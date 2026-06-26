@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Zone A — VR Exhibition</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- A-Frame pinned to a specific version (not "latest") so the scene
+         doesn't silently change when A-Frame ships an update. -->
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+
+    <script>
+      // ----------------------------------------------------------------
+      // Zone A ring layout
+      //
+      // This is a custom A-Frame COMPONENT. A component is a reusable bit
+      // of behaviour you attach to an entity as an HTML attribute. Here we
+      // register one called "ring-layout"; whatever entity carries it
+      // becomes the container, and on init we build nine <a-image> children
+      // inside it with a JS loop instead of hand-writing nine positions.
+      // ----------------------------------------------------------------
+
+      // --- Tweakable constants -------------------------------------------
+      const RADIUS = 3.5; // metres from the centre (you) to each image
+      const SWEEP_DEG = 180; // total angular spread of the ring, in degrees
+      const COUNT = 9; // number of images
+      const IMG_SIZE = 1.4; // width & height of each square image, in metres
+      const IMG_Y = 1.6; // height of each image's centre (eye height)
+      const ASSET_PREFIX = "#atpihl-"; // asset ids are atpihl-1 .. atpihl-9
+
+      AFRAME.registerComponent("ring-layout", {
+        init: function () {
+          // The arc runs symmetrically around straight-ahead, so it goes
+          // from -SWEEP/2 to +SWEEP/2. With COUNT images that's COUNT-1
+          // gaps between them, hence the step divides by (COUNT - 1).
+          const halfSweep = SWEEP_DEG / 2; // 90
+          const stepDeg = SWEEP_DEG / (COUNT - 1); // 180 / 8 = 22.5
+
+          for (let i = 0; i < COUNT; i++) {
+            // thetaDeg sweeps -90, -67.5, ... 0 ... +67.5, +90
+            const thetaDeg = -halfSweep + i * stepDeg;
+
+            // Math.sin/cos work in RADIANS, not degrees, so convert first.
+            const thetaRad = thetaDeg * (Math.PI / 180);
+
+            // Position on the circle around the camera at the origin:
+            //   x = radius * sin(theta)   -> swings left/right
+            //   z = -radius * cos(theta)  -> negative z is "in front"
+            // At theta=0 this is (0, -radius): straight ahead.
+            // At theta=-90 it's (-radius, 0): hard left.
+            // At theta=+90 it's (+radius, 0): hard right.
+            const x = RADIUS * Math.sin(thetaRad);
+            const z = -RADIUS * Math.cos(thetaRad);
+
+            // An a-image faces +Z by default. Rotating it by -theta about
+            // the Y axis turns that face back toward the centre (you).
+            const rotY = -thetaDeg;
+
+            // Build the entity and append it under this container.
+            const img = document.createElement("a-image");
+            img.setAttribute("src", ASSET_PREFIX + (i + 1)); // by id, not path
+            img.setAttribute("position", `${x} ${IMG_Y} ${z}`);
+            img.setAttribute("rotation", `0 ${rotY} 0`);
+            img.setAttribute("width", IMG_SIZE);
+            img.setAttribute("height", IMG_SIZE);
+            this.el.appendChild(img);
+          }
+        },
+      });
+    </script>
+  </head>
+  <body>
+    <!-- <a-scene> is the root of the scene graph. Everything visible lives
+         inside it as nested entities. A-Frame creates a default camera,
+         light, and WASD + mouse-look controls unless you override them. -->
+    <a-scene>
+      <!-- <a-assets> preloads media before the scene renders. Each <img>
+           here gets an id; the image entities reference those ids with
+           src="#atpihl-1" rather than pointing at the file path directly.
+           This way each file is fetched and decoded once, then shared. -->
+      <a-assets>
+        <img id="atpihl-1" src="ATPIHL/ATPIHL1.jpg" />
+        <img id="atpihl-2" src="ATPIHL/ATPIHL2.jpg" />
+        <img id="atpihl-3" src="ATPIHL/ATPIHL3.jpg" />
+        <img id="atpihl-4" src="ATPIHL/ATPIHL4.jpg" />
+        <img id="atpihl-5" src="ATPIHL/ATPIHL5.jpg" />
+        <img id="atpihl-6" src="ATPIHL/ATPIHL6.jpg" />
+        <img id="atpihl-7" src="ATPIHL/ATPIHL7.jpg" />
+        <img id="atpihl-8" src="ATPIHL/ATPIHL8.jpg" />
+        <img id="atpihl-9" src="ATPIHL/ATPIHL9.jpg" />
+      </a-assets>
+
+      <!-- Ground: a flat plane rotated -90° on X so it lies horizontal. -->
+      <a-plane
+        position="0 0 0"
+        rotation="-90 0 0"
+        width="30"
+        height="30"
+        color="#eee"
+      ></a-plane>
+
+      <!-- Sky: a large inward-facing sphere that surrounds the scene. -->
+      <a-sky color="#eee"></a-sky>
+
+      <!-- The ring container. It has no geometry of its own; the
+           ring-layout component fills it with nine image entities on init.
+           Sitting at the origin means the ring is centred on the camera. -->
+      <a-entity ring-layout position="0 0 0"></a-entity>
+
+      <!-- Camera at standing eye height with desktop controls:
+             look-controls -> mouse drag to look
+             wasd-controls -> W/A/S/D to walk -->
+      <a-entity
+        camera
+        look-controls
+        wasd-controls
+        position="0 1.6 0"
+      ></a-entity>
+    </a-scene>
+  </body>
+</html>
