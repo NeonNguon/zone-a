@@ -141,12 +141,118 @@
             const assetId = this.el.getAttribute("src");
             const assetImg = document.querySelector(assetId);
             const path = assetImg ? assetImg.getAttribute("src") : "";
+
+            // The SAME click fires from the desktop mouse cursor AND from the
+            // VR laser trigger — both routes land here.
+            // openFocus() shows the HTML overlay, which renders on desktop
+            // only. In a headset the trigger still fires this click (and the
+            // hover highlight still works), but the overlay won't appear.
+            // >>> VR FOCUS VIEW HOOKS IN HERE in a later step: branch on
+            //     this.el.sceneEl.is('vr-mode') and open an in-scene 3D
+            //     panel instead of the HTML overlay. <<<
             window.openFocus(path);
           };
           this.el.addEventListener("click", this.onClick);
         },
         remove: function () {
           this.el.removeEventListener("click", this.onClick);
+        },
+      });
+
+      // ================================================================
+      // VR LOCOMOTION
+      // These two components live on the controller entities but they MOVE
+      // THE RIG (the shared parent of camera + both controllers), so the
+      // whole player — view and hands — travels together. The headset still
+      // head-tracks the camera *within* the rig independently.
+      //
+      // Both only act inside an immersive session (sceneEl.is('vr-mode')),
+      // so desktop WASD + mouse-look are completely untouched. They also
+      // sit happily ALONGSIDE laser-controls on the same entity: the
+      // underlying touch-controls still emit 'thumbstickmoved' for these,
+      // while laser-controls handles the ray + trigger click separately.
+      // ================================================================
+
+      const MOVE_SPEED = 2; // metres per second — calm, walkable gallery pace
+      const SNAP_DEG = 45; // degrees per snap-turn flick (comfort, not smooth)
+
+      // --- Right thumbstick: smooth, head-relative movement ----------
+      AFRAME.registerComponent("smooth-locomotion", {
+        init: function () {
+          this.stick = { x: 0, y: 0 }; // latest thumbstick reading
+          this.rigEl = this.el.parentEl; // the rig (controller's parent)
+          this.cameraEl = document.getElementById("camera");
+
+          // Reused scratch vectors so tick() allocates nothing per frame.
+          this.forward = new THREE.Vector3();
+          this.right = new THREE.Vector3();
+          this.move = new THREE.Vector3();
+          this.quat = new THREE.Quaternion();
+
+          // oculus-touch-controls (pulled in by laser-controls) emits this.
+          this.onStick = (e) => {
+            this.stick.x = e.detail.x;
+            this.stick.y = e.detail.y;
+          };
+          this.el.addEventListener("thumbstickmoved", this.onStick);
+        },
+        tick: function (time, delta) {
+          if (!this.el.sceneEl.is("vr-mode")) return; // VR only
+          const dead = 0.15; // ignore tiny stick noise near centre
+          if (Math.abs(this.stick.x) < dead && Math.abs(this.stick.y) < dead) {
+            return;
+          }
+
+          // Take the camera's yaw (where you're LOOKING) and build flat
+          // forward/right vectors from it — that's what makes movement
+          // head-relative rather than fixed to the world axes.
+          this.cameraEl.object3D.getWorldQuaternion(this.quat);
+          this.forward.set(0, 0, -1).applyQuaternion(this.quat);
+          this.forward.y = 0;
+          this.forward.normalize(); // flatten onto the ground plane
+          this.right.set(1, 0, 0).applyQuaternion(this.quat);
+          this.right.y = 0;
+          this.right.normalize();
+
+          // Stick: pushing forward gives y = -1, so -y = forward.
+          this.move.set(0, 0, 0);
+          this.move.addScaledVector(this.forward, -this.stick.y);
+          this.move.addScaledVector(this.right, this.stick.x);
+          if (this.move.lengthSq() > 1) this.move.normalize(); // no fast diagonal
+
+          const dist = MOVE_SPEED * (delta / 1000); // frame-rate independent
+          this.rigEl.object3D.position.addScaledVector(this.move, dist);
+        },
+        remove: function () {
+          this.el.removeEventListener("thumbstickmoved", this.onStick);
+        },
+      });
+
+      // --- Left thumbstick: 45° SNAP turn (no smooth rotation) -------
+      AFRAME.registerComponent("snap-turn", {
+        init: function () {
+          this.rigEl = this.el.parentEl;
+          this.ready = true; // re-arm only after the stick recentres
+
+          this.onStick = (e) => {
+            if (!this.el.sceneEl.is("vr-mode")) return; // VR only
+            const x = e.detail.x;
+            if (this.ready && Math.abs(x) > 0.7) {
+              // One discrete step per flick; sign picks direction.
+              const dir = x > 0 ? -1 : 1; // push right -> turn right (clockwise)
+              this.rigEl.object3D.rotation.y += dir * THREE.MathUtils.degToRad(SNAP_DEG);
+              this.ready = false; // lock until the stick returns near centre
+            } else if (Math.abs(x) < 0.3) {
+              this.ready = true; // re-arm
+            }
+            // NOTE: this turns the rig about its own origin. For room-scale
+            // you'd rotate about the camera's ground position so you don't
+            // swing sideways — fine for a fixed standing spot here.
+          };
+          this.el.addEventListener("thumbstickmoved", this.onStick);
+        },
+        remove: function () {
+          this.el.removeEventListener("thumbstickmoved", this.onStick);
         },
       });
     </script>
@@ -338,17 +444,53 @@
         raycaster="objects: .clickable"
       ></a-entity>
 
-      <!-- Camera at standing eye height with desktop controls:
-             look-controls -> mouse drag to look
-             wasd-controls -> W/A/S/D to walk
-           id lets the overlay script disable look-controls while focused. -->
-      <a-entity
-        id="camera"
-        camera
-        look-controls
-        wasd-controls
-        position="0 1.6 0"
-      ></a-entity>
+      <!-- CAMERA RIG ----------------------------------------------------
+           The rig is an empty entity at floor level (y=0). Inside it sit the
+           camera and BOTH controllers as children. Because they share this
+           parent:
+             - VR locomotion moves the RIG, so view + hands travel together;
+             - the headset still head-tracks the camera WITHIN the rig, and
+               the controllers track the real hands within the rig.
+           Think of the rig as the floor you stand on; the camera is your
+           head, free to move on top of it. -->
+      <a-entity id="rig" position="0 0 0">
+        <!-- Camera at standing eye height. Desktop controls are unchanged:
+               look-controls -> mouse drag (and headset pose in VR)
+               wasd-controls -> W/A/S/D on desktop
+             id lets the overlay script disable look-controls while focused. -->
+        <a-entity
+          id="camera"
+          camera
+          look-controls
+          wasd-controls
+          position="0 1.6 0"
+        ></a-entity>
+
+        <!-- RIGHT controller: laser pointer + right-stick smooth movement.
+             laser-controls draws the visible ray and, on trigger, fires the
+             SAME mouseenter/mouseleave/click events the desktop mouse cursor
+             fires — so the existing image-hover and focus-on-click components
+             are reused as-is. raycaster objects:.clickable puts the ring
+             images on its target list. smooth-locomotion reads the same
+             controller's thumbstick; the two don't conflict. -->
+        <a-entity
+          id="rightHand"
+          laser-controls="hand: right"
+          raycaster="objects: .clickable; far: 100"
+          smooth-locomotion
+        ></a-entity>
+
+        <!-- LEFT controller: laser pointer + left-stick 45° snap turn. -->
+        <a-entity
+          id="leftHand"
+          laser-controls="hand: left"
+          raycaster="objects: .clickable; far: 100"
+          snap-turn
+        ></a-entity>
+      </a-entity>
+      <!-- (A comfort vignette would go here later: a component on the rig/
+           camera that darkens the view edges while smooth-locomotion is
+           actively moving. Not added yet.) -->
     </a-scene>
 
     <!-- Focus overlay. Lives OUTSIDE <a-scene>: it's plain HTML/CSS drawn
