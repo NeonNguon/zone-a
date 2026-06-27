@@ -175,7 +175,6 @@
 
       const MOVE_SPEED = 2; // metres per second — calm, walkable gallery pace
       const SNAP_DEG = 45; // degrees per snap-turn flick (comfort, not smooth)
-      const SMOOTH_TURN_SPEED = 90; // degrees per second when in smooth mode
 
       // --- Right thumbstick: smooth, head-relative movement ----------
       AFRAME.registerComponent("smooth-locomotion", {
@@ -229,85 +228,31 @@
         },
       });
 
-      // --- Left thumbstick: view turning, SNAP or SMOOTH -------------
-      // One component, two behaviours selected by `mode`. The HUD button
-      // flips mode at runtime via setAttribute, so no code swap is needed.
-      AFRAME.registerComponent("view-turn", {
-        schema: { mode: { default: "snap" } }, // "snap" | "smooth"
+      // --- Left thumbstick: 45° SNAP turn (no smooth rotation) -------
+      AFRAME.registerComponent("snap-turn", {
         init: function () {
-          this.rigEl = this.el.parentEl; // turning rotates the rig
-          this.stickX = 0; // latest horizontal stick value
-          this.ready = true; // snap re-arm gate (recentre between flicks)
+          this.rigEl = this.el.parentEl;
+          this.ready = true; // re-arm only after the stick recentres
 
           this.onStick = (e) => {
-            this.stickX = e.detail.x;
-          };
-          this.el.addEventListener("thumbstickmoved", this.onStick);
-        },
-        tick: function (time, delta) {
-          if (!this.el.sceneEl.is("vr-mode")) return; // VR only
-          const x = this.stickX;
-
-          if (this.data.mode === "smooth") {
-            // Continuous: rotate proportional to stick deflection & time.
-            const dead = 0.15;
-            if (Math.abs(x) < dead) return;
-            const rate = THREE.MathUtils.degToRad(SMOOTH_TURN_SPEED);
-            // push right (x>0) -> turn right (clockwise = decreasing yaw)
-            this.rigEl.object3D.rotation.y -= x * rate * (delta / 1000);
-          } else {
-            // Snap: one discrete 45° step per flick, then lock until centre.
+            if (!this.el.sceneEl.is("vr-mode")) return; // VR only
+            const x = e.detail.x;
             if (this.ready && Math.abs(x) > 0.7) {
-              const dir = x > 0 ? -1 : 1; // right -> turn right
+              // One discrete step per flick; sign picks direction.
+              const dir = x > 0 ? -1 : 1; // push right -> turn right (clockwise)
               this.rigEl.object3D.rotation.y += dir * THREE.MathUtils.degToRad(SNAP_DEG);
-              this.ready = false;
+              this.ready = false; // lock until the stick returns near centre
             } else if (Math.abs(x) < 0.3) {
               this.ready = true; // re-arm
             }
-          }
-          // NOTE: turns the rig about its own origin; fine for a fixed
-          // standing spot. Room-scale would rotate about the camera column.
+            // NOTE: this turns the rig about its own origin. For room-scale
+            // you'd rotate about the camera's ground position so you don't
+            // swing sideways — fine for a fixed standing spot here.
+          };
+          this.el.addEventListener("thumbstickmoved", this.onStick);
         },
         remove: function () {
           this.el.removeEventListener("thumbstickmoved", this.onStick);
-        },
-      });
-
-      // --- HUD toggle button -----------------------------------------
-      // Sits on the head-locked HUD plane. A click (laser trigger OR desktop
-      // mouse — same events) flips the left controller's view-turn mode and
-      // updates the label. A subtle hover tint gives pointing feedback.
-      AFRAME.registerComponent("turn-toggle", {
-        init: function () {
-          this.label = this.el.querySelector("#hud-label");
-
-          const render = () => {
-            const mode = document
-              .getElementById("leftHand")
-              .getAttribute("view-turn").mode;
-            // Show the mode you'd switch TO would be confusing; show current.
-            this.label.setAttribute("value", "Turn: " + (mode === "snap" ? "Snap 45°" : "Smooth"));
-          };
-
-          this.onClick = () => {
-            const left = document.getElementById("leftHand");
-            const current = left.getAttribute("view-turn").mode;
-            const next = current === "snap" ? "smooth" : "snap";
-            left.setAttribute("view-turn", "mode", next);
-            render();
-          };
-          this.onEnter = () => this.el.setAttribute("color", "#dddddd");
-          this.onLeave = () => this.el.setAttribute("color", "#ffffff");
-
-          this.el.addEventListener("click", this.onClick);
-          this.el.addEventListener("mouseenter", this.onEnter);
-          this.el.addEventListener("mouseleave", this.onLeave);
-          render(); // set initial label text
-        },
-        remove: function () {
-          this.el.removeEventListener("click", this.onClick);
-          this.el.removeEventListener("mouseenter", this.onEnter);
-          this.el.removeEventListener("mouseleave", this.onLeave);
         },
       });
     </script>
@@ -519,32 +464,7 @@
           look-controls
           wasd-controls
           position="0 1.6 0"
-        >
-          <!-- HUD: head-locked, pinned to the upper-right of the view.
-               Because it's a child of the camera it follows your head and
-               faces you; you aim at it by moving the controller. class
-               "clickable" puts it on the laser (and desktop mouse) raycaster.
-               z=-1 is 1m in front; x/y push it to the top-right corner. -->
-          <a-plane
-            id="hud-turn"
-            class="clickable"
-            turn-toggle
-            position="-0.55 0.38 -1"
-            width="0.42"
-            height="0.14"
-            color="#ffffff"
-            opacity="0.9"
-          >
-            <a-text
-              id="hud-label"
-              value="Turn: Snap 45°"
-              align="center"
-              color="#111111"
-              width="0.5"
-              position="0 0 0.001"
-            ></a-text>
-          </a-plane>
-        </a-entity>
+        ></a-entity>
 
         <!-- RIGHT controller: laser pointer + right-stick smooth movement.
              laser-controls draws the visible ray and, on trigger, fires the
@@ -565,7 +485,7 @@
           id="leftHand"
           laser-controls="hand: left"
           raycaster="objects: .clickable; far: 100"
-          view-turn="mode: snap"
+          snap-turn
         ></a-entity>
       </a-entity>
       <!-- (A comfort vignette would go here later: a component on the rig/
