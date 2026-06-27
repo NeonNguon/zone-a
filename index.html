@@ -4,408 +4,24 @@
     <meta charset="utf-8" />
     <title>Zone A — VR Exhibition</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
     <!-- A-Frame pinned to a specific version (not "latest") so the scene
          doesn't silently change when A-Frame ships an update. -->
     <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
 
-    <script>
-      // ----------------------------------------------------------------
-      // Zone A ring layout
-      //
-      // This is a custom A-Frame COMPONENT. A component is a reusable bit
-      // of behaviour you attach to an entity as an HTML attribute. Here we
-      // register one called "ring-layout"; whatever entity carries it
-      // becomes the container, and on init we build nine <a-image> children
-      // inside it with a JS loop instead of hand-writing nine positions.
-      // ----------------------------------------------------------------
+    <!-- Shared captions loader + custom components, in <head> AFTER A-Frame
+         so the components are registered before <a-scene> parses them. -->
+    <script src="js/captions.js"></script>
+    <script src="js/components.js"></script>
 
-      // --- Tweakable constants -------------------------------------------
-      const SWEEP_DEG = 180; // total angular spread of the ring, in degrees
-      const COUNT = 9; // number of images
-      const IMG_SIZE = 1.4; // width & height of each square image, in metres
-      const GAP_FRAC = 0.05; // gap between neighbours, as a fraction of width
-      // NOTE: radius is no longer a constant. With the sweep AND the gap
-      // both fixed, the radius is fully determined by them (computed below).
-      const IMG_Y = 1.6; // height of each image's centre (eye height)
-      const ASSET_PREFIX = "#atpihl-"; // asset ids are atpihl-1 .. atpihl-9
-
-      AFRAME.registerComponent("ring-layout", {
-        init: function () {
-          // The arc is symmetric around straight-ahead. COUNT images leave
-          // COUNT-1 gaps, so each step is the sweep split into COUNT-1.
-          const halfSweep = SWEEP_DEG / 2; // 67.5
-          const stepDeg = SWEEP_DEG / (COUNT - 1); // 135 / 8 = 16.875
-          const stepRad = stepDeg * (Math.PI / 180);
-
-          // Centre-to-centre arc length we WANT between neighbours: one
-          // image width plus the 5% gap.
-          const spacing = IMG_SIZE * (1 + GAP_FRAC); // 1.4 * 1.05 = 1.47 m
-
-          // Arc length = radius * angle(rad). We know the arc (spacing) and
-          // the angle (stepRad), so solve for the radius: radius = arc/angle.
-          // A narrower sweep means a smaller step angle, which pushes the
-          // radius OUT to keep the same real-world spacing.
-          const RADIUS = spacing / stepRad; // ~4.99 m
-          console.log(`Zone A ring: sweep ${SWEEP_DEG}°, step ${stepDeg.toFixed(2)}°, radius ${RADIUS.toFixed(2)} m`);
-
-          for (let i = 0; i < COUNT; i++) {
-            // thetaDeg sweeps -90, -67.5, ... 0 ... +67.5, +90
-            const thetaDeg = -halfSweep + i * stepDeg;
-
-            // Math.sin/cos work in RADIANS, not degrees, so convert first.
-            const thetaRad = thetaDeg * (Math.PI / 180);
-
-            // Position on the circle around the camera at the origin:
-            //   x = radius * sin(theta)   -> swings left/right
-            //   z = -radius * cos(theta)  -> negative z is "in front"
-            // At theta=0 this is (0, -radius): straight ahead.
-            // At theta=-90 it's (-radius, 0): hard left.
-            // At theta=+90 it's (+radius, 0): hard right.
-            const x = RADIUS * Math.sin(thetaRad);
-            const z = -RADIUS * Math.cos(thetaRad);
-
-            // An a-image faces +Z by default. Rotating it by -theta about
-            // the Y axis turns that face back toward the centre (you).
-            const rotY = -thetaDeg;
-
-            // Build the entity and append it under this container.
-            const img = document.createElement("a-image");
-            img.setAttribute("src", ASSET_PREFIX + (i + 1)); // by id, not path
-            img.setAttribute("position", `${x} ${IMG_Y} ${z}`);
-            img.setAttribute("rotation", `0 ${rotY} 0`);
-            img.setAttribute("width", IMG_SIZE);
-            img.setAttribute("height", IMG_SIZE);
-            // "clickable" is what the raycaster filters on; the two custom
-            // components add hover-highlight and click-to-focus behaviour.
-            img.setAttribute("class", "clickable");
-            img.setAttribute("image-hover", "");
-            img.setAttribute("focus-on-click", "");
-            this.el.appendChild(img);
-          }
-        },
-      });
-
-      // ----------------------------------------------------------------
-      // image-hover: subtle highlight while the mouse ray is over an image.
-      //
-      // Lifecycle recap:
-      //   init()   -> runs once; build the border + attach listeners
-      //   remove() -> runs if the component is detached; clean listeners up
-      // this.el is the <a-image>; this.el.object3D is its three.js node.
-      // ----------------------------------------------------------------
-      AFRAME.registerComponent("image-hover", {
-        init: function () {
-          // A thin "frame": a slightly larger dark plane sitting just
-          // behind the image. Because it's a touch bigger, its edges peek
-          // out around the picture; the centre is hidden behind the image.
-          // It's a child entity, so it scales together with the image.
-          const border = document.createElement("a-plane");
-          border.setAttribute("width", IMG_SIZE + 0.04); // 2cm margin each side
-          border.setAttribute("height", IMG_SIZE + 0.04);
-          border.setAttribute("color", "#222");
-          border.setAttribute("position", "0 0 -0.01"); // just behind, no z-fight
-          border.setAttribute("visible", false); // hidden until hover
-          this.el.appendChild(border);
-
-          // Store the handlers on `this` so remove() can detach the exact
-          // same function references later.
-          this.onEnter = () => {
-            this.el.object3D.scale.set(1.05, 1.05, 1.05); // small scale-up
-            border.setAttribute("visible", true);
-          };
-          this.onLeave = () => {
-            this.el.object3D.scale.set(1, 1, 1); // revert
-            border.setAttribute("visible", false);
-          };
-
-          // These events are fired by the cursor/raycaster, not the DOM.
-          this.el.addEventListener("mouseenter", this.onEnter);
-          this.el.addEventListener("mouseleave", this.onLeave);
-        },
-        remove: function () {
-          this.el.removeEventListener("mouseenter", this.onEnter);
-          this.el.removeEventListener("mouseleave", this.onLeave);
-        },
-      });
-
-      // ----------------------------------------------------------------
-      // focus-on-click: on click, open the HTML focus overlay for this image.
-      // The component only resolves the image's file path + title and hands
-      // off to openFocus() (defined in the body script that owns the overlay).
-      // ----------------------------------------------------------------
-      AFRAME.registerComponent("focus-on-click", {
-        init: function () {
-          this.onClick = () => {
-            // src is an asset id like "#atpihl-3"; follow it to the <img>
-            // in <a-assets> to recover the real file path.
-            const assetId = this.el.getAttribute("src");
-            const assetImg = document.querySelector(assetId);
-            const path = assetImg ? assetImg.getAttribute("src") : "";
-
-            // The SAME click fires from the desktop mouse cursor AND from the
-            // VR laser trigger — both routes land here.
-            // openFocus() shows the HTML overlay, which renders on desktop
-            // only. In a headset the trigger still fires this click (and the
-            // hover highlight still works), but the overlay won't appear.
-            // >>> VR FOCUS VIEW HOOKS IN HERE in a later step: branch on
-            //     this.el.sceneEl.is('vr-mode') and open an in-scene 3D
-            //     panel instead of the HTML overlay. <<<
-            window.openFocus(path);
-          };
-          this.el.addEventListener("click", this.onClick);
-        },
-        remove: function () {
-          this.el.removeEventListener("click", this.onClick);
-        },
-      });
-
-      // ================================================================
-      // VR LOCOMOTION
-      // These two components live on the controller entities but they MOVE
-      // THE RIG (the shared parent of camera + both controllers), so the
-      // whole player — view and hands — travels together. The headset still
-      // head-tracks the camera *within* the rig independently.
-      //
-      // Both only act inside an immersive session (sceneEl.is('vr-mode')),
-      // so desktop WASD + mouse-look are completely untouched. They also
-      // sit happily ALONGSIDE laser-controls on the same entity: the
-      // underlying touch-controls still emit 'thumbstickmoved' for these,
-      // while laser-controls handles the ray + trigger click separately.
-      // ================================================================
-
-      const MOVE_SPEED = 2; // metres per second — calm, walkable gallery pace
-      const SNAP_DEG = 45; // degrees per snap-turn flick (comfort, not smooth)
-
-      // --- Right thumbstick: smooth, head-relative movement ----------
-      AFRAME.registerComponent("smooth-locomotion", {
-        init: function () {
-          this.stick = { x: 0, y: 0 }; // latest thumbstick reading
-          this.rigEl = this.el.parentEl; // the rig (controller's parent)
-          this.cameraEl = document.getElementById("camera");
-
-          // Reused scratch vectors so tick() allocates nothing per frame.
-          this.forward = new THREE.Vector3();
-          this.right = new THREE.Vector3();
-          this.move = new THREE.Vector3();
-          this.quat = new THREE.Quaternion();
-
-          // oculus-touch-controls (pulled in by laser-controls) emits this.
-          this.onStick = (e) => {
-            this.stick.x = e.detail.x;
-            this.stick.y = e.detail.y;
-          };
-          this.el.addEventListener("thumbstickmoved", this.onStick);
-        },
-        tick: function (time, delta) {
-          if (!this.el.sceneEl.is("vr-mode")) return; // VR only
-          const dead = 0.15; // ignore tiny stick noise near centre
-          if (Math.abs(this.stick.x) < dead && Math.abs(this.stick.y) < dead) {
-            return;
-          }
-
-          // Take the camera's yaw (where you're LOOKING) and build flat
-          // forward/right vectors from it — that's what makes movement
-          // head-relative rather than fixed to the world axes.
-          this.cameraEl.object3D.getWorldQuaternion(this.quat);
-          this.forward.set(0, 0, -1).applyQuaternion(this.quat);
-          this.forward.y = 0;
-          this.forward.normalize(); // flatten onto the ground plane
-          this.right.set(1, 0, 0).applyQuaternion(this.quat);
-          this.right.y = 0;
-          this.right.normalize();
-
-          // Stick: pushing forward gives y = -1, so -y = forward.
-          this.move.set(0, 0, 0);
-          this.move.addScaledVector(this.forward, -this.stick.y);
-          this.move.addScaledVector(this.right, this.stick.x);
-          if (this.move.lengthSq() > 1) this.move.normalize(); // no fast diagonal
-
-          const dist = MOVE_SPEED * (delta / 1000); // frame-rate independent
-          this.rigEl.object3D.position.addScaledVector(this.move, dist);
-        },
-        remove: function () {
-          this.el.removeEventListener("thumbstickmoved", this.onStick);
-        },
-      });
-
-      // --- Left thumbstick: 45° SNAP turn (no smooth rotation) -------
-      AFRAME.registerComponent("snap-turn", {
-        init: function () {
-          this.rigEl = this.el.parentEl;
-          this.ready = true; // re-arm only after the stick recentres
-
-          this.onStick = (e) => {
-            if (!this.el.sceneEl.is("vr-mode")) return; // VR only
-            const x = e.detail.x;
-            if (this.ready && Math.abs(x) > 0.7) {
-              // One discrete step per flick; sign picks direction.
-              const dir = x > 0 ? -1 : 1; // push right -> turn right (clockwise)
-              this.rigEl.object3D.rotation.y += dir * THREE.MathUtils.degToRad(SNAP_DEG);
-              this.ready = false; // lock until the stick returns near centre
-            } else if (Math.abs(x) < 0.3) {
-              this.ready = true; // re-arm
-            }
-            // NOTE: this turns the rig about its own origin. For room-scale
-            // you'd rotate about the camera's ground position so you don't
-            // swing sideways — fine for a fixed standing spot here.
-          };
-          this.el.addEventListener("thumbstickmoved", this.onStick);
-        },
-        remove: function () {
-          this.el.removeEventListener("thumbstickmoved", this.onStick);
-        },
-      });
-    </script>
-
-    <style>
-      /* The focus overlay sits on top of the WebGL canvas (z-index) and
-         covers the whole window. backdrop-filter: blur() blurs whatever is
-         BEHIND the element — i.e. the 3D scene — while its own children
-         (the image + title) stay sharp on top. */
-      #focus-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 10;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        background: rgba(238, 238, 238, 0.55); /* pale tint over the blur */
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px); /* Safari */
-        /* Fade in/out instead of a hard cut. pointer-events off while
-           hidden so clicks pass through to the canvas. */
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.25s ease;
-      }
-      #focus-overlay.visible {
-        opacity: 1;
-        pointer-events: auto;
-      }
-      /* Shared minimal type for everything in the overlay. */
-      #focus-overlay,
-      #focus-overlay * {
-        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-      }
-
-      /* The row holds [image + caption + reveal] and the memory panel side
-         by side. The overlay centres this row, so when the memory panel
-         grows the whole row re-centres and the image appears to slide left.
-         gap animates so the shift is smooth. */
-      #focus-row {
-        display: flex;
-        align-items: center;
-        gap: 0px;
-        transition: gap 0.4s ease;
-      }
-      #focus-row.memory-open {
-        gap: 28px;
-      }
-
-      /* Image + caption + reveal control, kept together on the left. */
-      #focus-main {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-      }
-      #focus-col {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      #focus-image {
-        max-width: 70vmin;
-        max-height: 70vmin;
-        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
-      }
-      #focus-title {
-        margin-top: 16px;
-        font-size: 18px;
-        font-weight: 500;
-        letter-spacing: 0.02em;
-        color: #111;
-      }
-      /* Location + year: smaller, lighter, secondary. */
-      #focus-meta {
-        margin-top: 4px;
-        font-size: 13px;
-        font-weight: 400;
-        letter-spacing: 0.03em;
-        color: #777;
-      }
-
-      /* The reveal control: present but understated. */
-      #focus-reveal {
-        flex: none;
-        background: transparent;
-        border: 1px solid #bbb;
-        color: #555;
-        font-size: 12px;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        padding: 8px 12px;
-        cursor: pointer;
-        white-space: nowrap;
-        transition: border-color 0.2s ease, color 0.2s ease;
-      }
-      #focus-reveal:hover {
-        border-color: #555;
-        color: #111;
-      }
-
-      /* Memory panel. Collapsed = zero width + transparent; open = fixed
-         width. Width animates, so it slides open and pushes the row wider.
-         overflow hidden clips the fixed-width inner during the animation. */
-      #focus-memory {
-        width: 0;
-        opacity: 0;
-        overflow: hidden;
-        transition: width 0.4s ease, opacity 0.4s ease;
-      }
-      #focus-memory.open {
-        width: 320px;
-        opacity: 1;
-      }
-      /* Fixed width so the text doesn't reflow while the panel animates. */
-      #focus-memory-inner {
-        width: 320px;
-        box-sizing: border-box;
-        padding: 4px 4px 4px 24px;
-        border-left: 1px solid #ccc;
-      }
-      #focus-memory-close {
-        background: transparent;
-        border: none;
-        color: #888;
-        font-size: 18px;
-        line-height: 1;
-        cursor: pointer;
-        padding: 0;
-        margin-bottom: 12px;
-      }
-      #focus-memory-close:hover {
-        color: #111;
-      }
-      /* Long memory text scrolls instead of overflowing. */
-      #focus-memory-text {
-        max-height: 60vmin;
-        overflow-y: auto;
-        font-size: 14px;
-        line-height: 1.6;
-        color: #333;
-      }
-    </style>
+    <!-- Desktop focus-overlay styles. -->
+    <link rel="stylesheet" href="css/focus.css" />
   </head>
   <body>
-    <!-- <a-scene> is the root of the scene graph. Everything visible lives
-         inside it as nested entities. A-Frame creates a default camera,
-         light, and WASD + mouse-look controls unless you override them. -->
+    <!-- <a-scene> is the root of the scene graph. -->
     <a-scene>
-      <!-- <a-assets> preloads media before the scene renders. Each <img>
-           here gets an id; the image entities reference those ids with
-           src="#atpihl-1" rather than pointing at the file path directly.
-           This way each file is fetched and decoded once, then shared. -->
+      <!-- Preload the nine images; entities reference them by id (#atpihl-N)
+           so each file is fetched and decoded once, then shared. -->
       <a-assets>
         <img id="atpihl-1" src="ATPIHL/ATPIHL1.jpg" />
         <img id="atpihl-2" src="ATPIHL/ATPIHL2.jpg" />
@@ -419,45 +35,23 @@
       </a-assets>
 
       <!-- Ground: a flat plane rotated -90° on X so it lies horizontal. -->
-      <a-plane
-        position="0 0 0"
-        rotation="-90 0 0"
-        width="30"
-        height="30"
-        color="#eee"
-      ></a-plane>
+      <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#eee"></a-plane>
 
-      <!-- Sky: a large inward-facing sphere that surrounds the scene. -->
+      <!-- Sky: a large inward-facing sphere surrounding the scene. -->
       <a-sky color="#eee"></a-sky>
 
-      <!-- The ring container. It has no geometry of its own; the
-           ring-layout component fills it with nine image entities on init.
-           Sitting at the origin means the ring is centred on the camera. -->
+      <!-- Ring container: ring-layout fills it with nine image entities. -->
       <a-entity ring-layout position="0 0 0"></a-entity>
 
-      <!-- Mouse cursor + raycaster. rayOrigin:mouse casts the ray from the
-           live pointer (not a centre-screen gaze reticle). objects:.clickable
-           limits hit-testing to the images. This entity emits the
-           mouseenter / mouseleave / click events our components listen for. -->
-      <a-entity
-        cursor="rayOrigin: mouse"
-        raycaster="objects: .clickable"
-      ></a-entity>
+      <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
+           .clickable and emits mouseenter/mouseleave/click on the images. -->
+      <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
 
-      <!-- CAMERA RIG ----------------------------------------------------
-           The rig is an empty entity at floor level (y=0). Inside it sit the
-           camera and BOTH controllers as children. Because they share this
-           parent:
-             - VR locomotion moves the RIG, so view + hands travel together;
-             - the headset still head-tracks the camera WITHIN the rig, and
-               the controllers track the real hands within the rig.
-           Think of the rig as the floor you stand on; the camera is your
-           head, free to move on top of it. -->
+      <!-- CAMERA RIG: empty parent at floor level holding the camera + both
+           controllers. VR locomotion moves the RIG (view + hands together)
+           while the headset head-tracks the camera within it. -->
       <a-entity id="rig" position="0 0 0">
-        <!-- Camera at standing eye height. Desktop controls are unchanged:
-               look-controls -> mouse drag (and headset pose in VR)
-               wasd-controls -> W/A/S/D on desktop
-             id lets the overlay script disable look-controls while focused. -->
+        <!-- Camera at standing eye height; desktop controls unchanged. -->
         <a-entity
           id="camera"
           camera
@@ -467,12 +61,9 @@
         ></a-entity>
 
         <!-- RIGHT controller: laser pointer + right-stick smooth movement.
-             laser-controls draws the visible ray and, on trigger, fires the
-             SAME mouseenter/mouseleave/click events the desktop mouse cursor
-             fires — so the existing image-hover and focus-on-click components
-             are reused as-is. raycaster objects:.clickable puts the ring
-             images on its target list. smooth-locomotion reads the same
-             controller's thumbstick; the two don't conflict. -->
+             laser-controls fires the SAME mouseenter/mouseleave/click events
+             as the desktop mouse, so image-hover and focus-on-click are
+             reused as-is. raycaster objects:.clickable targets the images. -->
         <a-entity
           id="rightHand"
           laser-controls="hand: right"
@@ -488,17 +79,15 @@
           snap-turn
         ></a-entity>
       </a-entity>
-      <!-- (A comfort vignette would go here later: a component on the rig/
-           camera that darkens the view edges while smooth-locomotion is
-           actively moving. Not added yet.) -->
+      <!-- (Comfort vignette would go here later: darken the view edges while
+           smooth-locomotion is actively moving. Not added yet.) -->
     </a-scene>
 
-    <!-- Focus overlay. Lives OUTSIDE <a-scene>: it's plain HTML/CSS drawn
-         over the canvas, not a 3D entity. (Which is also why it won't show
-         in VR headset rendering — that's expected for this step.) -->
+    <!-- Desktop focus overlay DOM. Lives OUTSIDE <a-scene>: plain HTML/CSS
+         over the canvas, so it does NOT render in VR (the VR focus view is
+         built from A-Frame entities in js/focus-vr.js instead). -->
     <div id="focus-overlay">
       <div id="focus-row">
-        <!-- Left: image, caption, and the reveal control to its right. -->
         <div id="focus-main">
           <div id="focus-col">
             <img id="focus-image" src="" alt="" />
@@ -507,8 +96,6 @@
           </div>
           <button id="focus-reveal" type="button">Reveal memory</button>
         </div>
-
-        <!-- Right: the memory panel, collapsed until "Reveal memory". -->
         <div id="focus-memory">
           <div id="focus-memory-inner">
             <button id="focus-memory-close" type="button" aria-label="Close memory">×</button>
@@ -518,111 +105,9 @@
       </div>
     </div>
 
-    <script>
-      // Overlay controller. Owns the captions data, openFocus()/closeFocus(),
-      // the memory reveal, and the dismiss interactions.
-      (function () {
-        const overlay = document.getElementById("focus-overlay");
-        const row = document.getElementById("focus-row");
-        const image = document.getElementById("focus-image");
-        const title = document.getElementById("focus-title");
-        const meta = document.getElementById("focus-meta");
-        const reveal = document.getElementById("focus-reveal");
-        const memory = document.getElementById("focus-memory");
-        const memoryText = document.getElementById("focus-memory-text");
-        const memoryClose = document.getElementById("focus-memory-close");
-
-        // --- Captions data --------------------------------------------
-        // Fetch ONCE on load and keep the parsed object in `captions`,
-        // keyed by filename-stem (ATPIHL1 ... ATPIHL9). If anything goes
-        // wrong we log a clear error and leave captions = null; the scene
-        // keeps working, openFocus just falls back to the stem as a title.
-        let captions = null;
-        fetch("ATPIHL/captions.json")
-          .then(function (res) {
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            return res.json(); // res.json() decodes the body as UTF-8
-          })
-          .then(function (data) {
-            captions = data;
-            console.log("Captions loaded:", Object.keys(captions).length, "entries");
-          })
-          .catch(function (err) {
-            console.error("Could not load ATPIHL/captions.json:", err);
-          });
-
-        // "ATPIHL/ATPIHL3.jpg" -> "ATPIHL3": drop folder, strip extension.
-        // This stem is exactly the key used in captions.json.
-        function stemFromPath(path) {
-          const file = path.split("/").pop();
-          return file.replace(/\.[^.]+$/, "");
-        }
-
-        // Collapse the memory panel back to its default state.
-        function collapseMemory() {
-          memory.classList.remove("open");
-          row.classList.remove("memory-open");
-        }
-
-        // Exposed globally so the focus-on-click component can call it.
-        window.openFocus = function (path) {
-          const stem = stemFromPath(path);
-          const entry = captions ? captions[stem] : null;
-
-          image.setAttribute("src", path);
-
-          if (entry) {
-            // textContent (not innerHTML) is safe and renders the Vietnamese
-            // diacritics fine because the page is UTF-8.
-            title.textContent = entry.title;
-            meta.textContent = entry.location + " · " + entry.year;
-            memoryText.textContent = entry.memory;
-            reveal.style.display = ""; // there is a memory to reveal
-          } else {
-            // Graceful fallback if the entry (or the whole file) is missing.
-            title.textContent = stem;
-            meta.textContent = "";
-            memoryText.textContent = "";
-            reveal.style.display = "none";
-          }
-
-          collapseMemory(); // always start with memory hidden
-          overlay.classList.add("visible"); // CSS fade-in
-
-          // Freeze mouse-look so the scene doesn't swing behind the blur.
-          const cam = document.getElementById("camera");
-          if (cam) cam.setAttribute("look-controls", "enabled", false);
-        };
-
-        function closeFocus() {
-          overlay.classList.remove("visible"); // fade-out
-          collapseMemory(); // reset for next time
-          const cam = document.getElementById("camera");
-          if (cam) cam.setAttribute("look-controls", "enabled", true);
-        }
-
-        // --- Memory reveal toggle -------------------------------------
-        reveal.addEventListener("click", function () {
-          const opening = !memory.classList.contains("open");
-          memory.classList.toggle("open", opening);
-          row.classList.toggle("memory-open", opening);
-        });
-        memoryClose.addEventListener("click", collapseMemory);
-
-        // --- Dismiss the whole focus view -----------------------------
-        // Only a click on the backdrop itself (the empty pale area) closes;
-        // clicks on the image, caption, reveal, or memory do not.
-        overlay.addEventListener("click", function (e) {
-          if (e.target === overlay) closeFocus();
-        });
-
-        // Esc closes, but only when the overlay is actually open.
-        window.addEventListener("keydown", function (e) {
-          if (e.key === "Escape" && overlay.classList.contains("visible")) {
-            closeFocus();
-          }
-        });
-      })();
-    </script>
+    <!-- Focus-view controllers, at END of <body> so the DOM/scene exist.
+         focus-click in components.js routes to whichever is appropriate. -->
+    <script src="js/focus-desktop.js"></script>
+    <script src="js/focus-vr.js"></script>
   </body>
 </html>

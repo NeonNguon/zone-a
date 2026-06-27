@@ -1,0 +1,138 @@
+/* Desktop / web focus overlay. Plain HTML/CSS drawn over the WebGL canvas.
+   (This path does NOT render in a VR headset — the VR focus view is built
+   from A-Frame entities instead, in js/focus-vr.js.) */
+
+/* The overlay sits on top of the canvas and covers the window.
+   backdrop-filter: blur() blurs whatever is BEHIND the element — the 3D
+   scene — while its own children stay sharp on top. */
+#focus-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(238, 238, 238, 0.55); /* pale tint over the blur */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); /* Safari */
+  /* Fade in/out instead of a hard cut. pointer-events off while hidden so
+     clicks pass through to the canvas. */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+#focus-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Shared minimal type for everything in the overlay. */
+#focus-overlay,
+#focus-overlay * {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* The row holds [image + caption + reveal] and the memory panel side by
+   side. The overlay centres this row, so when the memory panel grows the
+   whole row re-centres and the image appears to slide left. */
+#focus-row {
+  display: flex;
+  align-items: center;
+  gap: 0px;
+  transition: gap 0.4s ease;
+}
+#focus-row.memory-open {
+  gap: 28px;
+}
+
+/* Image + caption + reveal control, kept together on the left. */
+#focus-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+#focus-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+#focus-image {
+  max-width: 70vmin;
+  max-height: 70vmin;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
+}
+#focus-title {
+  margin-top: 16px;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #111;
+}
+/* Location + year: smaller, lighter, secondary. */
+#focus-meta {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: #777;
+}
+
+/* The reveal control: present but understated. */
+#focus-reveal {
+  flex: none;
+  background: transparent;
+  border: 1px solid #bbb;
+  color: #555;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+#focus-reveal:hover {
+  border-color: #555;
+  color: #111;
+}
+
+/* Memory panel. Collapsed = zero width + transparent; open = fixed width.
+   Width animates, so it slides open and pushes the row wider. */
+#focus-memory {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: width 0.4s ease, opacity 0.4s ease;
+}
+#focus-memory.open {
+  width: 320px;
+  opacity: 1;
+}
+/* Fixed width so the text doesn't reflow while the panel animates. */
+#focus-memory-inner {
+  width: 320px;
+  box-sizing: border-box;
+  padding: 4px 4px 4px 24px;
+  border-left: 1px solid #ccc;
+}
+#focus-memory-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 12px;
+}
+#focus-memory-close:hover {
+  color: #111;
+}
+/* Long memory text scrolls instead of overflowing. */
+#focus-memory-text {
+  max-height: 60vmin;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333;
+}
