@@ -13,42 +13,58 @@ const IMG_Y = 1.6; // height of each image's centre (eye height)
 const ASSET_PREFIX = "#atpihl-"; // asset ids are atpihl-1 .. atpihl-9
 
 // ----------------------------------------------------------------
-// ring-layout: builds the nine-image half-circle in a JS loop.
+// zoneARingPlacements(): THE single source of the ring geometry. Returns one
+// record per image: { x, z, thetaDeg, rotY, radius }. Both the ring-layout
+// (image placement) and the ring-contact-cue (floor cue placement) read this,
+// so the cues can never drift out of sync with the images.
 // ----------------------------------------------------------------
-AFRAME.registerComponent("ring-layout", {
-  init: function () {
-    // The arc is symmetric around straight-ahead. COUNT images leave
-    // COUNT-1 gaps, so each step is the sweep split into COUNT-1.
-    const halfSweep = SWEEP_DEG / 2; // 90
-    const stepDeg = SWEEP_DEG / (COUNT - 1); // 180 / 8 = 22.5
-    const stepRad = stepDeg * (Math.PI / 180);
+function zoneARingPlacements() {
+  // The arc is symmetric around straight-ahead. COUNT images leave COUNT-1
+  // gaps, so each step is the sweep split into COUNT-1.
+  const halfSweep = SWEEP_DEG / 2; // 90
+  const stepDeg = SWEEP_DEG / (COUNT - 1); // 180 / 8 = 22.5
+  const stepRad = stepDeg * (Math.PI / 180);
 
-    // Centre-to-centre arc length we WANT between neighbours: one image
-    // width plus the 5% gap.
-    const spacing = IMG_SIZE * (1 + GAP_FRAC); // 1.4 * 1.05 = 1.47 m
+  // Centre-to-centre arc length we WANT between neighbours: one image width
+  // plus the 5% gap. Arc length = radius * angle(rad), so radius = arc / angle.
+  const spacing = IMG_SIZE * (1 + GAP_FRAC); // 1.4 * 1.05 = 1.47 m
+  const RADIUS = spacing / stepRad; // ~3.74 m
 
-    // Arc length = radius * angle(rad), so radius = arc / angle.
-    const RADIUS = spacing / stepRad; // ~3.74 m
-    console.log(`Zone A ring: sweep ${SWEEP_DEG}°, step ${stepDeg.toFixed(2)}°, radius ${RADIUS.toFixed(2)} m`);
-
-    for (let i = 0; i < COUNT; i++) {
-      // thetaDeg sweeps -90, -67.5, ... 0 ... +67.5, +90
-      const thetaDeg = -halfSweep + i * stepDeg;
-      const thetaRad = thetaDeg * (Math.PI / 180); // sin/cos want radians
-
+  const out = [];
+  for (let i = 0; i < COUNT; i++) {
+    // thetaDeg sweeps -90, -67.5, ... 0 ... +67.5, +90
+    const thetaDeg = -halfSweep + i * stepDeg;
+    const thetaRad = thetaDeg * (Math.PI / 180); // sin/cos want radians
+    out.push({
       // Circle around the camera at the origin:
       //   x = radius * sin(theta)   -> swings left/right
       //   z = -radius * cos(theta)  -> negative z is "in front"
-      const x = RADIUS * Math.sin(thetaRad);
-      const z = -RADIUS * Math.cos(thetaRad);
+      x: RADIUS * Math.sin(thetaRad),
+      z: -RADIUS * Math.cos(thetaRad),
+      thetaDeg: thetaDeg,
+      rotY: -thetaDeg, // an a-image faces +Z; -theta about Y faces the centre
+      radius: RADIUS,
+    });
+  }
+  return out;
+}
 
-      // An a-image faces +Z; rotating by -theta about Y faces the centre.
-      const rotY = -thetaDeg;
+// ----------------------------------------------------------------
+// ring-layout: builds the nine-image half-circle from zoneARingPlacements().
+// ----------------------------------------------------------------
+AFRAME.registerComponent("ring-layout", {
+  init: function () {
+    const placements = zoneARingPlacements();
+    const RADIUS = placements.length ? placements[0].radius : 0;
+    console.log(
+      `Zone A ring: sweep ${SWEEP_DEG}°, count ${COUNT}, radius ${RADIUS.toFixed(2)} m`
+    );
 
+    placements.forEach((p, i) => {
       const img = document.createElement("a-image");
       img.setAttribute("src", ASSET_PREFIX + (i + 1)); // by id, not path
-      img.setAttribute("position", `${x} ${IMG_Y} ${z}`);
-      img.setAttribute("rotation", `0 ${rotY} 0`);
+      img.setAttribute("position", `${p.x} ${IMG_Y} ${p.z}`);
+      img.setAttribute("rotation", `0 ${p.rotY} 0`);
       img.setAttribute("width", IMG_SIZE);
       img.setAttribute("height", IMG_SIZE);
       // "clickable" is what the raycaster filters on; the two components add
@@ -57,7 +73,7 @@ AFRAME.registerComponent("ring-layout", {
       img.setAttribute("image-hover", "");
       img.setAttribute("focus-on-click", "");
       this.el.appendChild(img);
-    }
+    });
   },
 });
 
