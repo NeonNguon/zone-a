@@ -401,7 +401,7 @@ const ENV_PRESETS = {
     setBackground(scene, "#eeeeee"); // white
     setFog(scene, null);
     buildAmbient(env, "#bbbbbb", 1); // hover frame needs light
-    buildGround(env, "#eeeeee"); // white floor (ground dependency)
+    buildGround(env, "#ffffff"); // pure white floor (ground dependency)
 
     const half = CITYROOM_SIZE / 2;
     // White box room — inner faces (side: back), so it encloses you in white.
