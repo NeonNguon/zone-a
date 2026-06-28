@@ -211,7 +211,10 @@ const ENV_PRESETS = {
     buildGround(env, "#0a0d16");
     env.appendChild(
       envEl("a-entity", {
-        "three-grid": "size: 60; divisions: 60",
+        // Brighter lines + higher opacity so the floor reads clearly against
+        // the dark background (color1 = centre lines, color2 = grid lines).
+        "three-grid":
+          "size: 60; divisions: 60; color1: #7da2ff; color2: #4a63c8; opacity: 0.85",
         position: "0 0.01 0", // a hair above the ground to avoid z-fighting
       })
     );
