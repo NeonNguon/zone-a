@@ -31,6 +31,10 @@
   let dimEl = null; // head-centred dark sphere
   let memoryEl = null; // memory panel (built on reveal, removed on collapse)
   let currentEntry = null; // captions entry for the open image
+  // Elements that make up the IMAGE STATE (image, title, year, reveal control).
+  // Hidden when the memory replaces the image, shown again on close. Each rec is
+  // { el, cls } where cls is the clickable class to restore (null if not click).
+  let imageStateEls = [];
 
   function sceneEl() {
     return document.querySelector("a-scene");
@@ -44,6 +48,19 @@
       const el = document.getElementById(id);
       const rc = el && el.components && el.components.raycaster;
       if (rc) rc.refreshObjects();
+    });
+  }
+
+  // Show/hide the IMAGE STATE as a group. Hiding also strips the clickable
+  // class so the laser can't hit (e.g.) the now-invisible reveal control;
+  // showing restores it. Callers refresh the raycasters afterwards.
+  function setImageStateVisible(on) {
+    imageStateEls.forEach(function (rec) {
+      rec.el.setAttribute("visible", on);
+      if (rec.cls) {
+        if (on) rec.el.setAttribute("class", rec.cls);
+        else rec.el.removeAttribute("class");
+      }
     });
   }
 
@@ -116,6 +133,9 @@
     backing.setAttribute("class", "clickable");
     focusEl.appendChild(backing);
 
+    // IMAGE STATE elements are (re)collected fresh on each open.
+    imageStateEls = [];
+
     // The focus image — reuses the same preloaded asset by id.
     const img = document.createElement("a-image");
     img.setAttribute("src", assetId);
@@ -124,6 +144,7 @@
     img.setAttribute("position", "0 0 0");
     img.setAttribute("class", "clickable"); // intercept so it doesn't close
     focusEl.appendChild(img);
+    imageStateEls.push({ el: img, cls: "clickable" });
 
     // Title (prominent) + year (secondary). Light text on the dark backing.
     // NOTE: location is intentionally OMITTED — the default 3D font can't
@@ -132,26 +153,60 @@
     const titleEl = makeText(title, { width: 2.4, color: "#ffffff" });
     titleEl.setAttribute("position", "0 -1.0 0.02");
     focusEl.appendChild(titleEl);
+    imageStateEls.push({ el: titleEl, cls: null });
 
     const yearEl = makeText(year, { width: 1.6, color: "#b9b9b9" });
     yearEl.setAttribute("position", "0 -1.28 0.02");
     focusEl.appendChild(yearEl);
+    imageStateEls.push({ el: yearEl, cls: null });
     // (location text will be added here later, once the diacritic font is in)
 
-    // Reveal-memory control, beside the image on the right.
+    // Reveal-memory control, beside the image on the right. Clicking it enters
+    // MEMORY STATE (memory replaces the image in the central panel).
     if (currentEntry && currentEntry.memory) {
       const reveal = document.createElement("a-plane");
-      reveal.setAttribute("width", 0.6);
+      reveal.setAttribute("width", 0.85);
       reveal.setAttribute("height", 0.22);
-      reveal.setAttribute("position", `${VR_IMG / 2 + 0.45} 0 0.02`);
+      reveal.setAttribute("position", `${VR_IMG / 2 + 0.55} 0 0.02`);
       reveal.setAttribute("material", panelMat("#2a2a2a", 0.95));
       reveal.setAttribute("class", "clickable");
-      const revealLabel = makeText("Memory", { width: 1.4, color: "#eaeaea" });
+      const revealLabel = makeText("reveal memory", {
+        width: 1.7,
+        color: "#eaeaea",
+      });
       revealLabel.setAttribute("position", "0 0 0.01");
       reveal.appendChild(revealLabel);
-      reveal.addEventListener("click", toggleMemory);
+      reveal.addEventListener("click", showMemory);
       focusEl.appendChild(reveal);
+      imageStateEls.push({ el: reveal, cls: "clickable" });
     }
+
+    // Audio control, below the reveal control. Replays / stops the spoken
+    // memory. It lives in the IMAGE STATE group, so it hides with the image
+    // when the memory is revealed — the audio itself keeps playing across that
+    // toggle (it belongs to the focused image, not the state).
+    const audioCtrl = document.createElement("a-plane");
+    audioCtrl.setAttribute("width", 0.85);
+    audioCtrl.setAttribute("height", 0.22);
+    audioCtrl.setAttribute("position", `${VR_IMG / 2 + 0.55} -0.3 0.02`);
+    audioCtrl.setAttribute("material", panelMat("#2a2a2a", 0.95));
+    audioCtrl.setAttribute("class", "clickable");
+    const audioLabel = makeText("Stop audio", { width: 1.7, color: "#eaeaea" });
+    audioLabel.setAttribute("position", "0 0 0.01");
+    audioCtrl.appendChild(audioLabel);
+    audioCtrl.addEventListener("click", function () {
+      ZoneA.audio.toggle();
+    });
+    focusEl.appendChild(audioCtrl);
+    imageStateEls.push({ el: audioCtrl, cls: "clickable" });
+
+    // Play this image's spoken memory from the start. One reused audio element
+    // means switching images (openVRFocus calls closeVRFocus first) stops the
+    // previous clip before this one begins — never two at once.
+    ZoneA.audio.setOnChange(function (playing) {
+      audioLabel.setAttribute("text", "value", playing ? "Stop audio" : "Replay audio");
+    });
+    ZoneA.audio.playFor(stem);
 
     sceneEl().appendChild(focusEl);
 
@@ -159,68 +214,87 @@
     requestAnimationFrame(refreshRaycasters);
   };
 
-  // Memory reveal: build a second panel beside the image (right), not over
-  // it. Toggling again (or its × control) removes it.
-  function toggleMemory() {
-    if (memoryEl) {
-      collapseMemory();
-      return;
-    }
+  // Enter MEMORY STATE: hide the image, title, year and reveal control, and
+  // build a single dark card in the SAME central position the image occupied,
+  // with the memory text parented INSIDE it. The × control returns to IMAGE
+  // STATE. This is a toggle between two states in one place.
+  function showMemory() {
+    if (memoryEl) return; // already in memory state
     if (!currentEntry || !currentEntry.memory) return;
 
-    const panelH = VR_IMG + 0.6;
-    memoryEl = document.createElement("a-entity");
-    memoryEl.setAttribute("position", `${VR_IMG / 2 + 1.35} 0 0`);
+    setImageStateVisible(false);
 
-    const mback = document.createElement("a-plane");
-    mback.setAttribute("width", 1.5);
-    mback.setAttribute("height", panelH);
-    mback.setAttribute("position", "0 0 -0.02");
-    mback.setAttribute("material", panelMat("#111111", 0.92));
-    mback.setAttribute("class", "clickable"); // no-op
-    memoryEl.appendChild(mback);
+    // Centred over the image footprint (image is at "0 0"); a touch in front so
+    // it cleanly covers the now-hidden image.
+    const panelW = 1.9;
+    const panelH = 1.9;
+    const pad = 0.14; // inward padding from the panel edges
 
-    // Close (×) control, top-right of the memory panel.
+    // The ONE dark panel. It is also the memory root, so the text and close
+    // control live INSIDE it (parented), not at their own world position.
+    memoryEl = document.createElement("a-plane");
+    memoryEl.setAttribute("width", panelW);
+    memoryEl.setAttribute("height", panelH);
+    memoryEl.setAttribute("position", "0 0 0.02");
+    memoryEl.setAttribute("material", panelMat("#111111", 0.92));
+    memoryEl.setAttribute("class", "clickable"); // no-op: don't fall through
+
+    // Memory body text — child of the panel, anchored to its top-left corner
+    // and padded inward, wrapped to the panel width so it stays inside the card.
+    const mtext = makeText(currentEntry.memory, {
+      width: panelW - pad * 2,
+      align: "left",
+      anchor: "left", // start at the left edge; never spill past it
+      baseline: "top", // start at the top; flow downward
+      color: "#e6e6e6",
+      wrapCount: 32,
+    });
+    mtext.setAttribute(
+      "position",
+      `${-panelW / 2 + pad} ${panelH / 2 - 0.3} 0.01`
+    );
+    memoryEl.appendChild(mtext);
+
+    // Close (×) control, top-right corner of the panel → back to IMAGE STATE.
     const close = document.createElement("a-plane");
     close.setAttribute("width", 0.18);
     close.setAttribute("height", 0.18);
-    close.setAttribute("position", `0.62 ${panelH / 2 - 0.18} 0.01`);
+    close.setAttribute(
+      "position",
+      `${panelW / 2 - 0.16} ${panelH / 2 - 0.16} 0.02`
+    );
     close.setAttribute("material", panelMat("#2a2a2a", 1));
     close.setAttribute("class", "clickable");
     const closeLabel = makeText("x", { width: 0.7, color: "#eaeaea" });
     closeLabel.setAttribute("position", "0 0 0.01");
     close.appendChild(closeLabel);
-    close.addEventListener("click", collapseMemory);
+    close.addEventListener("click", hideMemory);
     memoryEl.appendChild(close);
-
-    // Memory body text, top-aligned and wrapped.
-    const mtext = makeText(currentEntry.memory, {
-      width: 1.35,
-      align: "left",
-      color: "#e6e6e6",
-      wrapCount: 30,
-      baseline: "top",
-    });
-    mtext.setAttribute("position", `-0.62 ${panelH / 2 - 0.18} 0.01`);
-    memoryEl.appendChild(mtext);
 
     focusEl.appendChild(memoryEl);
     requestAnimationFrame(refreshRaycasters);
   }
 
-  function collapseMemory() {
+  // Return to IMAGE STATE: remove the memory card and show the image group.
+  function hideMemory() {
     if (memoryEl && memoryEl.parentNode) memoryEl.parentNode.removeChild(memoryEl);
     memoryEl = null;
+    setImageStateVisible(true);
     refreshRaycasters();
   }
 
-  // Close the whole VR focus view and restore the scene.
+  // Close the whole VR focus view and restore the scene. The memory card (if
+  // open) is a child of focusEl and is removed with it; nulling memoryEl and
+  // clearing imageStateEls resets to IMAGE STATE for the next open.
   function closeVRFocus() {
-    collapseMemory(); // reset memory panel for next time
+    ZoneA.audio.stop(); // never let the clip outlive the focus view
+    ZoneA.audio.clearOnChange();
     if (focusEl && focusEl.parentNode) focusEl.parentNode.removeChild(focusEl);
     if (dimEl && dimEl.parentNode) dimEl.parentNode.removeChild(dimEl);
     focusEl = null;
     dimEl = null;
+    memoryEl = null;
+    imageStateEls = [];
     currentEntry = null;
     refreshRaycasters();
   }

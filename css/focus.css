@@ -77,6 +77,24 @@
   color: #777;
 }
 
+/* Audio control: a quiet text button under the caption. Restrained — no
+   border or fill, just small uppercase type that darkens on hover. */
+#focus-audio {
+  margin-top: 12px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #888;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+#focus-audio:hover {
+  color: #111;
+}
+
 /* The reveal control: present but understated. */
 #focus-reveal {
   flex: none;

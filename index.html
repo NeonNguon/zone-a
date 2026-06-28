@@ -12,6 +12,7 @@
     <!-- Shared captions loader + custom components, in <head> AFTER A-Frame
          so the components are registered before <a-scene> parses them. -->
     <script src="js/captions.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/components.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
@@ -93,6 +94,8 @@
             <img id="focus-image" src="" alt="" />
             <div id="focus-title"></div>
             <div id="focus-meta"></div>
+            <!-- Replay / stop the spoken memory. Auto-plays on open. -->
+            <button id="focus-audio" type="button">Stop audio</button>
           </div>
           <button id="focus-reveal" type="button">Reveal memory</button>
         </div>

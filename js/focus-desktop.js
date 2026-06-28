@@ -16,10 +16,17 @@
   const memory = document.getElementById("focus-memory");
   const memoryText = document.getElementById("focus-memory-text");
   const memoryClose = document.getElementById("focus-memory-close");
+  const audioBtn = document.getElementById("focus-audio");
 
   function collapseMemory() {
     memory.classList.remove("open");
     row.classList.remove("memory-open");
+  }
+
+  // Reflect playback state on the audio control (set as ZoneA.audio's
+  // onChange while this overlay is open).
+  function setAudioLabel(playing) {
+    audioBtn.textContent = playing ? "Stop audio" : "Replay audio";
   }
 
   window.openDesktopFocus = function (path) {
@@ -45,6 +52,12 @@
     collapseMemory(); // always start with memory hidden
     overlay.classList.add("visible"); // CSS fade-in
 
+    // Play this image's spoken memory from the start. Reusing one audio
+    // element means a previous clip (e.g. switching images) is stopped first.
+    // The click that opened the overlay is the user gesture autoplay needs.
+    ZoneA.audio.setOnChange(setAudioLabel);
+    ZoneA.audio.playFor(stem);
+
     // Freeze mouse-look so the scene doesn't swing behind the blur.
     const cam = document.getElementById("camera");
     if (cam) cam.setAttribute("look-controls", "enabled", false);
@@ -53,6 +66,8 @@
   function closeFocus() {
     overlay.classList.remove("visible"); // fade-out
     collapseMemory(); // reset for next time
+    ZoneA.audio.stop(); // never let the clip outlive the focus view
+    ZoneA.audio.clearOnChange();
     const cam = document.getElementById("camera");
     if (cam) cam.setAttribute("look-controls", "enabled", true);
   }
@@ -64,6 +79,11 @@
     row.classList.toggle("memory-open", opening);
   });
   memoryClose.addEventListener("click", collapseMemory);
+
+  // --- Audio control: replay / stop (does NOT affect the memory toggle) ---
+  audioBtn.addEventListener("click", function () {
+    ZoneA.audio.toggle();
+  });
 
   // --- Dismiss: only a click on the backdrop itself closes ---------
   overlay.addEventListener("click", function (e) {
