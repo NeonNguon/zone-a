@@ -305,7 +305,18 @@ const ENV_PRESETS = {
           "type: hemisphere; color: #ffffff; groundColor: #cccccc; intensity: 1",
       })
     );
-    buildGround(env, "#eeeeee");
+    // Floor: pure white and UNLIT (shader: flat), like the cityroom floor, so
+    // it reads bright white rather than a light-dimmed grey. Still a ground
+    // plane (dependency rule).
+    env.appendChild(
+      envEl("a-plane", {
+        position: "0 0 0",
+        rotation: "-90 0 0",
+        width: GROUND_SIZE,
+        height: GROUND_SIZE,
+        material: "color: #ffffff; shader: flat; side: double",
+      })
+    );
   },
 
   // DATASPACE — dark volume with a glowing grid and a drifting point field.
