@@ -416,8 +416,19 @@ const ENV_PRESETS = {
     );
 
     // One skyline panel per wall, spanning the wall width, bottom on the floor.
-    const panelW = CITYROOM_SIZE;
-    const panelH = CITYROOM_SIZE / SKYLINE_ASPECT; // preserve image aspect
+    // Same treatment as the skyline preset: crop the black foreground band off
+    // the bottom (texture window) and shorten the panel by the same fraction so
+    // buildings keep their apparent height (no squash); smooth alpha blend
+    // instead of an alphaTest cutout to avoid edge sparkle.
+    const keep = 1 - SKYLINE_CROP;
+    const panelW = CITYROOM_SIZE; // span the wall width (unchanged)
+    const panelH = (CITYROOM_SIZE / SKYLINE_ASPECT) * keep; // cropped height
+    const crop = {
+      repeat: "1 " + keep,
+      offset: "0 " + SKYLINE_CROP,
+      alphaTest: 0,
+      depthWrite: false,
+    };
     const eps = 0.05; // sit just inside the wall to avoid z-fighting
     const y = panelH / 2; // centre at half height -> bottom on the floor line
     const walls = [
@@ -428,7 +439,7 @@ const ENV_PRESETS = {
     ];
     for (let i = 0; i < 4; i++) {
       const src = SAIGON_SRCS[WALL_IMAGES[i] - 1];
-      const panel = skylinePanel(src, panelW, panelH);
+      const panel = skylinePanel(src, panelW, panelH, crop);
       panel.setAttribute("position", walls[i].pos);
       panel.setAttribute("rotation", walls[i].rot);
       env.appendChild(panel);
