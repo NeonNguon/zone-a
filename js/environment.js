@@ -32,6 +32,9 @@ const PARTICLE_DRIFT = 0.02; // radians/sec — slow yaw of the whole field
 // (converted HDR->SDR jpg) used purely as a FUNCTIONAL test of the wraparound;
 // swap for a real Saigon equirect later.
 const PHOTO_SKY_SRC = "assets/ferndale_studio_04_4k.jpg";
+// Radius (metres) of the `room` preset's inverted photo sphere. The ring sits
+// ~3.7 m from centre, so it stays comfortably inside. Tune to resize the room.
+const ROOM_RADIUS = 8;
 
 // ----------------------------------------------------------------
 // three-grid: a THREE.GridHelper wrapped as a component so it has a clean
@@ -122,6 +125,47 @@ AFRAME.registerComponent("particle-field", {
       this.points.geometry.dispose();
       this.points.material.dispose();
       this.points = null;
+    }
+  },
+});
+
+// ----------------------------------------------------------------
+// photo-room: an inverted sphere (BackSide — viewed from inside) textured with
+// an equirectangular image, so the photo wraps CLOSE around the ring rather
+// than sitting at an infinite a-sky distance. Kept a SPHERE on purpose: the
+// image is equirectangular and would distort on flat box faces. Same lifecycle
+// pattern as particle-field/three-grid — build in init(), dispose in remove()
+// (geometry, material AND texture) so it tears down cleanly on cycle.
+// ----------------------------------------------------------------
+AFRAME.registerComponent("photo-room", {
+  schema: {
+    src: { type: "string", default: PHOTO_SKY_SRC },
+    radius: { type: "number", default: ROOM_RADIUS },
+  },
+  init: function () {
+    const d = this.data;
+    const geo = new THREE.SphereGeometry(d.radius, 64, 40);
+    this.tex = new THREE.TextureLoader().load(d.src);
+    this.tex.colorSpace = THREE.SRGBColorSpace; // jpg is sRGB-encoded
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.tex,
+      side: THREE.BackSide, // we're INSIDE the sphere — render inner faces
+      fog: false, // unlit backdrop; ignore scene fog
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    this.el.setObject3D("photoRoom", mesh);
+    this.mesh = mesh;
+  },
+  remove: function () {
+    this.el.removeObject3D("photoRoom");
+    if (this.mesh) {
+      this.mesh.geometry.dispose();
+      this.mesh.material.dispose();
+      this.mesh = null;
+    }
+    if (this.tex) {
+      this.tex.dispose(); // free the GPU texture too
+      this.tex = null;
     }
   },
 });
@@ -235,6 +279,28 @@ const ENV_PRESETS = {
     env.appendChild(envEl("a-sky", { src: PHOTO_SKY_SRC }));
   },
 
+  // ROOM — the ring INSIDE the photo: an inverted equirect sphere (radius
+  // ROOM_RADIUS) wraps the studio close around the ring, instead of the
+  // infinite dome the `photo` preset uses. A separate preset — `photo` is
+  // left exactly as-is.
+  room: function (env, scene) {
+    setBackground(scene, "#000000"); // never seen (the sphere encloses you)
+    setFog(scene, null);
+    buildAmbient(env, "#cccccc", 1); // keeps the lit hover frame visible
+    // Ground kept PRESENT (all-presets rule) but fully transparent + no depth
+    // write, so the photo's OWN floor shows through — no grey-slab look.
+    env.appendChild(
+      envEl("a-plane", {
+        position: "0 0 0",
+        rotation: "-90 0 0",
+        width: GROUND_SIZE,
+        height: GROUND_SIZE,
+        material: "transparent: true; opacity: 0; depthWrite: false",
+      })
+    );
+    env.appendChild(envEl("a-entity", { "photo-room": "" }));
+  },
+
   // SPLAT — Gaussian-splat scene. STUB.
   splat: function (env, scene) {
     // TODO(splat): Gaussian splatting needs a THIRD-PARTY A-Frame component
@@ -264,7 +330,7 @@ AFRAME.registerComponent("environment-manager", {
 
   init: function () {
     this.scene = this.el.sceneEl;
-    this.order = ["void", "dataspace", "photo", "splat"];
+    this.order = ["void", "dataspace", "photo", "room", "splat"];
     this.active = null; // the preset currently built into #environment
 
     const params = new URLSearchParams(window.location.search);
