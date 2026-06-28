@@ -77,6 +77,12 @@
       <a-entity id="zone-a">
         <!-- Ring container: ring-layout fills it with nine image entities. -->
         <a-entity ring-layout position="0 0 0"></a-entity>
+
+        <!-- Per-image floor contact cue. Lives under #zone-a so it PERSISTS
+             across environment switches (env teardown only touches
+             #environment); it retunes its material to each preset's profile.
+             Tunables: radius / opacity / softness / yoffset / color / mode. -->
+        <a-entity ring-contact-cue position="0 0 0"></a-entity>
       </a-entity>
 
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to

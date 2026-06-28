@@ -220,3 +220,192 @@ AFRAME.registerComponent("snap-turn", {
     this.el.removeEventListener("thumbstickmoved", this.onStick);
   },
 });
+
+// ================================================================
+// ring-contact-cue — a per-image floor contact cue for the Zone A ring.
+//
+// Nine soft radial "pools" on the floor, one directly under each ring image
+// (same x,z, derived from zoneARingPlacements() so they can't drift). The
+// images do NOT move; this only adds a ground cue so they read as
+// deliberately-floating-but-anchored rather than accidentally hovering.
+//
+// Design notes:
+//  - ONE radial-gradient texture, generated on a canvas at runtime, with the
+//    falloff in the ALPHA channel (white RGB, so material.color sets the hue).
+//    The same texture serves both appearance modes; shared across all nine.
+//  - ONE shared material across all nine meshes, so an environment switch
+//    retunes a single material (colour / blending / opacity), not nine.
+//  - This GEOMETRY is owned by Zone A and PERSISTS across environment switches
+//    (it lives under #zone-a, which env teardown never touches). On a switch we
+//    only RETUNE the shared material to the active preset's profile.
+//  - z-fight guards vs the floor: small +y offset, depthWrite:false, and
+//    polygonOffset.
+//  - Two modes share texture+geometry, differ only in material settings:
+//      shadow (light grounds): normal blend, dark tint, modest opacity.
+//      glow   (dark grounds):  additive blend, neon tint, low opacity.
+// ================================================================
+AFRAME.registerComponent("ring-contact-cue", {
+  schema: {
+    // -- float-tuning knobs (eyeball live via setAttribute / the inspector) --
+    radius: { type: "number", default: 1.3 }, // cue radius (m); > image width (1.4)
+    opacity: { type: "number", default: 0.3 }, // base opacity (LOW); profile may override
+    softness: { type: "number", default: 0.55 }, // gradient falloff 0 (hard) .. 1 (very soft)
+    yoffset: { type: "number", default: 0.02 }, // metres above the floor (y=0)
+    // -- base appearance; the active environment profile overrides these --
+    color: { type: "color", default: "#000000" }, // tint
+    mode: { type: "string", default: "shadow" }, // "shadow" | "glow"
+  },
+
+  init: function () {
+    this.meshes = [];
+    this.geometry = null;
+    this.material = null;
+    this.texture = null;
+    this.curProfile = null; // active environment's profile (or null -> fallback)
+
+    this.group = new THREE.Group();
+    this.el.setObject3D("cue", this.group);
+
+    // Reuse environment-manager's already-tracked active preset: it emits
+    // "environmentchanged" { preset, profile } on every switch. Listen for it,
+    // and read the current value on init (we attach after its first emit).
+    this.onEnvChange = (e) => {
+      this.applyProfile(e.detail && e.detail.profile);
+    };
+    this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
+  },
+
+  update: function (oldData) {
+    const d = this.data;
+    const first = Object.keys(oldData).length === 0;
+
+    if (first) {
+      this.buildTexture(); // softness
+      this.buildMaterial(); // color/opacity/mode (tuned below)
+      this.buildGeometry(); // radius
+      this.buildMeshes(); // 9 meshes at ring x,z, flat, +yoffset
+      this.tuneMaterial();
+      // Pick up the environment that is already active (manager inits first).
+      this.applyProfile(this.currentEnvProfile());
+      return;
+    }
+
+    // Subsequent prop tweaks: rebuild only what changed; geometry persists.
+    if (oldData.softness !== d.softness) this.buildTexture();
+    if (oldData.radius !== d.radius) this.buildGeometry();
+    if (oldData.radius !== d.radius || oldData.yoffset !== d.yoffset) {
+      this.layoutMeshes();
+    }
+    this.tuneMaterial();
+  },
+
+  // --- ONE soft radial-gradient texture; falloff encoded in ALPHA ---------
+  buildTexture: function () {
+    if (this.texture) this.texture.dispose();
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    const c = size / 2;
+    const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
+    // White RGB (hue comes from material.color); alpha = soft power falloff,
+    // 1 at the centre -> 0 at the edge (so the square's corners are invisible:
+    // no rectangular edge). Higher softness = gentler, fainter spread.
+    const exp = 1 + this.data.softness * 3;
+    const STOPS = 16;
+    for (let i = 0; i <= STOPS; i++) {
+      const t = i / STOPS;
+      const a = Math.pow(1 - t, exp);
+      grad.addColorStop(t, `rgba(255,255,255,${a})`);
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    this.texture = new THREE.CanvasTexture(canvas);
+    this.texture.colorSpace = THREE.SRGBColorSpace;
+    if (this.material) {
+      this.material.map = this.texture;
+      this.material.needsUpdate = true;
+    }
+  },
+
+  // --- ONE shared material (retuned per environment) ----------------------
+  buildMaterial: function () {
+    this.material = new THREE.MeshBasicMaterial({
+      map: this.texture,
+      transparent: true,
+      opacity: this.data.opacity,
+      color: new THREE.Color(this.data.color),
+      side: THREE.DoubleSide,
+      depthWrite: false, // don't write depth -> don't fight the floor
+      polygonOffset: true, // bias toward camera, belt-and-suspenders vs z-fight
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+      blending: THREE.NormalBlending,
+    });
+  },
+
+  buildGeometry: function () {
+    if (this.geometry) this.geometry.dispose();
+    const d = this.data.radius * 2; // plane spans the cue diameter
+    this.geometry = new THREE.PlaneGeometry(d, d);
+    this.meshes.forEach((m) => {
+      m.geometry = this.geometry;
+    });
+  },
+
+  buildMeshes: function () {
+    zoneARingPlacements().forEach((p) => {
+      const mesh = new THREE.Mesh(this.geometry, this.material);
+      mesh.rotation.x = -Math.PI / 2; // lie flat, facing up
+      mesh.position.set(p.x, this.data.yoffset, p.z);
+      this.group.add(mesh);
+      this.meshes.push(mesh);
+    });
+  },
+
+  layoutMeshes: function () {
+    const placements = zoneARingPlacements();
+    this.meshes.forEach((mesh, i) => {
+      mesh.position.set(placements[i].x, this.data.yoffset, placements[i].z);
+    });
+  },
+
+  // --- retune the shared material to the active profile (or fallback) ------
+  applyProfile: function (profile) {
+    this.curProfile = profile || null;
+    this.tuneMaterial();
+  },
+
+  tuneMaterial: function () {
+    if (!this.material) return;
+    const d = this.data;
+    const p = this.curProfile || {}; // {} -> falls back to component defaults
+    const mode = p.mode || d.mode; // "shadow" | "glow"
+    const color = p.color || d.color;
+    const opacity = p.opacity != null ? p.opacity : d.opacity;
+    const blending =
+      mode === "glow" ? THREE.AdditiveBlending : THREE.NormalBlending;
+    if (this.material.blending !== blending) {
+      this.material.blending = blending;
+      this.material.needsUpdate = true; // blending change requires this
+    }
+    this.material.color.set(color);
+    this.material.opacity = opacity;
+  },
+
+  // Read environment-manager's currently-active profile (it inits before us).
+  currentEnvProfile: function () {
+    const envEl = document.getElementById("environment");
+    const mgr =
+      envEl && envEl.components && envEl.components["environment-manager"];
+    return mgr ? mgr.activeProfile || null : null;
+  },
+
+  remove: function () {
+    this.el.sceneEl.removeEventListener("environmentchanged", this.onEnvChange);
+    this.el.removeObject3D("cue");
+    if (this.geometry) this.geometry.dispose();
+    if (this.material) this.material.dispose();
+    if (this.texture) this.texture.dispose();
+  },
+});
