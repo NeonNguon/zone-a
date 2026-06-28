@@ -36,6 +36,30 @@ const ROOM_SKY_SRC = "assets/ferndale_studio_04_4k.jpg";
 // ~3.7 m from centre, so it stays comfortably inside. Tune to resize the room.
 const ROOM_RADIUS = 8;
 
+// --- Saigon skyline silhouettes (black-on-transparent PNGs) -------------
+// Shared by the `skyline` and `cityroom` presets. Rendered with transparency
+// so the white room shows through above/between buildings (no rect edges).
+const SAIGON_SRCS = [
+  "assets/saigon1.png",
+  "assets/saigon2.png",
+  "assets/saigon3.png",
+  "assets/saigon4.png",
+];
+const SKYLINE_ASPECT = 1456 / 816; // source image width/height, preserved on planes
+
+// `skyline` preset (distant horizon ring) -------------------------------
+const SKYLINE_RADIUS = 18; // metres centre -> skyline ring (tune horizon distance)
+const SKYLINE_HEIGHT = 9; // metres, full plane height; buildings fill the lower
+//                            part, transparent sky above (tune building scale)
+const SKYLINE_COUNT = 6; // number of silhouette planes evenly around the ring;
+//                          the 4 images repeat, white gaps between are fine
+
+// `cityroom` preset (flat panels on a white box room) -------------------
+const CITYROOM_SIZE = 16; // metres, box width & depth (must exceed the ring; tune)
+const CITYROOM_HEIGHT = 10; // metres, box height (>= panel height below)
+// Which saigon image (1-4) maps to each of the 4 walls, in order: -Z, +X, +Z, -X.
+const WALL_IMAGES = [1, 2, 3, 4];
+
 // ----------------------------------------------------------------
 // three-grid: a THREE.GridHelper wrapped as a component so it has a clean
 // teardown (dispose on remove) and can be appended/removed like any entity.
@@ -222,6 +246,19 @@ function setFog(scene, opts) {
   else scene.removeAttribute("fog"); // explicit "no fog"
 }
 
+// A flat silhouette panel: a plane textured with a black-on-transparent PNG.
+// transparent + alphaTest keys out the empty sky so there are no rectangular
+// edges; side: double so it reads correctly however you face it.
+function skylinePanel(src, w, h) {
+  return envEl("a-plane", {
+    width: w,
+    height: h,
+    material:
+      "src: " + src +
+      "; shader: flat; transparent: true; alphaTest: 0.5; side: double",
+  });
+}
+
 // A floating red label so a STUB look is obviously a stub in-headset.
 function stubLabel(text) {
   return envEl("a-entity", {
@@ -301,6 +338,29 @@ const ENV_PRESETS = {
     env.appendChild(envEl("a-entity", { "photo-room": "" }));
   },
 
+  // SKYLINE — Saigon silhouettes as a distant horizon ringing the white space.
+  // Flat planes standing on the floor line at SKYLINE_RADIUS, buildings rising
+  // from the ground, white room above and behind. The 4 images repeat around.
+  skyline: function (env, scene) {
+    setBackground(scene, "#eeeeee"); // white, like void
+    setFog(scene, null);
+    buildAmbient(env, "#bbbbbb", 1); // hover frame needs light
+    buildGround(env, "#eeeeee"); // white floor (ground dependency)
+
+    const w = SKYLINE_HEIGHT * SKYLINE_ASPECT; // keep image aspect ratio
+    for (let i = 0; i < SKYLINE_COUNT; i++) {
+      const thetaDeg = (360 / SKYLINE_COUNT) * i;
+      const t = thetaDeg * (Math.PI / 180);
+      const x = SKYLINE_RADIUS * Math.sin(t);
+      const z = -SKYLINE_RADIUS * Math.cos(t);
+      const panel = skylinePanel(SAIGON_SRCS[i % 4], w, SKYLINE_HEIGHT);
+      // Bottom on the floor line (centre at half height); face the centre.
+      panel.setAttribute("position", `${x} ${SKYLINE_HEIGHT / 2} ${z}`);
+      panel.setAttribute("rotation", `0 ${-thetaDeg} 0`);
+      env.appendChild(panel);
+    }
+  },
+
   // SPLAT — Gaussian-splat scene. STUB.
   splat: function (env, scene) {
     // TODO(splat): Gaussian splatting needs a THIRD-PARTY A-Frame component
@@ -330,7 +390,7 @@ AFRAME.registerComponent("environment-manager", {
 
   init: function () {
     this.scene = this.el.sceneEl;
-    this.order = ["void", "dataspace", "photo", "room", "splat"];
+    this.order = ["void", "dataspace", "photo", "room", "skyline", "splat"];
     this.active = null; // the preset currently built into #environment
 
     const params = new URLSearchParams(window.location.search);
