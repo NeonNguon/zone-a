@@ -35,14 +35,29 @@
         <img id="atpihl-9" src="ATPIHL/ATPIHL9.jpg" />
       </a-assets>
 
-      <!-- Ground: a flat plane rotated -90° on X so it lies horizontal. -->
-      <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#eee"></a-plane>
+      <!-- ============================================================
+           ENVIRONMENT LAYER — everything atmospheric (background/sky,
+           fog, lights, ground, grid, particles), swappable as one unit.
+           The ring NEVER sets any of these. (Step 2: still STATIC — the
+           original white look. Step 3 hands this container to the
+           environment-manager component, which builds presets into it.)
+           ============================================================ -->
+      <a-entity id="environment">
+        <!-- Ground: a flat plane rotated -90° on X so it lies horizontal. -->
+        <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#eee"></a-plane>
 
-      <!-- Sky: a large inward-facing sphere surrounding the scene. -->
-      <a-sky color="#eee"></a-sky>
+        <!-- Sky: a large inward-facing sphere surrounding the scene. -->
+        <a-sky color="#eee"></a-sky>
+      </a-entity>
 
-      <!-- Ring container: ring-layout fills it with nine image entities. -->
-      <a-entity ring-layout position="0 0 0"></a-entity>
+      <!-- ============================================================
+           ZONE A — the exhibition itself: ONLY the ring, its nine images
+           and their audio. Sets no background / fog / lights / ground.
+           ============================================================ -->
+      <a-entity id="zone-a">
+        <!-- Ring container: ring-layout fills it with nine image entities. -->
+        <a-entity ring-layout position="0 0 0"></a-entity>
+      </a-entity>
 
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
            .clickable and emits mouseenter/mouseleave/click on the images. -->
