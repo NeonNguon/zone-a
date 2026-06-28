@@ -361,6 +361,47 @@ const ENV_PRESETS = {
     }
   },
 
+  // CITYROOM — a big white box room enclosing the ring, with the Saigon
+  // silhouettes mapped FLAT onto the inner wall faces as graphic panels, each
+  // sitting on the floor line of its wall (buildings rising from the floor).
+  cityroom: function (env, scene) {
+    setBackground(scene, "#eeeeee"); // white
+    setFog(scene, null);
+    buildAmbient(env, "#bbbbbb", 1); // hover frame needs light
+    buildGround(env, "#eeeeee"); // white floor (ground dependency)
+
+    const half = CITYROOM_SIZE / 2;
+    // White box room — inner faces (side: back), so it encloses you in white.
+    env.appendChild(
+      envEl("a-box", {
+        position: `0 ${CITYROOM_HEIGHT / 2} 0`,
+        width: CITYROOM_SIZE,
+        height: CITYROOM_HEIGHT,
+        depth: CITYROOM_SIZE,
+        material: "color: #eeeeee; shader: flat; side: back",
+      })
+    );
+
+    // One skyline panel per wall, spanning the wall width, bottom on the floor.
+    const panelW = CITYROOM_SIZE;
+    const panelH = CITYROOM_SIZE / SKYLINE_ASPECT; // preserve image aspect
+    const eps = 0.05; // sit just inside the wall to avoid z-fighting
+    const y = panelH / 2; // centre at half height -> bottom on the floor line
+    const walls = [
+      { pos: `0 ${y} ${-half + eps}`, rot: "0 0 0" }, // -Z wall, faces +Z (inward)
+      { pos: `${half - eps} ${y} 0`, rot: "0 -90 0" }, // +X wall, faces -X
+      { pos: `0 ${y} ${half - eps}`, rot: "0 180 0" }, // +Z wall, faces -Z
+      { pos: `${-half + eps} ${y} 0`, rot: "0 90 0" }, // -X wall, faces +X
+    ];
+    for (let i = 0; i < 4; i++) {
+      const src = SAIGON_SRCS[WALL_IMAGES[i] - 1];
+      const panel = skylinePanel(src, panelW, panelH);
+      panel.setAttribute("position", walls[i].pos);
+      panel.setAttribute("rotation", walls[i].rot);
+      env.appendChild(panel);
+    }
+  },
+
   // SPLAT — Gaussian-splat scene. STUB.
   splat: function (env, scene) {
     // TODO(splat): Gaussian splatting needs a THIRD-PARTY A-Frame component
@@ -390,7 +431,7 @@ AFRAME.registerComponent("environment-manager", {
 
   init: function () {
     this.scene = this.el.sceneEl;
-    this.order = ["void", "dataspace", "photo", "room", "skyline", "splat"];
+    this.order = ["void", "dataspace", "photo", "room", "skyline", "cityroom", "splat"];
     this.active = null; // the preset currently built into #environment
 
     const params = new URLSearchParams(window.location.search);
