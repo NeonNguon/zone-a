@@ -500,6 +500,20 @@ const ENV_PRESETS = {
 };
 
 // ----------------------------------------------------------------
+// Ground-cue PROFILES — OPTIONAL, additive metadata on the preset definitions.
+// Zone A's ring-contact-cue reads the active preset's `.profile` and retunes
+// its shared material to it:
+//   { mode: 'shadow' | 'glow', color, opacity }
+// Presets WITHOUT a profile keep working unchanged — the cue falls back to its
+// dark "shadow" default (covers photo, room, skyline, splat).
+//   - void / cityroom: light/white floors  -> dark shadow.
+//   - dataspace:       dark neon-grid floor -> additive glow, grid-matching hue.
+// ----------------------------------------------------------------
+ENV_PRESETS.void.profile = { mode: "shadow", color: "#000000", opacity: 0.28 };
+ENV_PRESETS.cityroom.profile = { mode: "shadow", color: "#000000", opacity: 0.3 };
+ENV_PRESETS.dataspace.profile = { mode: "glow", color: "#7da2ff", opacity: 0.55 };
+
+// ----------------------------------------------------------------
 // environment-manager: owns #environment. One property, `preset`. Builds the
 // named preset on init / change, tearing the old one down first. Reads ?env=
 // from the URL (shareable links) and cycles the CYCLE_ORDER set via the
@@ -576,6 +590,14 @@ AFRAME.registerComponent("environment-manager", {
     this.teardown(); // remove the old look entirely, then build fresh
     builder(this.el, this.scene);
     this.active = name;
+    // Active preset's optional ground-cue profile (additive metadata; may be
+    // undefined). Tracked here alongside the HUD's active-preset state, and
+    // broadcast so Zone A's ring-contact-cue can retune to match.
+    this.activeProfile = builder.profile || null;
+    this.scene.emit("environmentchanged", {
+      preset: name,
+      profile: this.activeProfile,
+    });
     this.updateHud(name); // keep the dev HUD in sync (even while hidden)
 
     // Reflect the active preset in the URL so the address bar stays shareable.
