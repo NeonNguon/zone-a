@@ -28,6 +28,10 @@ const GROUND_SIZE = 30; // metres square; matches the original plane
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps
 const PARTICLE_SPREAD = 30; // half-extent of the cube the points fill (m)
 const PARTICLE_DRIFT = 0.02; // radians/sec — slow yaw of the whole field
+// Equirectangular sky image for the `photo` preset. Currently a studio HDRI
+// (converted HDR->SDR jpg) used purely as a FUNCTIONAL test of the wraparound;
+// swap for a real Saigon equirect later.
+const PHOTO_SKY_SRC = "assets/ferndale_studio_04_4k.jpg";
 
 // ----------------------------------------------------------------
 // three-grid: a THREE.GridHelper wrapped as a component so it has a clean
@@ -221,20 +225,14 @@ const ENV_PRESETS = {
     env.appendChild(envEl("a-entity", { "particle-field": "" }));
   },
 
-  // PHOTO — equirectangular photo sky. STUB.
+  // PHOTO — equirectangular photo sky (a-sky wraps the 2:1 image around you).
+  // Currently a studio HDRI for a functional wraparound test (PHOTO_SKY_SRC).
   photo: function (env, scene) {
-    // TODO(photo): replace the placeholder colour sky with a real equirect.
-    // Add an <img id="env-photo" src="..."> to <a-assets>, then below use
-    //   envEl("a-sky", { src: "#env-photo" })  instead of the color sky.
-    console.warn(
-      '[environment] "photo" preset is a STUB — set an equirect a-sky src.'
-    );
-    setBackground(scene, "#3a3f4a");
+    setBackground(scene, "#000000"); // hidden behind the sky; black fallback
     setFog(scene, null);
-    buildAmbient(env, "#cccccc", 1);
-    buildGround(env, "#888888");
-    env.appendChild(envEl("a-sky", { color: "#3a3f4a" })); // <-- swap for src:"#env-photo"
-    env.appendChild(stubLabel("PHOTO preset (stub)\nset an equirect a-sky src"));
+    buildAmbient(env, "#cccccc", 1); // keeps the lit hover frame visible
+    buildGround(env, "#888888"); // floor you stand on (per all-presets rule)
+    env.appendChild(envEl("a-sky", { src: PHOTO_SKY_SRC }));
   },
 
   // SPLAT — Gaussian-splat scene. STUB.
