@@ -53,6 +53,9 @@ const SKYLINE_HEIGHT = 9; // metres, full plane height; buildings fill the lower
 //                            part, transparent sky above (tune building scale)
 const SKYLINE_COUNT = 6; // number of silhouette planes evenly around the ring;
 //                          the 4 images repeat, white gaps between are fine
+const SKYLINE_LIFT = 0.05; // metres the plane bases sit ABOVE the floor, so they
+//                            aren't coplanar with the ground plane (anti z-fight);
+//                            small enough that buildings still read as floor-rising
 
 // `cityroom` preset (flat panels on a white box room) -------------------
 const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the ring; tune)
@@ -354,8 +357,12 @@ const ENV_PRESETS = {
       const x = SKYLINE_RADIUS * Math.sin(t);
       const z = -SKYLINE_RADIUS * Math.cos(t);
       const panel = skylinePanel(SAIGON_SRCS[i % 4], w, SKYLINE_HEIGHT);
-      // Bottom on the floor line (centre at half height); face the centre.
-      panel.setAttribute("position", `${x} ${SKYLINE_HEIGHT / 2} ${z}`);
+      // Base just above the floor line (lifted by SKYLINE_LIFT so it isn't
+      // coplanar with the ground); centre at half height + lift; face centre.
+      panel.setAttribute(
+        "position",
+        `${x} ${SKYLINE_HEIGHT / 2 + SKYLINE_LIFT} ${z}`
+      );
       panel.setAttribute("rotation", `0 ${-thetaDeg} 0`);
       env.appendChild(panel);
     }

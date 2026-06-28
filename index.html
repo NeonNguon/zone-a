@@ -86,10 +86,14 @@
            controllers. VR locomotion moves the RIG (view + hands together)
            while the headset head-tracks the camera within it. -->
       <a-entity id="rig" position="0 0 0">
-        <!-- Camera at standing eye height; desktop controls unchanged. -->
+        <!-- Camera at standing eye height; desktop controls unchanged.
+             near:0.1 (up from the 0.005 default) tightens the depth range so
+             far-off surfaces — the floor, skyline plane edges — stop shimmering
+             at grazing angles. far left at default so distant a-sky preset
+             skies still render. -->
         <a-entity
           id="camera"
-          camera
+          camera="near: 0.1"
           look-controls
           wasd-controls
           position="0 1.6 0"
