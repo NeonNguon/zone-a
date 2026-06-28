@@ -24,6 +24,13 @@
 // ================================================================
 
 // ---------- tunables ----------
+
+// Presets stepped through by the cycle control (desktop `e` key / right-hand
+// `b` button), in order. EVERY preset stays defined in ENV_PRESETS below and
+// loadable via ?env=<name> — this list only controls what the e/b cycle visits.
+// Add/remove names here to change the active cycle set.
+const CYCLE_ORDER = ["void", "dataspace", "cityroom"];
+
 const GROUND_SIZE = 30; // metres square; matches the original plane
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps
 const PARTICLE_SPREAD = 30; // half-extent of the cube the points fill (m)
@@ -495,14 +502,15 @@ const ENV_PRESETS = {
 // ----------------------------------------------------------------
 // environment-manager: owns #environment. One property, `preset`. Builds the
 // named preset on init / change, tearing the old one down first. Reads ?env=
-// from the URL (shareable links) and cycles with the `n` key.
+// from the URL (shareable links) and cycles the CYCLE_ORDER set via the
+// desktop `e` key or the right controller's `B` button.
 // ----------------------------------------------------------------
 AFRAME.registerComponent("environment-manager", {
   schema: { preset: { type: "string", default: "void" } },
 
   init: function () {
     this.scene = this.el.sceneEl;
-    this.order = ["void", "dataspace", "photo", "room", "skyline", "cityroom", "splat"];
+    this.order = CYCLE_ORDER; // which presets the e/b cycle steps through
     this.active = null; // the preset currently built into #environment
 
     const params = new URLSearchParams(window.location.search);
@@ -522,12 +530,22 @@ AFRAME.registerComponent("environment-manager", {
     const initial =
       fromUrl && ENV_PRESETS[fromUrl] ? fromUrl : this.data.preset;
 
-    // `n` cycles to the next preset; `h` toggles the dev HUD.
+    // Desktop: `e` cycles to the next preset; `h` toggles the dev HUD.
     this.onKey = (e) => {
-      if (e.key === "n" || e.key === "N") this.cycle();
+      if (e.key === "e" || e.key === "E") this.cycle();
       else if (e.key === "h" || e.key === "H") this.toggleHud();
     };
     window.addEventListener("keydown", this.onKey);
+
+    // Quest 3 / WebXR: the right controller's `B` button cycles. laser-controls
+    // (oculus-touch-controls under the hood) emits `bbuttondown` on the right
+    // hand. The element exists once the DOM is parsed; its events fire once its
+    // controller components init.
+    this.cycleFromController = () => this.cycle();
+    this.rightHand = document.getElementById("rightHand");
+    if (this.rightHand) {
+      this.rightHand.addEventListener("bbuttondown", this.cycleFromController);
+    }
 
     this.build(initial); // single, first build (also primes the HUD text)
   },
@@ -587,6 +605,9 @@ AFRAME.registerComponent("environment-manager", {
 
   remove: function () {
     window.removeEventListener("keydown", this.onKey);
+    if (this.rightHand) {
+      this.rightHand.removeEventListener("bbuttondown", this.cycleFromController);
+    }
     this.teardown();
   },
 });
