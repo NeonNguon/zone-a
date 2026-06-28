@@ -28,6 +28,9 @@ const GROUND_SIZE = 30; // metres square; matches the original plane
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps
 const PARTICLE_SPREAD = 30; // half-extent of the cube the points fill (m)
 const PARTICLE_DRIFT = 0.02; // radians/sec — slow yaw of the whole field
+const ROOM_SIZE = 20; // redroom wall box width/depth (m), encloses the ring
+const ROOM_HEIGHT = 6; // redroom wall height (m)
+const PULSE_SPEED = 0.8; // redroom emissive pulse rate (radians/sec) — slow
 
 // ----------------------------------------------------------------
 // three-grid: a THREE.GridHelper wrapped as a component so it has a clean
@@ -118,6 +121,63 @@ AFRAME.registerComponent("particle-field", {
       this.points.geometry.dispose();
       this.points.material.dispose();
       this.points = null;
+    }
+  },
+});
+
+// ----------------------------------------------------------------
+// pulsing-walls: a box room (inner faces) whose emissive colour oscillates
+// smoothly between two red tones on a slow loop. Same lifecycle pattern as
+// particle-field — build geometry/material in init(), animate in tick(),
+// dispose in remove() so it tears down cleanly with no animation leaking
+// across preset switches.
+// ----------------------------------------------------------------
+AFRAME.registerComponent("pulsing-walls", {
+  schema: {
+    size: { type: "number", default: ROOM_SIZE },
+    height: { type: "number", default: ROOM_HEIGHT },
+    color: { type: "color", default: "#200000" }, // base (lit) wall colour
+    emissiveA: { type: "color", default: "#330000" }, // pulse low (dim red)
+    emissiveB: { type: "color", default: "#cc0000" }, // pulse high (bright red)
+    speed: { type: "number", default: PULSE_SPEED },
+  },
+  init: function () {
+    const d = this.data;
+    const geo = new THREE.BoxGeometry(d.size, d.height, d.size);
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(d.color),
+      emissive: new THREE.Color(d.emissiveA),
+      side: THREE.BackSide, // we stand INSIDE the box — render the inner faces
+      roughness: 1,
+      metalness: 0,
+      fog: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = d.height / 2; // floor at y=0, ceiling at y=height
+    this.el.setObject3D("walls", mesh);
+    this.mesh = mesh;
+
+    // Pulse endpoints + a reused scratch colour, so tick() allocates nothing.
+    this.emA = new THREE.Color(d.emissiveA);
+    this.emB = new THREE.Color(d.emissiveB);
+    this.scratch = new THREE.Color();
+    this.speed = d.speed;
+  },
+  tick: function (time) {
+    if (!this.mesh) return;
+    // 0..1 sine; lerp emissive A -> B by that factor for a smooth oscillation.
+    const f = (Math.sin((time / 1000) * this.speed) + 1) / 2;
+    this.scratch.copy(this.emA).lerp(this.emB, f);
+    this.mesh.material.emissive.copy(this.scratch);
+  },
+  remove: function () {
+    // Drop the object from the graph (stops it rendering) and free GPU
+    // resources; nulling this.mesh makes any stray tick() a no-op.
+    this.el.removeObject3D("walls");
+    if (this.mesh) {
+      this.mesh.geometry.dispose();
+      this.mesh.material.dispose();
+      this.mesh = null;
     }
   },
 });
@@ -218,6 +278,16 @@ const ENV_PRESETS = {
     env.appendChild(envEl("a-entity", { "particle-field": "" }));
   },
 
+  // REDROOM — red floor inside a red box room whose walls pulse between two
+  // red tones (pulsing-walls owns the animation + its own teardown).
+  redroom: function (env, scene) {
+    setBackground(scene, "#1a0000");
+    setFog(scene, null);
+    buildAmbient(env, "#777777", 1); // neutral-ish, so the hover frame stays lit
+    buildGround(env, "#5a0000"); // red ground
+    env.appendChild(envEl("a-entity", { "pulsing-walls": "" }));
+  },
+
   // PHOTO — equirectangular photo sky. STUB.
   photo: function (env, scene) {
     // TODO(photo): replace the placeholder colour sky with a real equirect.
@@ -263,7 +333,7 @@ AFRAME.registerComponent("environment-manager", {
 
   init: function () {
     this.scene = this.el.sceneEl;
-    this.order = ["void", "dataspace", "photo", "splat"];
+    this.order = ["void", "dataspace", "redroom", "photo", "splat"];
     this.active = null; // the preset currently built into #environment
 
     const params = new URLSearchParams(window.location.search);
