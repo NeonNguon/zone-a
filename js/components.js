@@ -78,6 +78,30 @@ AFRAME.registerComponent("ring-layout", {
 });
 
 // ----------------------------------------------------------------
+// zone-a-root: the SINGLE placement handle for the whole Zone A assembly.
+// #zone-a is the shared origin that BOTH the image ring (ring-layout) and the
+// floor contact cues (ring-contact-cue) hang off — and the images carry their
+// own audio trigger (focus-on-click) and hover/focus zones — so offsetting this
+// one entity moves the entire assembly as a unit. It does NOT touch ring
+// radius / image size / spacing / shape / height; only the assembly's position.
+//
+// `offset` is the tunable placement handle (full x/y/z), default 4 m back along
+// -z (away from spawn) to make room for Zones B and C. Adjust live, e.g.:
+//   document.getElementById('zone-a').setAttribute('zone-a-root','offset','0 0 -6')
+// ----------------------------------------------------------------
+AFRAME.registerComponent("zone-a-root", {
+  schema: {
+    offset: { type: "vec3", default: { x: 0, y: 0, z: -4 } },
+  },
+  update: function () {
+    const o = this.data.offset;
+    // Drive the position component (not object3D directly) so there is no
+    // init-order race with it; one offset moves images + cues + triggers.
+    this.el.setAttribute("position", { x: o.x, y: o.y, z: o.z });
+  },
+});
+
+// ----------------------------------------------------------------
 // image-hover: subtle highlight while the mouse/laser ray is over an image.
 // ----------------------------------------------------------------
 AFRAME.registerComponent("image-hover", {
