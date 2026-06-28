@@ -405,9 +405,13 @@ const ENV_PRESETS = {
 
     const half = CITYROOM_SIZE / 2;
     // White box room — inner faces (side: back), so it encloses you in white.
+    // SINK it SKYLINE_LIFT below the floor: otherwise the box's bottom inner
+    // face is coplanar with the ground plane (both white at y=0), which z-fights
+    // and makes the floor flicker. Dropping it leaves the ground plane as the
+    // one visible floor; the ceiling drop is negligible.
     env.appendChild(
       envEl("a-box", {
-        position: `0 ${CITYROOM_HEIGHT / 2} 0`,
+        position: `0 ${CITYROOM_HEIGHT / 2 - SKYLINE_LIFT} 0`,
         width: CITYROOM_SIZE,
         height: CITYROOM_HEIGHT,
         depth: CITYROOM_SIZE,
