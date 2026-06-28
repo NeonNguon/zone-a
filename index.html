@@ -20,6 +20,25 @@
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
+
+    <!-- Dev-only environment HUD. Plain 2D overlay, hidden by default; the
+         environment-manager shows it only when ?debug is in the URL (or you
+         press `h`). Never part of the normal experience, never in VR. -->
+    <style>
+      #env-hud {
+        position: fixed;
+        left: 10px;
+        bottom: 10px;
+        z-index: 9999;
+        font: 12px/1.4 monospace;
+        color: #4caf50;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 4px 8px;
+        border-radius: 4px;
+        pointer-events: none; /* never steals clicks from the scene */
+        user-select: none;
+      }
+    </style>
   </head>
   <body>
     <!-- <a-scene> is a NEUTRAL host: it sets no background, fog, or lighting
@@ -122,6 +141,10 @@
         </div>
       </div>
     </div>
+
+    <!-- Dev-only HUD: shows the active environment preset while cycling with
+         `n`. Starts hidden; environment-manager reveals it on ?debug / `h`. -->
+    <div id="env-hud" hidden>env: <span id="env-hud-name">—</span></div>
 
     <!-- Focus-view controllers, at END of <body> so the DOM/scene exist.
          focus-click in components.js routes to whichever is appropriate. -->

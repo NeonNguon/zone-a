@@ -266,20 +266,43 @@ AFRAME.registerComponent("environment-manager", {
     this.order = ["void", "dataspace", "photo", "splat"];
     this.active = null; // the preset currently built into #environment
 
+    const params = new URLSearchParams(window.location.search);
+
+    // Dev-only HUD (2D overlay, defined in index.html). Default OFF: shown only
+    // when ?debug is present, or toggled at runtime with `h`. Never appears in
+    // the normal experience.
+    this.hud = document.getElementById("env-hud");
+    this.hudName = document.getElementById("env-hud-name");
+    this.hudVisible = false;
+    if (params.has("debug")) this.setHudVisible(true);
+
     // ?env= makes each look a shareable link. Adopt a valid value, else the
     // declared default. We build DIRECTLY here (not via setAttribute) so we
     // never re-enter the component lifecycle before init() finishes.
-    const fromUrl = new URLSearchParams(window.location.search).get("env");
+    const fromUrl = params.get("env");
     const initial =
       fromUrl && ENV_PRESETS[fromUrl] ? fromUrl : this.data.preset;
 
-    // `n` cycles to the next preset for quick side-by-side review.
+    // `n` cycles to the next preset; `h` toggles the dev HUD.
     this.onKey = (e) => {
       if (e.key === "n" || e.key === "N") this.cycle();
+      else if (e.key === "h" || e.key === "H") this.toggleHud();
     };
     window.addEventListener("keydown", this.onKey);
 
-    this.build(initial); // single, first build
+    this.build(initial); // single, first build (also primes the HUD text)
+  },
+
+  // ---- dev HUD helpers ----
+  setHudVisible: function (on) {
+    this.hudVisible = on;
+    if (this.hud) this.hud.hidden = !on;
+  },
+  toggleHud: function () {
+    this.setHudVisible(!this.hudVisible);
+  },
+  updateHud: function (name) {
+    if (this.hudName) this.hudName.textContent = name;
   },
 
   // Fires when `preset` is changed via setAttribute (e.g. cycle()). The
@@ -296,6 +319,7 @@ AFRAME.registerComponent("environment-manager", {
     this.teardown(); // remove the old look entirely, then build fresh
     builder(this.el, this.scene);
     this.active = name;
+    this.updateHud(name); // keep the dev HUD in sync (even while hidden)
 
     // Reflect the active preset in the URL so the address bar stays shareable.
     try {
