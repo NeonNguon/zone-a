@@ -14,13 +14,18 @@
     <script src="js/captions.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/components.js"></script>
+    <!-- Swappable environment layer: presets + environment-manager. Loaded
+         before <a-scene> parses so the component is registered in time. -->
+    <script src="js/environment.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
   </head>
   <body>
-    <!-- <a-scene> is the root of the scene graph. -->
-    <a-scene>
+    <!-- <a-scene> is a NEUTRAL host: it sets no background, fog, or lighting
+         itself. defaultLightsEnabled:false stops A-Frame injecting its default
+         light rig, so the environment presets fully own lighting. -->
+    <a-scene light="defaultLightsEnabled: false">
       <!-- Preload the nine images; entities reference them by id (#atpihl-N)
            so each file is fetched and decoded once, then shared. -->
       <a-assets>
@@ -38,17 +43,12 @@
       <!-- ============================================================
            ENVIRONMENT LAYER — everything atmospheric (background/sky,
            fog, lights, ground, grid, particles), swappable as one unit.
-           The ring NEVER sets any of these. (Step 2: still STATIC — the
-           original white look. Step 3 hands this container to the
-           environment-manager component, which builds presets into it.)
+           The ring NEVER sets any of these. environment-manager builds the
+           active preset's children in here and tears them down on switch.
+           Starts on "void" (the migrated white look); ?env=<preset>
+           overrides on load; the `n` key cycles. See js/environment.js.
            ============================================================ -->
-      <a-entity id="environment">
-        <!-- Ground: a flat plane rotated -90° on X so it lies horizontal. -->
-        <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#eee"></a-plane>
-
-        <!-- Sky: a large inward-facing sphere surrounding the scene. -->
-        <a-sky color="#eee"></a-sky>
-      </a-entity>
+      <a-entity id="environment" environment-manager="preset: void"></a-entity>
 
       <!-- ============================================================
            ZONE A — the exhibition itself: ONLY the ring, its nine images
