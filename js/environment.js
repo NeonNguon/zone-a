@@ -55,8 +55,8 @@ const SKYLINE_COUNT = 6; // number of silhouette planes evenly around the ring;
 //                          the 4 images repeat, white gaps between are fine
 
 // `cityroom` preset (flat panels on a white box room) -------------------
-const CITYROOM_SIZE = 16; // metres, box width & depth (must exceed the ring; tune)
-const CITYROOM_HEIGHT = 10; // metres, box height (>= panel height below)
+const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the ring; tune)
+const CITYROOM_HEIGHT = 20; // metres, box height (>= panel height below)
 // Which saigon image (1-4) maps to each of the 4 walls, in order: -Z, +X, +Z, -X.
 const WALL_IMAGES = [1, 2, 3, 4];
 
