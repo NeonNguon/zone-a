@@ -73,8 +73,12 @@
       <!-- ============================================================
            ZONE A — the exhibition itself: ONLY the ring, its nine images
            and their audio. Sets no background / fog / lights / ground.
+           zone-a-root offsets the WHOLE assembly (ring + cues + audio/focus
+           triggers) as a unit; default 4 m back (-z) to make room for Zones
+           B & C. Tune via the zone-a-root `offset` property — never the ring
+           math or the nine coordinates.
            ============================================================ -->
-      <a-entity id="zone-a">
+      <a-entity id="zone-a" zone-a-root="offset: 0 0 -4">
         <!-- Ring container: ring-layout fills it with nine image entities. -->
         <a-entity ring-layout position="0 0 0"></a-entity>
 
