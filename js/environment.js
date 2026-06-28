@@ -28,10 +28,10 @@ const GROUND_SIZE = 30; // metres square; matches the original plane
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps
 const PARTICLE_SPREAD = 30; // half-extent of the cube the points fill (m)
 const PARTICLE_DRIFT = 0.02; // radians/sec — slow yaw of the whole field
-// Equirectangular sky image for the `photo` preset. Currently a studio HDRI
-// (converted HDR->SDR jpg) used purely as a FUNCTIONAL test of the wraparound;
-// swap for a real Saigon equirect later.
-const PHOTO_SKY_SRC = "assets/ferndale_studio_04_4k.jpg";
+// Equirectangular sky image for the `photo` preset (converted HDR->SDR jpg).
+const PHOTO_SKY_SRC = "assets/qwantani_moonrise_puresky_4k.jpg";
+// Equirectangular image for the `room` preset's sphere (kept as-is).
+const ROOM_SKY_SRC = "assets/ferndale_studio_04_4k.jpg";
 // Radius (metres) of the `room` preset's inverted photo sphere. The ring sits
 // ~3.7 m from centre, so it stays comfortably inside. Tune to resize the room.
 const ROOM_RADIUS = 8;
@@ -139,7 +139,7 @@ AFRAME.registerComponent("particle-field", {
 // ----------------------------------------------------------------
 AFRAME.registerComponent("photo-room", {
   schema: {
-    src: { type: "string", default: PHOTO_SKY_SRC },
+    src: { type: "string", default: ROOM_SKY_SRC },
     radius: { type: "number", default: ROOM_RADIUS },
   },
   init: function () {
