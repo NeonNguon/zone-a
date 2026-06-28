@@ -401,7 +401,19 @@ const ENV_PRESETS = {
     setBackground(scene, "#eeeeee"); // white
     setFog(scene, null);
     buildAmbient(env, "#bbbbbb", 1); // hover frame needs light
-    buildGround(env, "#ffffff"); // pure white floor (ground dependency)
+    // Floor: pure white and UNLIT (shader: flat), matching the flat white box
+    // walls. buildGround() uses a LIT material that ambient #bbb dims to grey —
+    // that was the grey floor. Sized to the room so it's white wall-to-wall.
+    // Still a ground plane (dependency rule).
+    env.appendChild(
+      envEl("a-plane", {
+        position: "0 0 0",
+        rotation: "-90 0 0",
+        width: CITYROOM_SIZE,
+        height: CITYROOM_SIZE,
+        material: "color: #ffffff; shader: flat; side: double",
+      })
+    );
 
     const half = CITYROOM_SIZE / 2;
     // White box room — inner faces (side: back), so it encloses you in white.
