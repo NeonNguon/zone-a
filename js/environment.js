@@ -56,6 +56,11 @@ const SKYLINE_COUNT = 6; // number of silhouette planes evenly around the ring;
 const SKYLINE_LIFT = 0.05; // metres the plane bases sit ABOVE the floor, so they
 //                            aren't coplanar with the ground plane (anti z-fight);
 //                            small enough that buildings still read as floor-rising
+const SKYLINE_CROP = 0.25; // fraction of the image height (from the BOTTOM) to
+//                            crop off — the solid black foreground band. Done via
+//                            texture offset/repeat; the plane is shortened by the
+//                            same fraction so buildings keep their apparent height
+//                            (no vertical squash). Tune 0..~0.4.
 
 // `cityroom` preset (flat panels on a white box room) -------------------
 const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the ring; tune)
@@ -249,16 +254,28 @@ function setFog(scene, opts) {
   else scene.removeAttribute("fog"); // explicit "no fog"
 }
 
-// A flat silhouette panel: a plane textured with a black-on-transparent PNG.
-// transparent + alphaTest keys out the empty sky so there are no rectangular
-// edges; side: double so it reads correctly however you face it.
-function skylinePanel(src, w, h) {
+// A flat silhouette panel: a plane textured with a (keyed) black-on-transparent
+// PNG. side: double so it reads correctly however you face it. opts let a caller
+// tune the cutout and crop without affecting other callers:
+//   alphaTest  (default 0.5) — 0 = smooth alpha BLEND (no cutout sparkle)
+//   depthWrite (default true) — false avoids transparent depth artefacts
+//   repeat/offset (default "1 1" / "0 0") — texture crop window
+function skylinePanel(src, w, h, opts) {
+  opts = opts || {};
+  const alphaTest = opts.alphaTest == null ? 0.5 : opts.alphaTest;
+  const depthWrite = opts.depthWrite == null ? true : opts.depthWrite;
+  const repeat = opts.repeat || "1 1";
+  const offset = opts.offset || "0 0";
   return envEl("a-plane", {
     width: w,
     height: h,
     material:
       "src: " + src +
-      "; shader: flat; transparent: true; alphaTest: 0.5; side: double",
+      "; shader: flat; transparent: true; side: double" +
+      "; alphaTest: " + alphaTest +
+      "; depthWrite: " + depthWrite +
+      "; repeat: " + repeat +
+      "; offset: " + offset,
   });
 }
 
@@ -350,19 +367,28 @@ const ENV_PRESETS = {
     buildAmbient(env, "#bbbbbb", 1); // hover frame needs light
     buildGround(env, "#eeeeee"); // white floor (ground dependency)
 
-    const w = SKYLINE_HEIGHT * SKYLINE_ASPECT; // keep image aspect ratio
+    const keep = 1 - SKYLINE_CROP; // fraction of image height kept (top part)
+    const w = SKYLINE_HEIGHT * SKYLINE_ASPECT; // width unchanged (full image width)
+    const h = SKYLINE_HEIGHT * keep; // plane shortened by the crop -> no squash
+    // Texture window: show the TOP `keep` of the image (drop the bottom band).
+    const crop = {
+      repeat: "1 " + keep,
+      offset: "0 " + SKYLINE_CROP,
+      // Smooth alpha blend (no alphaTest cutout) — removes the edge sparkle that
+      // alpha-testing a minified, soft-keyed texture produces. depthWrite off so
+      // the transparent planes don't fight depth.
+      alphaTest: 0,
+      depthWrite: false,
+    };
     for (let i = 0; i < SKYLINE_COUNT; i++) {
       const thetaDeg = (360 / SKYLINE_COUNT) * i;
       const t = thetaDeg * (Math.PI / 180);
       const x = SKYLINE_RADIUS * Math.sin(t);
       const z = -SKYLINE_RADIUS * Math.cos(t);
-      const panel = skylinePanel(SAIGON_SRCS[i % 4], w, SKYLINE_HEIGHT);
+      const panel = skylinePanel(SAIGON_SRCS[i % 4], w, h, crop);
       // Base just above the floor line (lifted by SKYLINE_LIFT so it isn't
       // coplanar with the ground); centre at half height + lift; face centre.
-      panel.setAttribute(
-        "position",
-        `${x} ${SKYLINE_HEIGHT / 2 + SKYLINE_LIFT} ${z}`
-      );
+      panel.setAttribute("position", `${x} ${h / 2 + SKYLINE_LIFT} ${z}`);
       panel.setAttribute("rotation", `0 ${-thetaDeg} 0`);
       env.appendChild(panel);
     }
