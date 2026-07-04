@@ -14,6 +14,9 @@
     <script src="js/captions.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/components.js"></script>
+    <!-- Zone B (10×10 image wall). AFTER components.js so it can read Zone A's
+         ring radius to auto-size the wall. -->
+    <script src="js/zone-b.js"></script>
     <!-- Swappable environment layer: presets + environment-manager. Loaded
          before <a-scene> parses so the component is registered in time. -->
     <script src="js/environment.js"></script>
@@ -87,6 +90,22 @@
              #environment); it retunes its material to each preset's profile.
              Tunables: radius / opacity / softness / yoffset / color / mode. -->
         <a-entity ring-contact-cue position="0 0 0"></a-entity>
+      </a-entity>
+
+      <!-- ============================================================
+           ZONE B — a 10×10 wall of 100 images, to the RIGHT of spawn.
+           zone-b-root offsets the WHOLE wall as a unit (same pattern/intent as
+           zone-a-root); default ~6 3 0 places it to the right (+x) and raised.
+           Tune via the zone-b-root `offset` property — not the grid math.
+
+           The inner container's `0 -90 0` rotation turns the wall (built FLAT
+           by image-wall, facing +z) to face -x, back toward spawn. So facing
+           -z you see Zone A; turn right 90° (face +x) and the wall is dead
+           ahead, its width spanning the view. All wall tunables (width / gap /
+           rows / cols / aspect) live on the image-wall component.
+           ============================================================ -->
+      <a-entity id="zone-b" zone-b-root="offset: 6 3 0">
+        <a-entity rotation="0 -90 0" image-wall></a-entity>
       </a-entity>
 
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
