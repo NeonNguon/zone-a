@@ -246,6 +246,86 @@ AFRAME.registerComponent("snap-turn", {
 });
 
 // ================================================================
+// ContactCue — SHARED contact-cue kit. The zone-agnostic pieces of the floor
+// "contact cue" (the runtime radial-gradient TEXTURE, the shadow/glow MATERIAL,
+// and the PER-ENVIRONMENT RETUNING) live here as free functions so more than
+// one zone can reuse them. Zone A's ring cues (ring-contact-cue, below) and
+// Zone B's wall cues (wall-contact-cue, in zone-b.js) both call these; only the
+// PLACEMENT of the quads differs per zone. Extracted verbatim from Zone A's
+// original methods, so Zone A's appearance is unchanged.
+// ================================================================
+const ContactCue = {
+  // ONE soft radial-gradient texture; falloff encoded in ALPHA. White RGB (hue
+  // comes from material.color); alpha = soft power falloff, 1 at the centre ->
+  // 0 at the edge (so the square's corners are invisible: no rectangular edge).
+  // Higher softness = gentler, fainter spread.
+  makeTexture: function (softness) {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    const c = size / 2;
+    const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
+    const exp = 1 + softness * 3;
+    const STOPS = 16;
+    for (let i = 0; i <= STOPS; i++) {
+      const t = i / STOPS;
+      const a = Math.pow(1 - t, exp);
+      grad.addColorStop(t, `rgba(255,255,255,${a})`);
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  },
+
+  // ONE shared material per cue set (retuned per environment). depthWrite:false
+  // + polygonOffset keep it from z-fighting the floor.
+  makeMaterial: function (data, texture) {
+    return new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: data.opacity,
+      color: new THREE.Color(data.color),
+      side: THREE.DoubleSide,
+      depthWrite: false, // don't write depth -> don't fight the floor
+      polygonOffset: true, // bias toward camera, belt-and-suspenders vs z-fight
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+      blending: THREE.NormalBlending,
+    });
+  },
+
+  // Retune a cue material to the active environment profile (or fall back to
+  // the component's own defaults): shadow = normal blend, glow = additive.
+  tuneMaterial: function (material, data, profile) {
+    if (!material) return;
+    const p = profile || {}; // {} -> falls back to component defaults
+    const mode = p.mode || data.mode; // "shadow" | "glow"
+    const color = p.color || data.color;
+    const opacity = p.opacity != null ? p.opacity : data.opacity;
+    const blending =
+      mode === "glow" ? THREE.AdditiveBlending : THREE.NormalBlending;
+    if (material.blending !== blending) {
+      material.blending = blending;
+      material.needsUpdate = true; // blending change requires this
+    }
+    material.color.set(color);
+    material.opacity = opacity;
+  },
+
+  // Read environment-manager's currently-active ground profile (it inits before
+  // the cues). Presets without a profile -> null -> the cue's shadow default.
+  currentProfile: function () {
+    const envEl = document.getElementById("environment");
+    const mgr =
+      envEl && envEl.components && envEl.components["environment-manager"];
+    return mgr ? mgr.activeProfile || null : null;
+  },
+};
+
+// ================================================================
 // ring-contact-cue — a per-image floor contact cue for the Zone A ring.
 //
 // Nine soft radial "pools" on the floor, one directly under each ring image
@@ -326,26 +406,9 @@ AFRAME.registerComponent("ring-contact-cue", {
   // --- ONE soft radial-gradient texture; falloff encoded in ALPHA ---------
   buildTexture: function () {
     if (this.texture) this.texture.dispose();
-    const size = 256;
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    const c = size / 2;
-    const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
-    // White RGB (hue comes from material.color); alpha = soft power falloff,
-    // 1 at the centre -> 0 at the edge (so the square's corners are invisible:
-    // no rectangular edge). Higher softness = gentler, fainter spread.
-    const exp = 1 + this.data.softness * 3;
-    const STOPS = 16;
-    for (let i = 0; i <= STOPS; i++) {
-      const t = i / STOPS;
-      const a = Math.pow(1 - t, exp);
-      grad.addColorStop(t, `rgba(255,255,255,${a})`);
-    }
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, size, size);
-    this.texture = new THREE.CanvasTexture(canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
+    // Shared generator (ContactCue.makeTexture) so Zone B's wall cues get the
+    // identical radial-gradient texture; softness is the only input.
+    this.texture = ContactCue.makeTexture(this.data.softness);
     if (this.material) {
       this.material.map = this.texture;
       this.material.needsUpdate = true;
@@ -354,18 +417,9 @@ AFRAME.registerComponent("ring-contact-cue", {
 
   // --- ONE shared material (retuned per environment) ----------------------
   buildMaterial: function () {
-    this.material = new THREE.MeshBasicMaterial({
-      map: this.texture,
-      transparent: true,
-      opacity: this.data.opacity,
-      color: new THREE.Color(this.data.color),
-      side: THREE.DoubleSide,
-      depthWrite: false, // don't write depth -> don't fight the floor
-      polygonOffset: true, // bias toward camera, belt-and-suspenders vs z-fight
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-      blending: THREE.NormalBlending,
-    });
+    // Shared material builder (ContactCue.makeMaterial) — same blend + z-fight
+    // guards Zone B reuses.
+    this.material = ContactCue.makeMaterial(this.data, this.texture);
   },
 
   buildGeometry: function () {
@@ -401,28 +455,14 @@ AFRAME.registerComponent("ring-contact-cue", {
   },
 
   tuneMaterial: function () {
-    if (!this.material) return;
-    const d = this.data;
-    const p = this.curProfile || {}; // {} -> falls back to component defaults
-    const mode = p.mode || d.mode; // "shadow" | "glow"
-    const color = p.color || d.color;
-    const opacity = p.opacity != null ? p.opacity : d.opacity;
-    const blending =
-      mode === "glow" ? THREE.AdditiveBlending : THREE.NormalBlending;
-    if (this.material.blending !== blending) {
-      this.material.blending = blending;
-      this.material.needsUpdate = true; // blending change requires this
-    }
-    this.material.color.set(color);
-    this.material.opacity = opacity;
+    // Shared retuner (ContactCue.tuneMaterial): shadow/glow + color + opacity
+    // from the active env profile, falling back to this component's defaults.
+    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
   },
 
-  // Read environment-manager's currently-active profile (it inits before us).
+  // Read environment-manager's currently-active profile (shared helper).
   currentEnvProfile: function () {
-    const envEl = document.getElementById("environment");
-    const mgr =
-      envEl && envEl.components && envEl.components["environment-manager"];
-    return mgr ? mgr.activeProfile || null : null;
+    return ContactCue.currentProfile();
   },
 
   remove: function () {
