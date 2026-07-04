@@ -45,16 +45,35 @@ AFRAME.registerComponent("zone-c-root", {
 
   init: function () {
     this.started = false; // becomes true on the first user-gesture play
+
+    // Control-strip visibility state. The strip starts hidden and fades in on
+    // any interaction with the screen or itself; after `controlsFadeDelay` ms
+    // idle it fades back out and stops catching raycasts.
+    this.stripShown = false;
+    this.fade = 0; // 0..1 current strip opacity factor
+    this.fadeTarget = 0;
+    this.now = 0; // scene time (ms), refreshed every tick for event handlers
+    this.lastActive = 0;
+    this.stripHover = 0; // pointers currently over strip elements (no fade)
+    this.scrubbing = false;
+    this.scrubCursor = null; // the cursor/controller entity dragging the seek
+    this.rayLast = {}; // per-raycaster last hit point on the screen (motion)
+
     this.buildVideo();
     this.build();
+    this.buildControls();
 
     // First click on the screen is THE user gesture that unlocks playback
     // (Quest/mobile refuse programmatic play before one). Desktop mouse and
-    // VR laser trigger both arrive here as the same `click`.
+    // VR laser trigger both arrive here as the same `click`. Later clicks
+    // just count as activity, reviving the control strip.
     this.onScreenClick = () => {
+      this.activity();
       if (!this.started) this.startPlayback();
     };
     this.screenEl.addEventListener("click", this.onScreenClick);
+    this.onScreenEnter = () => this.activity();
+    this.screenEl.addEventListener("mouseenter", this.onScreenEnter);
   },
 
   update: function () {
@@ -121,6 +140,354 @@ AFRAME.registerComponent("zone-c-root", {
     this.screenEl.setAttribute("position", `0 ${centerY} 0`);
 
     this.glyphEl.setAttribute("position", `0 ${centerY} 0.05`);
+
+    if (this.stripEl) this.layoutControls();
+  },
+
+  // ================================================================
+  // CONTROL STRIP — a minimal floating row below the screen:
+  //   [play/pause] [restart] [------- seek track -------] [fs slot]
+  // Flat quads only, no fonts (icons are triangles/bars, so nothing depends
+  // on a glyph existing in a text font). Each button's dark backing plane IS
+  // its hit target, sized generously for Quest controller pointing.
+  // The rightmost slot is a RESERVED PLACEHOLDER for Pass 2's fullscreen
+  // button — inert and near-invisible, it just keeps the layout stable.
+  // ================================================================
+  buildControls: function () {
+    const strip = document.createElement("a-entity");
+    strip.setAttribute("visible", false); // hidden until first interaction
+    this.container.appendChild(strip);
+    this.stripEl = strip;
+
+    const flat = (color, opacity) =>
+      `shader: flat; color: ${color}; transparent: true; opacity: ${opacity}; fog: false`;
+
+    const plane = (parent, w, h, mat) => {
+      const p = document.createElement("a-plane");
+      p.setAttribute("width", w);
+      p.setAttribute("height", h);
+      p.setAttribute("material", mat);
+      parent.appendChild(p);
+      return p;
+    };
+    const tri = (parent, a, b, c, mat) => {
+      const t = document.createElement("a-triangle");
+      t.setAttribute("vertex-a", a);
+      t.setAttribute("vertex-b", b);
+      t.setAttribute("vertex-c", c);
+      t.setAttribute("material", mat);
+      parent.appendChild(t);
+      return t;
+    };
+
+    // Backing panel (not a hit target — the buttons/track are).
+    this.panelEl = plane(strip, 1, 0.7, flat("#101010", 0.8));
+
+    // --- play/pause button: one backing plane, two swapped icons ----------
+    this.playBtn = plane(strip, 0.6, 0.6, flat("#1d1d1d", 0.9));
+    this.playIcon = tri(
+      this.playBtn,
+      "-0.13 0.18 0",
+      "-0.13 -0.18 0",
+      "0.19 0 0",
+      flat("#e8e8e8", 1)
+    );
+    this.playIcon.setAttribute("position", "0 0 0.01");
+    this.pauseIcon = document.createElement("a-entity");
+    this.pauseIcon.setAttribute("position", "0 0 0.01");
+    this.playBtn.appendChild(this.pauseIcon);
+    plane(this.pauseIcon, 0.1, 0.36, flat("#e8e8e8", 1)).setAttribute(
+      "position",
+      "-0.09 0 0"
+    );
+    plane(this.pauseIcon, 0.1, 0.36, flat("#e8e8e8", 1)).setAttribute(
+      "position",
+      "0.09 0 0"
+    );
+    this.pauseIcon.setAttribute("visible", false);
+
+    // --- restart button: skip-to-start icon (bar + left triangle) ---------
+    this.restartBtn = plane(strip, 0.6, 0.6, flat("#1d1d1d", 0.9));
+    plane(this.restartBtn, 0.06, 0.32, flat("#e8e8e8", 1)).setAttribute(
+      "position",
+      "-0.13 0 0.01"
+    );
+    tri(
+      this.restartBtn,
+      "0.17 0.16 0",
+      "0.17 -0.16 0",
+      "-0.05 0 0",
+      flat("#e8e8e8", 1)
+    ).setAttribute("position", "0 0 0.01");
+
+    // --- seek bar: generous invisible hit plane + thin visual track -------
+    // The hit plane spans EXACTLY the track width so intersection uv.x maps
+    // 1:1 to playback fraction; its extra height forgives shaky VR pointing.
+    this.trackHit = plane(strip, 1, 0.5, flat("#ffffff", 0));
+    this.trackEl = plane(this.trackHit, 1, 0.06, flat("#5a5a5a", 0.9));
+    this.trackEl.setAttribute("position", "0 0 0.01");
+    this.fillEl = plane(this.trackHit, 1, 0.06, flat("#ffffff", 1));
+    this.knobEl = plane(this.trackHit, 0.05, 0.2, flat("#ffffff", 1));
+
+    // --- Pass 2 placeholder: fullscreen button will live here -------------
+    this.fsSlot = plane(strip, 0.6, 0.6, flat("#1d1d1d", 0.25));
+
+    // Hit targets that gain/lose the `clickable` class with strip visibility,
+    // so a faded-out strip stops catching raycasts entirely.
+    this.stripClickables = [this.playBtn, this.restartBtn, this.trackHit];
+
+    // Hover bookkeeping: while any pointer rests ON the strip it never fades.
+    this.onStripEnter = () => {
+      this.stripHover++;
+      this.activity();
+    };
+    this.onStripLeave = () => {
+      this.stripHover = Math.max(0, this.stripHover - 1);
+    };
+    this.stripClickables.forEach((el) => {
+      el.addEventListener("mouseenter", this.onStripEnter);
+      el.addEventListener("mouseleave", this.onStripLeave);
+    });
+
+    this.onPlayClick = () => {
+      this.activity();
+      const v = this.videoEl;
+      if (!this.started || v.paused || v.ended) this.startPlayback();
+      else v.pause();
+    };
+    this.playBtn.addEventListener("click", this.onPlayClick);
+
+    this.onRestartClick = () => {
+      this.activity();
+      this.startPlayback(); // also the unlock gesture if nothing played yet
+      this.seekTo(0);
+    };
+    this.restartBtn.addEventListener("click", this.onRestartClick);
+
+    // Seek: press starts a scrub (and seeks immediately); tick() follows the
+    // pointer while held; release anywhere ends it. mousedown/mouseup come
+    // from the desktop cursor, triggerup from the VR controller.
+    this.onTrackDown = (e) => this.beginScrub(e);
+    this.trackHit.addEventListener("mousedown", this.onTrackDown);
+    this._endScrub = () => this.endScrub();
+
+    this.layoutControls();
+  },
+
+  layoutControls: function () {
+    const d = this.data;
+    const panelW = Math.max(4.5, d.screenWidth * 0.6);
+    const panelH = 0.7;
+
+    // Pinned relative to the WORLD floor like the screen: strip top sits a
+    // little below the screen's bottom edge.
+    const centerWorldY = d.screenHeightAboveFloor - 0.15 - panelH / 2;
+    this.stripEl.setAttribute("position", `0 ${centerWorldY - d.offset.y} 0.02`);
+
+    this.panelEl.setAttribute("width", panelW);
+    this.panelEl.setAttribute("height", panelH);
+
+    const playX = -panelW / 2 + 0.55;
+    const restartX = playX + 0.85;
+    const fsX = panelW / 2 - 0.55;
+    this.playBtn.setAttribute("position", `${playX} 0 0.01`);
+    this.restartBtn.setAttribute("position", `${restartX} 0 0.01`);
+    this.fsSlot.setAttribute("position", `${fsX} 0 0.01`);
+
+    const trackLeft = restartX + 0.75;
+    const trackRight = fsX - 0.75;
+    this.trackW = trackRight - trackLeft;
+    this.trackHit.setAttribute("width", this.trackW);
+    this.trackHit.setAttribute(
+      "position",
+      `${(trackLeft + trackRight) / 2} 0 0.01`
+    );
+    this.trackEl.setAttribute("width", this.trackW);
+    this.fillEl.setAttribute("width", this.trackW);
+    this.updateProgress();
+  },
+
+  // Progress fill + knob from the video's current position. The fill plane is
+  // track-wide and LEFT-ANCHORED via scale + recentred position (updating a
+  // width attribute would rebuild geometry every frame).
+  updateProgress: function () {
+    const v = this.videoEl;
+    const frac =
+      v && v.duration && isFinite(v.duration) ? v.currentTime / v.duration : 0;
+    const w = this.trackW;
+    this.fillEl.object3D.scale.x = Math.max(frac, 0.0001);
+    this.fillEl.object3D.position.set(-w / 2 + (frac * w) / 2, 0, 0.02);
+    this.knobEl.object3D.position.set(-w / 2 + frac * w, 0, 0.03);
+  },
+
+  // --- activity / visibility ------------------------------------------------
+  // Any interaction stamps the idle clock and revives the strip. `this.now`
+  // is scene time captured each tick — events reuse the latest tick's stamp.
+  activity: function () {
+    this.lastActive = this.now;
+    this.showControls();
+  },
+
+  showControls: function () {
+    this.fadeTarget = 1;
+    if (this.stripShown) return;
+    this.stripShown = true;
+    this.stripEl.setAttribute("visible", true);
+    this.stripClickables.forEach((el) => el.classList.add("clickable"));
+    this.refreshRaycasters();
+  },
+
+  // Fading out = animate opacity down in tick(); ONLY when it reaches zero is
+  // the strip actually hidden + declassed so raycasts pass through it.
+  hideControls: function () {
+    this.fadeTarget = 0;
+  },
+
+  deactivateStrip: function () {
+    if (!this.stripShown) return;
+    this.stripShown = false;
+    this.stripEl.setAttribute("visible", false);
+    this.stripClickables.forEach((el) => el.classList.remove("clickable"));
+    this.refreshRaycasters();
+  },
+
+  applyFade: function () {
+    const f = this.fade;
+    this.stripEl.object3D.traverse((node) => {
+      if (!node.isMesh || !node.material) return;
+      // Capture each material's authored opacity once, first time we see it.
+      if (node.userData.zcBaseOpacity === undefined) {
+        node.userData.zcBaseOpacity = node.material.opacity;
+      }
+      node.material.opacity = node.userData.zcBaseOpacity * f;
+    });
+  },
+
+  // --- seek scrub -------------------------------------------------------
+  beginScrub: function (e) {
+    this.activity();
+    this.scrubbing = true;
+    this.scrubCursor = (e.detail && e.detail.cursorEl) || null;
+    const hit = e.detail && e.detail.intersection;
+    if (hit && hit.uv) this.seekFrac(hit.uv.x);
+    window.addEventListener("mouseup", this._endScrub);
+    if (this.scrubCursor) {
+      this.scrubCursor.addEventListener("triggerup", this._endScrub);
+    }
+  },
+
+  endScrub: function () {
+    if (!this.scrubbing) return;
+    this.scrubbing = false;
+    this.activity();
+    window.removeEventListener("mouseup", this._endScrub);
+    if (this.scrubCursor) {
+      this.scrubCursor.removeEventListener("triggerup", this._endScrub);
+      this.scrubCursor = null;
+    }
+  },
+
+  seekFrac: function (f) {
+    const v = this.videoEl;
+    // Guard: no seeking before metadata (duration unknown until readyState 1).
+    if (!v || v.readyState < 1 || !isFinite(v.duration)) return;
+    const t = Math.min(Math.max(f, 0), 1) * v.duration;
+    // Small dead-band so a held-still scrub doesn't spam currentTime writes.
+    if (Math.abs(t - v.currentTime) > 0.1) v.currentTime = t;
+  },
+
+  seekTo: function (t) {
+    const v = this.videoEl;
+    if (!v || v.readyState < 1) return;
+    v.currentTime = t;
+  },
+
+  // --- per-frame: fade animation, idle timeout, scrub follow, progress ----
+  tick: function (time, dt) {
+    this.now = time;
+
+    // Pointer MOTION on the big screen counts as activity (mouseenter only
+    // fires once, so a moving pointer inside the screen would otherwise read
+    // as idle). Compares each raycaster's hit point frame to frame.
+    this.pollScreenMotion();
+
+    // Follow the held pointer along the seek track.
+    if (this.scrubbing) {
+      const rcEl = this.scrubCursor || this.mouseCursorEl();
+      const rc = rcEl && rcEl.components && rcEl.components.raycaster;
+      const hit = rc && rc.getIntersection(this.trackHit);
+      if (hit && hit.uv) {
+        this.seekFrac(hit.uv.x);
+        this.activity();
+      }
+    }
+
+    if (this.stripShown) {
+      this.updateProgress();
+
+      // Idle timeout — never while scrubbing or while a pointer rests on it.
+      if (
+        this.fadeTarget === 1 &&
+        !this.scrubbing &&
+        this.stripHover <= 0 &&
+        time - this.lastActive > this.data.controlsFadeDelay
+      ) {
+        this.hideControls();
+      }
+
+      // Fade animation (~250 ms each way).
+      const step = dt / 250;
+      if (this.fadeTarget === 1 && this.fade < 1) {
+        this.fade = Math.min(1, this.fade + step);
+        this.applyFade();
+      } else if (this.fadeTarget === 0 && this.fade > 0) {
+        this.fade = Math.max(0, this.fade - step);
+        this.applyFade();
+        if (this.fade === 0) this.deactivateStrip();
+      }
+    }
+  },
+
+  pollScreenMotion: function () {
+    const els = [
+      this.mouseCursorEl(),
+      document.getElementById("rightHand"),
+      document.getElementById("leftHand"),
+    ];
+    for (let i = 0; i < els.length; i++) {
+      const rc = els[i] && els[i].components && els[i].components.raycaster;
+      if (!rc) continue;
+      const hit = rc.getIntersection(this.screenEl);
+      if (hit && hit.point) {
+        const last = this.rayLast[i];
+        if (last && last.distanceTo(hit.point) > 0.02) this.activity();
+        this.rayLast[i] = (last || new THREE.Vector3()).copy(hit.point);
+      } else {
+        this.rayLast[i] = null;
+      }
+    }
+  },
+
+  mouseCursorEl: function () {
+    if (!this._mouseCursorEl) {
+      this._mouseCursorEl = this.el.sceneEl.querySelector("[cursor]");
+    }
+    return this._mouseCursorEl;
+  },
+
+  // Nudge every raycaster to rebuild its `.clickable` target list after the
+  // strip gains/loses the class (mirrors Zone B's refresh helper, plus the
+  // desktop mouse cursor).
+  refreshRaycasters: function () {
+    const els = [
+      this.mouseCursorEl(),
+      document.getElementById("rightHand"),
+      document.getElementById("leftHand"),
+    ];
+    els.forEach((el) => {
+      const rc = el && el.components && el.components.raycaster;
+      if (rc) rc.refreshObjects();
+    });
   },
 
   // --- the <video> element: created up front, PLAYED only on user gesture ---
@@ -136,6 +503,25 @@ AFRAME.registerComponent("zone-c-root", {
     v.src = VIDEO_URL;
     this.videoEl = v;
     this.videoTexture = null;
+
+    // The video element is the single source of truth for play state — the
+    // icons follow its events rather than our click handlers, so external
+    // pauses (tab hidden, headset removed) stay in sync too.
+    this.onVideoState = () => this.updatePlayIcon();
+    v.addEventListener("play", this.onVideoState);
+    v.addEventListener("pause", this.onVideoState);
+    this.onVideoEnded = () => {
+      this.updatePlayIcon();
+      this.activity(); // surface the strip so replay is one click away
+    };
+    v.addEventListener("ended", this.onVideoEnded);
+  },
+
+  updatePlayIcon: function () {
+    const v = this.videoEl;
+    const showPlay = !this.started || v.paused || v.ended;
+    this.playIcon.setAttribute("visible", showPlay);
+    this.pauseIcon.setAttribute("visible", !showPlay);
   },
 
   // First-gesture entry point: build the video texture, swap it onto the
@@ -178,9 +564,21 @@ AFRAME.registerComponent("zone-c-root", {
   },
 
   remove: function () {
+    this.endScrub();
     this.screenEl.removeEventListener("click", this.onScreenClick);
+    this.screenEl.removeEventListener("mouseenter", this.onScreenEnter);
+    this.playBtn.removeEventListener("click", this.onPlayClick);
+    this.restartBtn.removeEventListener("click", this.onRestartClick);
+    this.trackHit.removeEventListener("mousedown", this.onTrackDown);
+    this.stripClickables.forEach((el) => {
+      el.removeEventListener("mouseenter", this.onStripEnter);
+      el.removeEventListener("mouseleave", this.onStripLeave);
+    });
     const v = this.videoEl;
     if (v) {
+      v.removeEventListener("play", this.onVideoState);
+      v.removeEventListener("pause", this.onVideoState);
+      v.removeEventListener("ended", this.onVideoEnded);
       v.pause();
       v.removeAttribute("src");
       v.load();
