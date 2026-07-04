@@ -82,6 +82,7 @@ AFRAME.registerComponent("zone-c-root", {
     // init-order race with it; one offset moves screen + controls + audio.
     this.el.setAttribute("position", { x: o.x, y: o.y, z: o.z });
     if (this.container) this.layout();
+    this.applyAudioTunables();
   },
 
   // --- static scene graph: built once; layout() owns all sizes/positions ---
@@ -449,22 +450,21 @@ AFRAME.registerComponent("zone-c-root", {
   },
 
   pollScreenMotion: function () {
-    const els = [
-      this.mouseCursorEl(),
-      document.getElementById("rightHand"),
-      document.getElementById("leftHand"),
-    ];
-    for (let i = 0; i < els.length; i++) {
-      const rc = els[i] && els[i].components && els[i].components.raycaster;
-      if (!rc) continue;
-      const hit = rc.getIntersection(this.screenEl);
-      if (hit && hit.point) {
-        const last = this.rayLast[i];
-        if (last && last.distanceTo(hit.point) > 0.02) this.activity();
-        this.rayLast[i] = (last || new THREE.Vector3()).copy(hit.point);
-      } else {
-        this.rayLast[i] = null;
-      }
+    // DESKTOP MOUSE ONLY — deliberately not the VR controllers: a hand is
+    // never perfectly still, so laser jitter on a 12 m screen would count as
+    // perpetual activity and the strip would never fade while the laser rests
+    // on the screen (the natural pose while watching). In VR the strip is
+    // revived by mouseenter/click as the ray sweeps back onto screen or strip.
+    const el = this.mouseCursorEl();
+    const rc = el && el.components && el.components.raycaster;
+    if (!rc) return;
+    const hit = rc.getIntersection(this.screenEl);
+    if (hit && hit.point) {
+      const last = this.rayLast.mouse;
+      if (last && last.distanceTo(hit.point) > 0.02) this.activity();
+      this.rayLast.mouse = (last || new THREE.Vector3()).copy(hit.point);
+    } else {
+      this.rayLast.mouse = null;
     }
   },
 
@@ -533,6 +533,7 @@ AFRAME.registerComponent("zone-c-root", {
     if (!this.started) {
       this.started = true;
       this.applyVideoTexture();
+      this.initAudio(); // AudioContext creation ALSO needs the user gesture
       this.glyphEl.setAttribute("visible", false);
     }
     if (v.ended) v.currentTime = 0; // replay from the top after a run-through
@@ -563,8 +564,52 @@ AFRAME.registerComponent("zone-c-root", {
     mesh.material.needsUpdate = true;
   },
 
+  // --- positional audio ---------------------------------------------------
+  // The video's sound is pulled out of the element and localised AT THE
+  // SCREEN via THREE.PositionalAudio (setMediaElementSource reroutes the
+  // element's output entirely, so nothing plays "in your head"). Exponential
+  // distance model: full volume within audioRefDistance of the screen,
+  // falling off at audioRolloff beyond it — with the defaults (8 / 5) the
+  // film is clearly present ~10 m out and near-silent at spawn, 13 m away.
+  // Built here (not init) because creating an AudioContext outside a user
+  // gesture leaves it suspended on Quest/mobile.
+  initAudio: function () {
+    if (this.audio) return;
+    const cameraEl = document.getElementById("camera");
+    if (!cameraEl) {
+      console.warn("zone-c: no #camera entity; skipping positional audio");
+      return;
+    }
+    this.listener = new THREE.AudioListener();
+    cameraEl.object3D.add(this.listener);
+    if (this.listener.context.state === "suspended") {
+      this.listener.context.resume();
+    }
+
+    const audio = new THREE.PositionalAudio(this.listener);
+    audio.setMediaElementSource(this.videoEl);
+    audio.setDistanceModel("exponential");
+    audio.setRefDistance(this.data.audioRefDistance);
+    audio.setRolloffFactor(this.data.audioRolloff);
+    this.screenEl.object3D.add(audio); // localised at the screen itself
+    this.audio = audio;
+  },
+
+  applyAudioTunables: function () {
+    if (!this.audio) return;
+    this.audio.setRefDistance(this.data.audioRefDistance);
+    this.audio.setRolloffFactor(this.data.audioRolloff);
+  },
+
   remove: function () {
     this.endScrub();
+    if (this.audio) {
+      this.audio.disconnect();
+      this.screenEl.object3D.remove(this.audio);
+    }
+    if (this.listener && this.listener.parent) {
+      this.listener.parent.remove(this.listener);
+    }
     this.screenEl.removeEventListener("click", this.onScreenClick);
     this.screenEl.removeEventListener("mouseenter", this.onScreenEnter);
     this.playBtn.removeEventListener("click", this.onPlayClick);
@@ -586,3 +631,35 @@ AFRAME.registerComponent("zone-c-root", {
     if (this.videoTexture) this.videoTexture.dispose();
   },
 });
+
+// ================================================================
+// TESTING NOTES — Zone C Pass 1
+//
+// Desktop:
+//   • Load, turn to face -x (opposite the wall): dark 16:9 screen, subtle
+//     play triangle, bottom edge ~1 m off the floor.
+//   • Click the screen → video plays, sound clearly localised AT the screen.
+//   • Walk back to spawn (13 m) → audio falls to near-nothing; walk within
+//     ~10 m → clearly present again.
+//   • Hover/move the mouse over screen or strip → strip fades in below the
+//     screen; leave everything idle ~4 s → strip fades out and no longer
+//     blocks clicks behind it.
+//   • Play/pause toggles (icon follows real video state), restart jumps to
+//     0 and plays, click/drag on the seek track scrubs (dev server serves
+//     range requests, so seeking into unbuffered video works).
+//
+// Quest:
+//   • Same flow via controller ray + trigger: trigger on screen starts
+//     playback (the gesture also unlocks the AudioContext), strip buttons
+//     and seek-drag work with the laser, strip fades on idle.
+//   • WATCH THE FRAMERATE with the video playing: the source is 1080p at a
+//     high bitrate (~14 Mbit/s) and video textures re-upload every frame.
+//     If Quest fps suffers, report it — we may generate a 720p derivative
+//     for the in-scene screen (VIDEO_URL is the single swap point).
+//
+// Live tuning from the console, e.g.:
+//   document.getElementById('zone-c')
+//     .setAttribute('zone-c-root', 'audioRefDistance', 10)
+//   ...same for offset / screenWidth / screenHeightAboveFloor /
+//   controlsFadeDelay / audioRolloff.
+// ================================================================
