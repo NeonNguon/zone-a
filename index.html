@@ -17,6 +17,9 @@
     <!-- Zone B (10×10 image wall). AFTER components.js so it can read Zone A's
          ring radius to auto-size the wall. -->
     <script src="js/zone-b.js"></script>
+    <!-- Zone B floor map (100 locations behind the wall). AFTER zone-b.js so
+         it can read the wall's placement + width as its own defaults. -->
+    <script src="js/zone-b-map.js"></script>
     <!-- Zone C (outdoor cinema screen). -->
     <script src="js/zone-c.js"></script>
     <!-- Swappable environment layer: presets + environment-manager. Loaded
@@ -123,6 +126,43 @@
              Count + positions derive from the wall's live grid (#zone-b-wall).
              Tunables: radius / opacity / softness / yoffset. -->
         <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
+      </a-entity>
+
+      <!-- ============================================================
+           ZONE B FLOOR MAP — the "100 locations" dataset as a walkable street
+           map on the floor directly BEHIND the image wall (further from spawn
+           along +x), centred on the wall's lateral position. A pale Saigon
+           street map (baked offline by tools/bake-map-texture.js — no runtime
+           tile fetching) lies flat on the floor; 100 colored spheres float
+           above their real coordinates, grounded by small contact cues on the
+           map; clicking a sphere reveals its artwork (the wall's focus
+           grammar, by-ID image mapping).
+
+           zone-b-map-root offsets the WHOLE assembly as a unit (same pattern
+           as the other zone roots); its base spot is DERIVED live from
+           #zone-b's offset, so `offset` here is a delta from "on the wall
+           line, at floor level" — the board extends behind the wall from
+           there. The inner container carries the wall's same `0 -90 0` yaw so
+           the map width spans the wall's width.
+
+           Tunables: root offset (here); mapWidth (0 = wall width) /
+           basePlaneOpacity / sphereRadius / hoverHeight / gapBehindWall on
+           map-board; radius / opacity / softness / yoffset on map-contact-cue;
+           distance / height / dimRadius / dimOpacity / dur / aspect on
+           map-focus.
+           ============================================================ -->
+      <a-entity id="zone-b-map" zone-b-map-root>
+        <a-entity
+          id="zone-b-map-board"
+          rotation="0 -90 0"
+          map-board
+        ></a-entity>
+
+        <!-- Per-sphere contact cue ON the map plane. Lives under #zone-b-map
+             so it PERSISTS across environment switches (env teardown only
+             touches #environment); reuses the shared ContactCue kit and
+             retunes to each preset's ground profile like every other zone. -->
+        <a-entity map-contact-cue="board: #zone-b-map-board"></a-entity>
       </a-entity>
 
       <!-- ============================================================
