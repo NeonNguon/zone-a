@@ -1,0 +1,8 @@
+{
+  "name": "vr-exhibition-tools",
+  "private": true,
+  "description": "One-time offline bake scripts for the VR exhibition (not runtime code).",
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}

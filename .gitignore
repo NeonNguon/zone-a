@@ -1,0 +1,5 @@
+# One-time bake artifacts that must never be committed: the raw tile cache
+# (re-fetchable, large) and the bake script's dependencies.
+tools/tile-cache/
+tools/node_modules/
+tools/package-lock.json
