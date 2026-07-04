@@ -21,8 +21,8 @@ const POSTER_URL = "video/thumbnail.jpg";
 // strip, positional audio) is built under this entity, so moving the one
 // `offset` moves the entire cinema as a unit. Default offset started as Zone
 // B's mirror across the spawn point (Zone B at 13 3 0 → -13 3 0), then was
-// nudged 1 m closer to spawn: -12 3 0. Adjust live, e.g.:
-//   document.getElementById('zone-c').setAttribute('zone-c-root','offset','-14 3 0')
+// walked in closer to spawn by eye: -10 3 0. Adjust live, e.g.:
+//   document.getElementById('zone-c').setAttribute('zone-c-root','offset','-12 3 0')
 //
 // TUNABLES (all schema properties — adjustable by eye, no code edits):
 //   offset                 — assembly position (vec3), the placement handle.
@@ -37,7 +37,7 @@ const POSTER_URL = "video/thumbnail.jpg";
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-c-root", {
   schema: {
-    offset: { type: "vec3", default: { x: -12, y: 3, z: 0 } },
+    offset: { type: "vec3", default: { x: -10, y: 3, z: 0 } },
     // 9.6 = 80% of the original 12 m screen; the raised bottom edge (1.675 m)
     // keeps the ORIGINAL screen centre (4.375 m) — it shrank in place rather
     // than sinking with its bottom edge.
@@ -591,7 +591,9 @@ AFRAME.registerComponent("zone-c-root", {
   // element's output entirely, so nothing plays "in your head"). Exponential
   // distance model: full volume within audioRefDistance of the screen,
   // falling off at audioRolloff beyond it — with the defaults (8 / 5) the
-  // film is clearly present ~10 m out and near-silent at spawn, 12 m away.
+  // film is clearly present ~10 m out. NOTE: spawn is now only 10 m from the
+  // screen, so some sound carries there (~1/3 volume with the defaults) —
+  // raise audioRolloff if spawn should stay quieter.
   // Built here (not init) because creating an AudioContext outside a user
   // gesture leaves it suspended on Quest/mobile.
   initAudio: function () {
@@ -811,8 +813,9 @@ AFRAME.registerComponent("screen-contact-cue", {
 //     film's thumbnail (dark plane only until it loads), bottom edge
 //     ~1.7 m off the floor. No play glyph — hover brings up the strip.
 //   • Click the screen → video plays, sound clearly localised AT the screen.
-//   • Walk back to spawn (12 m) → audio falls to near-nothing; walk within
-//     ~10 m → clearly present again.
+//   • Walk back to spawn (now 10 m) → audio drops off clearly but no longer
+//     to near-nothing (~1/3 volume — the zone moved in); raise audioRolloff
+//     if spawn should be quieter.
 //   • Hover/move the mouse over screen or strip → strip fades in below the
 //     screen; leave everything idle ~4 s → strip fades out and no longer
 //     blocks clicks behind it.
