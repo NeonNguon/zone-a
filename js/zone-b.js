@@ -224,8 +224,20 @@ AFRAME.registerComponent("wall-tile-hover", {
     this.el.appendChild(border);
     this.border = border;
 
-    this.onEnter = () => border.setAttribute("visible", true);
-    this.onLeave = () => border.setAttribute("visible", false);
+    // On hover: reveal the frame and give the tile a subtle pop (like Zone A's
+    // image-hover). The `data-focused` guard keeps this from stomping the focus
+    // transform: while a tile is focused, wall-focus owns its scale, so hover
+    // must not touch it.
+    this.onEnter = () => {
+      if (this.el.dataset.focused) return;
+      border.setAttribute("visible", true);
+      this.el.object3D.scale.set(1.05, 1.05, 1.05);
+    };
+    this.onLeave = () => {
+      border.setAttribute("visible", false);
+      if (this.el.dataset.focused) return;
+      this.el.object3D.scale.set(1, 1, 1);
+    };
     this.el.addEventListener("mouseenter", this.onEnter);
     this.el.addEventListener("mouseleave", this.onLeave);
   },
@@ -488,7 +500,8 @@ AFRAME.registerComponent("wall-focus", {
       if (this.mode === "vr") this.dismissVR();
       return;
     }
-    tile.emit("mouseleave"); // clear its hover frame before it moves/lifts
+    tile.emit("mouseleave"); // clear its hover frame + pop before it moves/lifts
+    tile.dataset.focused = "1"; // hover now yields the tile's scale to focus
     if (this.el.sceneEl.is("vr-mode")) {
       this.mode = "vr";
       this.focusVR(tile);
@@ -561,6 +574,7 @@ AFRAME.registerComponent("wall-focus", {
       obj.position.copy(home.pos);
       obj.quaternion.copy(home.quat);
       obj.scale.copy(home.scale);
+      delete tile.dataset.focused; // hover may own the tile's scale again
       this.focused = null;
       this.home = null;
       this.refreshRaycasters();
@@ -776,6 +790,7 @@ AFRAME.registerComponent("wall-focus", {
       this.imgEl.style.transition = "none";
       this.imgEl.style.transform = "none";
       if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
+      if (tile) delete tile.dataset.focused;
       this.focused = null;
       this.mode = null;
       this.busy = false;
@@ -824,6 +839,7 @@ AFRAME.registerComponent("wall-focus", {
       obj.quaternion.copy(this.home.quat);
       obj.scale.copy(this.home.scale);
     }
+    if (this.focused) delete this.focused.dataset.focused;
     if (this.overlay) this.overlay.classList.remove("visible");
     if (this.imgEl) {
       this.imgEl.style.transition = "none";
