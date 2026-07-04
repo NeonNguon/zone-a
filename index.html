@@ -17,6 +17,8 @@
     <!-- Zone B (10×10 image wall). AFTER components.js so it can read Zone A's
          ring radius to auto-size the wall. -->
     <script src="js/zone-b.js"></script>
+    <!-- Zone C (outdoor cinema screen). -->
+    <script src="js/zone-c.js"></script>
     <!-- Swappable environment layer: presets + environment-manager. Loaded
          before <a-scene> parses so the component is registered in time. -->
     <script src="js/environment.js"></script>
@@ -122,6 +124,19 @@
              Tunables: radius / opacity / softness / yoffset. -->
         <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
       </a-entity>
+
+      <!-- ============================================================
+           ZONE C — outdoor cinema: one 16:9 video screen, OPPOSITE Zone B.
+           zone-c-root offsets the WHOLE assembly (screen + controls + audio)
+           as a unit (same pattern as zone-a-root / zone-b-root); the default
+           -13 3 0 mirrors Zone B's 13 3 0 across the spawn point, so facing
+           +x you see the wall and facing -x you see the cinema. The screen
+           is rotated inside the component to face back toward spawn.
+           All other tunables (screenWidth / screenHeightAboveFloor /
+           controlsFadeDelay / audioRefDistance / audioRolloff) live on the
+           zone-c-root schema — see js/zone-c.js.
+           ============================================================ -->
+      <a-entity id="zone-c" zone-c-root="offset: -13 3 0"></a-entity>
 
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
            .clickable and emits mouseenter/mouseleave/click on the images. -->
