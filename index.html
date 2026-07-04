@@ -23,6 +23,8 @@
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
+    <!-- Zone B web focus overlay styles (blurred overlay, Helvetica). -->
+    <link rel="stylesheet" href="css/zone-b-focus.css" />
 
     <!-- Dev-only environment HUD. Plain 2D overlay, hidden by default; the
          environment-manager shows it only when ?debug is in the URL (or you
@@ -186,6 +188,18 @@
             <div id="focus-memory-text"></div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Zone B web focus overlay DOM. Outside <a-scene>: plain HTML/CSS over the
+         canvas (does NOT render in VR — the VR wall focus is built in-world by
+         wall-focus in js/zone-b.js). Hidden until a wall tile is selected; the
+         picture flies in from the tile's on-screen position. -->
+    <div id="zoneb-focus">
+      <div id="zoneb-focus-col">
+        <img id="zoneb-focus-img" src="" alt="" />
+        <div id="zoneb-focus-title"></div>
+        <div id="zoneb-focus-year"></div>
       </div>
     </div>
 

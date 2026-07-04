@@ -179,6 +179,7 @@ AFRAME.registerComponent("image-wall", {
       img.setAttribute("data-title", entry.title || ""); // carried for focus mode
       img.dataset.file = entry.file; // also carry the source filename
       img.setAttribute("class", "clickable"); // raycaster-targetable (focus mode)
+      img.setAttribute("wall-tile-hover", ""); // black frame on hover
       this.el.appendChild(img);
       this.tiles.push(img);
     }
@@ -197,6 +198,40 @@ AFRAME.registerComponent("image-wall", {
   remove: function () {
     this.tiles.forEach((t) => t.parentNode && t.parentNode.removeChild(t));
     this.tiles = [];
+  },
+});
+
+// ----------------------------------------------------------------
+// wall-tile-hover — a black frame that appears around a wall tile while the
+// mouse cursor or a controller laser hovers it (same idea as Zone A's
+// image-hover). It's a slightly-larger black plane sitting just behind the
+// tile, revealed on `mouseenter` and hidden on `mouseleave` — both events are
+// fired identically by the desktop/mobile cursor and the VR lasers.
+// ----------------------------------------------------------------
+AFRAME.registerComponent("wall-tile-hover", {
+  init: function () {
+    const w = parseFloat(this.el.getAttribute("width")) || 1;
+    const h = parseFloat(this.el.getAttribute("height")) || 1;
+    // Black plane a touch larger than the tile, just behind it -> reads as a
+    // thin frame around the tile's edges. Unlit (flat) so it stays pure black;
+    // not clickable, so it never intercepts the raycaster.
+    const border = document.createElement("a-plane");
+    border.setAttribute("width", w + 0.06);
+    border.setAttribute("height", h + 0.06);
+    border.setAttribute("position", "0 0 -0.01");
+    border.setAttribute("material", "color: #000000; shader: flat");
+    border.setAttribute("visible", false);
+    this.el.appendChild(border);
+    this.border = border;
+
+    this.onEnter = () => border.setAttribute("visible", true);
+    this.onLeave = () => border.setAttribute("visible", false);
+    this.el.addEventListener("mouseenter", this.onEnter);
+    this.el.addEventListener("mouseleave", this.onLeave);
+  },
+  remove: function () {
+    this.el.removeEventListener("mouseenter", this.onEnter);
+    this.el.removeEventListener("mouseleave", this.onLeave);
   },
 });
 
@@ -371,14 +406,18 @@ AFRAME.registerComponent("wall-contact-cue", {
 // The tiles are made `.clickable` by image-wall; this one listener catches
 // their bubbled clicks (it lives on the wall entity, the tiles' DOM parent).
 //
-// In-world, NOT a 2D overlay: the ACTUAL tile mesh animates from its slot to
-// the focus spot and back — no separate copy. Its home transform is captured
-// before moving and restored exactly on dismiss, so the grid never drifts.
-// Dimming mirrors Zone A's VR focus: a camera-child dark sphere darkens
-// everything past its radius while the near focus tile stays bright.
+// Two presentations, forked on session type (like Zone A):
+//  - VR (in-world): the ACTUAL tile mesh animates from its slot to a spot in
+//    front of the camera and back — its home transform is captured and restored
+//    exactly (no drift). A camera-child dark sphere dims the rest; an a-text
+//    card shows title + year. Dismiss = select the tile again or the dimmed space.
+//  - WEB (desktop/mobile): Zone A's blurred-overlay aesthetic — a Helvetica
+//    HTML overlay (blur backdrop, title + year) whose picture FLIES in (FLIP)
+//    from the tile's on-screen position to centre, keeping the fly-in motion.
+//    Dismiss = click the blurred backdrop or press Esc.
 //
-// Only one tile focuses at a time; the dim sphere occludes the wall, so a
-// click while focused simply dismisses (you can't jump straight to another).
+// Only one tile focuses at a time; a click while focused simply dismisses
+// (the dim sphere / overlay occludes the wall — you can't jump to another).
 //
 // Tunables (new — do not affect the grid/cue/loader tunables):
 //   distance  — metres in front of the camera (world-space, FOV-independent).
@@ -398,30 +437,69 @@ AFRAME.registerComponent("wall-focus", {
   init: function () {
     this.cameraEl = document.getElementById("camera");
     this.focused = null; // the tile element currently focused
-    this.home = null; // captured LOCAL transform { pos, quat, scale }
-    this.anim = null; // active tween, or null
-    this.dimEl = null; // camera-child dark sphere
-    this.uiEl = null; // world-anchored title/year label
+    this.mode = null; // 'vr' (in-world) | 'web' (HTML overlay)
+    this.busy = false; // a web fly transition is running
+    this.home = null; // captured LOCAL transform { pos, quat, scale } (VR)
+    this.anim = null; // active VR tween, or null
+    this.dimEl = null; // camera-child dark sphere (VR)
+    this.uiEl = null; // world-anchored title/year label (VR)
+
+    // Web (desktop/mobile) focus reuses Zone A's blurred-overlay aesthetic:
+    // a Helvetica HTML overlay whose image FLIES in from the tile's screen
+    // position. Refs to that overlay (in index.html).
+    this.overlay = document.getElementById("zoneb-focus");
+    this.imgEl = document.getElementById("zoneb-focus-img");
+    this.titleEl = document.getElementById("zoneb-focus-title");
+    this.yearEl = document.getElementById("zoneb-focus-year");
 
     // Tiles are DOM children of this entity, so their bubbled `click` lands
     // here — one delegated listener for every platform's raycaster.
     this.onClick = this.onClick.bind(this);
     this.el.addEventListener("click", this.onClick);
     this.onDimClick = () => {
-      if (!this.anim && this.focused) this.dismiss();
+      if (!this.anim && this.focused && this.mode === "vr") this.dismissVR();
     };
+
+    // Web dismiss: click the blurred backdrop (empty space) or press Esc.
+    if (this.overlay) {
+      this.onOverlayClick = (e) => {
+        if (e.target === this.overlay && this.focused && this.mode === "web" && !this.busy) {
+          this.dismissWeb();
+        }
+      };
+      this.overlay.addEventListener("click", this.onOverlayClick);
+    }
+    this.onKey = (e) => {
+      if (e.key === "Escape" && this.focused && this.mode === "web" && !this.busy) {
+        this.dismissWeb();
+      }
+    };
+    window.addEventListener("keydown", this.onKey);
   },
 
   onClick: function (e) {
-    if (this.anim) return; // ignore clicks mid-animation
+    if (this.anim || this.busy) return; // ignore clicks mid-transition
     const tile = e.target;
     if (!tile || tile === this.el || !tile.classList) return;
     if (!tile.classList.contains("clickable")) return;
-    if (this.focused) this.dismiss(); // any click while focused -> dismiss
-    else this.focus(tile);
+    if (this.focused) {
+      // While focused: web dismiss is handled by the overlay/Esc (its overlay
+      // intercepts canvas clicks); only the VR path reaches here.
+      if (this.mode === "vr") this.dismissVR();
+      return;
+    }
+    tile.emit("mouseleave"); // clear its hover frame before it moves/lifts
+    if (this.el.sceneEl.is("vr-mode")) {
+      this.mode = "vr";
+      this.focusVR(tile);
+    } else {
+      this.mode = "web";
+      this.focusWeb(tile);
+    }
   },
 
-  focus: function (tile) {
+  // ================= VR (in-world) path =================
+  focusVR: function (tile) {
     const obj = tile.object3D;
     const parent = obj.parent; // the wall container (constant during focus)
 
@@ -461,17 +539,11 @@ AFRAME.registerComponent("wall-focus", {
     this.buildDim();
     this.buildLabel(tile.getAttribute("data-title") || "", focusPos, faceQuat);
 
-    // Desktop: freeze mouse-look so the tile stays centred. VR keeps head
-    // tracking (never disable look-controls in a headset).
-    if (!this.el.sceneEl.is("vr-mode") && this.cameraEl) {
-      this.cameraEl.setAttribute("look-controls", "enabled", false);
-    }
-
     this.focused = tile;
     this.startAnim(obj, toPos, toQuat, toScale, null);
   },
 
-  dismiss: function () {
+  dismissVR: function () {
     const tile = this.focused;
     if (!tile) return;
     const obj = tile.object3D;
@@ -567,11 +639,13 @@ AFRAME.registerComponent("wall-focus", {
     );
 
     const halfH = this.data.height / 2;
-    // A dark strip behind the text so it stays legible over any environment.
+    // A small dark card behind the text so it stays legible over any
+    // environment — sized to wrap the two text lines with a little leeway
+    // (narrower than the picture, not wider).
     const back = document.createElement("a-plane");
-    back.setAttribute("width", 2.6);
-    back.setAttribute("height", 0.62);
-    back.setAttribute("position", `0 ${-(halfH + 0.36)} 0`);
+    back.setAttribute("width", 1.1);
+    back.setAttribute("height", 0.46);
+    back.setAttribute("position", `0 ${-(halfH + 0.37)} 0`);
     back.setAttribute(
       "material",
       "color: #000000; opacity: 0.55; shader: flat; transparent: true; fog: false"
@@ -579,11 +653,11 @@ AFRAME.registerComponent("wall-focus", {
     ui.appendChild(back);
 
     // Title (white, prominent) + year (grey), matching Zone A's VR label.
-    const titleEl = this.makeText(title, { width: 2.6, color: "#ffffff" });
-    titleEl.setAttribute("position", `0 ${-(halfH + 0.25)} 0.02`);
+    const titleEl = this.makeText(title, { width: 2.2, color: "#ffffff" });
+    titleEl.setAttribute("position", `0 ${-(halfH + 0.26)} 0.02`);
     ui.appendChild(titleEl);
 
-    const yearEl = this.makeText("2026", { width: 1.8, color: "#c8c8c8" });
+    const yearEl = this.makeText("2026", { width: 1.6, color: "#c8c8c8" });
     yearEl.setAttribute("position", `0 ${-(halfH + 0.5)} 0.02`);
     ui.appendChild(yearEl);
 
@@ -620,19 +694,147 @@ AFRAME.registerComponent("wall-focus", {
     });
   },
 
+  // ================= Web (HTML overlay) path =================
+  // Zone A's blurred-overlay aesthetic (blur backdrop + Helvetica title/year),
+  // with the tile's picture FLYING in from its on-screen position (FLIP) so the
+  // motion from the earlier pass is kept. The 3D tile is left in place (blurred
+  // behind); a sharp HTML <img> of the full-res original lifts off to centre.
+  focusWeb: function (tile) {
+    if (!this.overlay || !this.imgEl) {
+      // No overlay wired — fall back to the in-world path so focus still works.
+      this.mode = "vr";
+      this.focusVR(tile);
+      return;
+    }
+    this.focused = tile;
+    this.busy = true;
+    // Freeze mouse-look so the tile's screen rect stays valid for the return fly.
+    if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", false);
+
+    const rect = this.tileScreenRect(tile);
+    const file = tile.dataset.file || "";
+    // Full-res original (browser colour-manages the embedded profile correctly).
+    this.imgEl.src = file ? "web4map/" + encodeURIComponent(file) : "";
+    this.titleEl.textContent = tile.getAttribute("data-title") || "";
+    this.yearEl.textContent = "2026"; // literal constant, not read from data
+
+    // Centred target size, keeping the tile's aspect, leaving room for the text.
+    const ww = parseFloat(tile.getAttribute("width")) || 1.5;
+    const hh = parseFloat(tile.getAttribute("height")) || 1;
+    const aspect = ww / hh;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const tH = Math.min(0.62 * vh, (0.72 * vw) / aspect);
+    this.imgEl.style.width = tH * aspect + "px";
+    this.imgEl.style.height = tH + "px";
+
+    this.overlay.classList.add("visible");
+
+    // FLIP: measure the centred target, then start from the tile's rect and
+    // release the transform so it eases to centre.
+    requestAnimationFrame(() => {
+      const fin = this.imgEl.getBoundingClientRect();
+      const dx = rect.left + rect.width / 2 - (fin.left + fin.width / 2);
+      const dy = rect.top + rect.height / 2 - (fin.top + fin.height / 2);
+      const sc = fin.width ? rect.width / fin.width : 1;
+      this.imgEl.style.transition = "none";
+      this.imgEl.style.transform = `translate(${dx}px, ${dy}px) scale(${sc})`;
+      void this.imgEl.offsetWidth; // force reflow so the start state applies
+      this.imgEl.style.transition = "transform 0.4s ease";
+      this.imgEl.style.transform = "none";
+      const done = () => {
+        this.imgEl.removeEventListener("transitionend", done);
+        this.busy = false;
+      };
+      this.imgEl.addEventListener("transitionend", done);
+      setTimeout(() => {
+        if (this.busy) {
+          this.imgEl.removeEventListener("transitionend", done);
+          this.busy = false;
+        }
+      }, 600);
+    });
+  },
+
+  dismissWeb: function () {
+    const tile = this.focused;
+    if (!tile) return;
+    this.busy = true;
+    // Fly the picture back to the tile's on-screen rect, then hide the overlay.
+    const rect = this.tileScreenRect(tile);
+    const fin = this.imgEl.getBoundingClientRect();
+    const dx = rect.left + rect.width / 2 - (fin.left + fin.width / 2);
+    const dy = rect.top + rect.height / 2 - (fin.top + fin.height / 2);
+    const sc = fin.width ? rect.width / fin.width : 1;
+    this.imgEl.style.transition = "transform 0.4s ease";
+    this.imgEl.style.transform = `translate(${dx}px, ${dy}px) scale(${sc})`;
+    this.overlay.classList.remove("visible");
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      this.imgEl.removeEventListener("transitionend", done);
+      this.imgEl.style.transition = "none";
+      this.imgEl.style.transform = "none";
+      if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
+      this.focused = null;
+      this.mode = null;
+      this.busy = false;
+    };
+    this.imgEl.addEventListener("transitionend", done);
+    setTimeout(done, 600); // safety if transitionend doesn't fire
+  },
+
+  // The tile's current on-screen rectangle (project its four corners with the
+  // active camera) — the start/end of the web fly.
+  tileScreenRect: function (tile) {
+    const sceneEl = this.el.sceneEl;
+    const cam = sceneEl.camera;
+    const canvas = sceneEl.canvas || (sceneEl.renderer && sceneEl.renderer.domElement);
+    const w = (canvas && canvas.clientWidth) || window.innerWidth;
+    const h = (canvas && canvas.clientHeight) || window.innerHeight;
+    const obj = tile.object3D;
+    obj.updateWorldMatrix(true, false);
+    const ww = parseFloat(tile.getAttribute("width")) || 1;
+    const hh = parseFloat(tile.getAttribute("height")) || 1;
+    const corners = [
+      [-ww / 2, -hh / 2], [ww / 2, -hh / 2], [ww / 2, hh / 2], [-ww / 2, hh / 2],
+    ];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const v = new THREE.Vector3();
+    corners.forEach((c) => {
+      v.set(c[0], c[1], 0).applyMatrix4(obj.matrixWorld).project(cam);
+      const sx = (v.x * 0.5 + 0.5) * w;
+      const sy = (-v.y * 0.5 + 0.5) * h;
+      minX = Math.min(minX, sx); maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+    });
+    return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
+  },
+
   remove: function () {
     this.el.removeEventListener("click", this.onClick);
-    // If focused mid-teardown, snap the tile home so the grid isn't left broken.
-    if (this.focused && this.home) {
+    window.removeEventListener("keydown", this.onKey);
+    if (this.overlay && this.onOverlayClick) {
+      this.overlay.removeEventListener("click", this.onOverlayClick);
+    }
+    // If focused mid-teardown, restore state so the grid/overlay aren't broken.
+    if (this.mode === "vr" && this.focused && this.home) {
       const obj = this.focused.object3D;
       obj.position.copy(this.home.pos);
       obj.quaternion.copy(this.home.quat);
       obj.scale.copy(this.home.scale);
     }
+    if (this.overlay) this.overlay.classList.remove("visible");
+    if (this.imgEl) {
+      this.imgEl.style.transition = "none";
+      this.imgEl.style.transform = "none";
+    }
     this.teardownDim();
     this.teardownLabel();
     if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
     this.focused = null;
+    this.mode = null;
+    this.busy = false;
     this.home = null;
     this.anim = null;
   },

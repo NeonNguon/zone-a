@@ -1,0 +1,54 @@
+/* Zone B web focus overlay — mirrors Zone A's focus aesthetic (js/focus.css):
+   a blurred backdrop with minimal Helvetica type. The difference is the image
+   FLIES in from the tile's on-screen position (the FLIP transform is driven in
+   js/zone-b.js). Does NOT render in a headset — VR uses the in-world path. */
+
+#zoneb-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(238, 238, 238, 0.55); /* pale tint over the blur */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); /* Safari */
+  opacity: 0;
+  pointer-events: none; /* click through to the canvas while hidden */
+  transition: opacity 0.25s ease;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+#zoneb-focus.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+#zoneb-focus * {
+  font-family: inherit;
+}
+
+/* Image + title + year, stacked and centred (same order/spacing as Zone A). */
+#zoneb-focus-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#zoneb-focus-img {
+  display: block;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
+  transform-origin: center center; /* FLIP scales about the centre */
+}
+#zoneb-focus-title {
+  margin-top: 16px;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #111;
+}
+/* Year: smaller, lighter, secondary (matches Zone A's #focus-meta). */
+#zoneb-focus-year {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: #777;
+}
