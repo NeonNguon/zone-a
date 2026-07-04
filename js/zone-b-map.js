@@ -426,3 +426,432 @@ AFRAME.registerComponent("map-contact-cue", {
   },
 });
 
+// ----------------------------------------------------------------
+// map-focus — click/select a sphere to reveal its artwork image full-view,
+// with the SAME interaction grammar as the wall's wall-focus (js/zone-b.js):
+//
+//  - VR (in-world): an a-image springs from the sphere's spot to a readable
+//    spot in front of the camera (title shown, rest dimmed by the same
+//    camera-child dark sphere); select it again — or the dimmed space — to
+//    send it back to the sphere and away. Capture-and-restore: the fly-out
+//    returns to the sphere's exact world spot, then the image is removed;
+//    the sphere itself never moves.
+//  - WEB (desktop/mobile): REUSES the wall's #zoneb-focus blurred overlay —
+//    the full-res picture FLIES in from the sphere's on-screen position
+//    (FLIP), dismissed by clicking the backdrop or pressing Esc.
+//
+// Only one reveal at a time: while one is open the other spheres don't
+// respond (focused guard + the dim/overlay occluding them), and the
+// anim/busy guards ignore clicks mid-transition (double-click safe).
+//
+// Tunables: distance / height / dimRadius / dimOpacity / dur / aspect
+// (the revealed picture's w:h, matching the wall tiles' 1.5).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("map-focus", {
+  schema: {
+    distance: { type: "number", default: 1.8 },
+    height: { type: "number", default: 1.4 },
+    dimRadius: { type: "number", default: 4 },
+    dimOpacity: { type: "number", default: 0.6 },
+    dur: { type: "number", default: 450 }, // ms
+    aspect: { type: "number", default: 1.5 }, // revealed picture w:h
+  },
+
+  init: function () {
+    this.cameraEl = document.getElementById("camera");
+    this.focused = null; // the hit-target entity currently revealed
+    this.mode = null; // 'vr' | 'web'
+    this.busy = false; // a web fly transition is running
+    this.anim = null; // active VR tween, or null
+    this.flyEl = null; // the VR a-image doing the reveal
+    this.home = null; // its spawn transform at the sphere { pos, quat, scale }
+    this.dimEl = null; // camera-child dark sphere (VR)
+    this.uiEl = null; // world-anchored title label (VR)
+
+    // Web reveal reuses the wall's blurred overlay DOM (index.html).
+    this.overlay = document.getElementById("zoneb-focus");
+    this.imgEl = document.getElementById("zoneb-focus-img");
+    this.titleEl = document.getElementById("zoneb-focus-title");
+    this.yearEl = document.getElementById("zoneb-focus-year");
+
+    // Hit targets are DOM children of this entity; one delegated listener
+    // catches their bubbled clicks from every platform's raycaster.
+    this.onClick = this.onClick.bind(this);
+    this.el.addEventListener("click", this.onClick);
+    this.onDimClick = () => {
+      if (!this.anim && this.focused && this.mode === "vr") this.dismissVR();
+    };
+
+    // Web dismiss: click the blurred backdrop (empty space) or press Esc.
+    if (this.overlay) {
+      this.onOverlayClick = (e) => {
+        if (e.target === this.overlay && this.focused && this.mode === "web" && !this.busy) {
+          this.dismissWeb();
+        }
+      };
+      this.overlay.addEventListener("click", this.onOverlayClick);
+    }
+    this.onKey = (e) => {
+      if (e.key === "Escape" && this.focused && this.mode === "web" && !this.busy) {
+        this.dismissWeb();
+      }
+    };
+    window.addEventListener("keydown", this.onKey);
+  },
+
+  onClick: function (e) {
+    if (this.anim || this.busy) return; // ignore clicks mid-transition
+    const target = e.target;
+    if (!target || target === this.el || !target.classList) return;
+    if (!target.classList.contains("clickable")) return;
+    if (this.focused) {
+      // While revealed: web dismiss is handled by the overlay/Esc; the VR
+      // path dismisses on any in-world click (the reveal or another sphere
+      // behind the dim) — same one-at-a-time behaviour as the wall.
+      if (this.mode === "vr") this.dismissVR();
+      return;
+    }
+    if (!target.dataset.file) return; // not a map hit target
+    if (this.el.sceneEl.is("vr-mode")) {
+      this.mode = "vr";
+      this.focusVR(target);
+    } else {
+      this.mode = "web";
+      this.focusWeb(target);
+    }
+  },
+
+  // The sphere's world position (centre of the reveal's fly path).
+  targetWorldPos: function (target) {
+    return target.object3D.getWorldPosition(new THREE.Vector3());
+  },
+
+  // ================= VR (in-world) path =================
+  focusVR: function (target) {
+    const spherePos = this.targetWorldPos(target);
+
+    // Anchor a spot `distance` m in front of the camera at eye height,
+    // facing the camera (computed once — not head-locked), like wall-focus.
+    const cam = this.cameraEl.object3D;
+    const camPos = cam.getWorldPosition(new THREE.Vector3());
+    const camQuat = cam.getWorldQuaternion(new THREE.Quaternion());
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat);
+    fwd.y = 0;
+    fwd.normalize();
+    const focusPos = camPos.clone().addScaledVector(fwd, this.data.distance);
+    focusPos.y = camPos.y; // eye level
+    const dir = camPos.clone().sub(focusPos).normalize();
+    const faceQuat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      dir
+    );
+
+    // The revealed picture: the wall's 512 tile texture (Quest-friendly, the
+    // same asset the wall tiles show), scene-rooted so world == local.
+    const h = this.data.height;
+    const w = h * this.data.aspect;
+    const img = document.createElement("a-image");
+    img.setAttribute("src", "web4map-512/" + encodeURIComponent(target.dataset.file));
+    img.setAttribute("width", w);
+    img.setAttribute("height", h);
+    img.setAttribute("class", "clickable"); // select it again -> dismiss
+    this.el.sceneEl.appendChild(img);
+    this.flyEl = img;
+
+    // Spawn AT the sphere (tiny), captured as home for the exact fly-back.
+    const startScale = Math.max(0.05, (this.dataSphereRadius() * 2) / h);
+    this.home = {
+      pos: spherePos.clone(),
+      quat: faceQuat.clone(),
+      scale: new THREE.Vector3(startScale, startScale, startScale),
+    };
+    const obj = img.object3D;
+    obj.position.copy(this.home.pos);
+    obj.quaternion.copy(this.home.quat);
+    obj.scale.copy(this.home.scale);
+
+    this.buildDim();
+    this.buildLabel(target.getAttribute("data-title") || "", focusPos, faceQuat);
+
+    this.focused = target;
+    this.startAnim(
+      obj,
+      focusPos,
+      faceQuat,
+      new THREE.Vector3(1, 1, 1),
+      null
+    );
+  },
+
+  // The board's current sphereRadius (fly-out start size follows it).
+  dataSphereRadius: function () {
+    const board = this.el.components["map-board"];
+    return board ? board.data.sphereRadius : 0.12;
+  },
+
+  dismissVR: function () {
+    const img = this.flyEl;
+    if (!img || !this.home) return;
+    const target = this.focused;
+    const home = this.home;
+
+    // Un-dim immediately; the picture flies back down to its sphere.
+    this.teardownDim();
+    this.teardownLabel();
+
+    this.startAnim(img.object3D, home.pos, home.quat, home.scale, () => {
+      if (img.parentNode) img.parentNode.removeChild(img);
+      this.flyEl = null;
+      this.home = null;
+      this.focused = null;
+      this.mode = null;
+      this.refreshRaycasters();
+    });
+  },
+
+  // --- easing tween (same shape as wall-focus) ------------------------------
+  startAnim: function (obj, toPos, toQuat, toScale, onComplete) {
+    this.anim = {
+      obj: obj,
+      fromPos: obj.position.clone(),
+      toPos: toPos.clone(),
+      fromQuat: obj.quaternion.clone(),
+      toQuat: toQuat.clone(),
+      fromScale: obj.scale.clone(),
+      toScale: toScale.clone(),
+      t: 0,
+      dur: Math.max(0.001, this.data.dur / 1000),
+      onComplete: onComplete,
+    };
+  },
+
+  tick: function (time, dt) {
+    const a = this.anim;
+    if (!a) return; // no reveal in flight -> zero per-frame work
+    a.t += dt / 1000;
+    let u = a.t / a.dur;
+    if (u > 1) u = 1;
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; // easeInOutQuad
+    a.obj.position.lerpVectors(a.fromPos, a.toPos, e);
+    a.obj.quaternion.copy(a.fromQuat).slerp(a.toQuat, e);
+    a.obj.scale.lerpVectors(a.fromScale, a.toScale, e);
+    if (u >= 1) {
+      a.obj.position.copy(a.toPos);
+      a.obj.quaternion.copy(a.toQuat);
+      a.obj.scale.copy(a.toScale);
+      const done = a.onComplete;
+      this.anim = null;
+      if (done) done();
+    }
+  },
+
+  // --- dim sphere + label: same construction as wall-focus ------------------
+  buildDim: function () {
+    const s = document.createElement("a-sphere");
+    s.setAttribute("radius", this.data.dimRadius);
+    s.setAttribute(
+      "material",
+      `color: #000000; opacity: ${this.data.dimOpacity}; shader: flat; transparent: true; fog: false; side: back`
+    );
+    s.setAttribute("class", "clickable"); // click empty space -> dismiss
+    this.cameraEl.appendChild(s);
+    s.addEventListener("click", this.onDimClick);
+    this.dimEl = s;
+    requestAnimationFrame(() => this.refreshRaycasters());
+  },
+
+  teardownDim: function () {
+    if (this.dimEl) {
+      this.dimEl.removeEventListener("click", this.onDimClick);
+      if (this.dimEl.parentNode) this.dimEl.parentNode.removeChild(this.dimEl);
+      this.dimEl = null;
+    }
+  },
+
+  buildLabel: function (title, focusPos, faceQuat) {
+    if (!title) return;
+    const ui = document.createElement("a-entity");
+    ui.setAttribute("position", `${focusPos.x} ${focusPos.y} ${focusPos.z}`);
+    const eu = new THREE.Euler().setFromQuaternion(faceQuat, "YXZ");
+    ui.setAttribute(
+      "rotation",
+      `${THREE.MathUtils.radToDeg(eu.x)} ${THREE.MathUtils.radToDeg(
+        eu.y
+      )} ${THREE.MathUtils.radToDeg(eu.z)}`
+    );
+
+    const halfH = this.data.height / 2;
+    const back = document.createElement("a-plane");
+    back.setAttribute("width", 1.1);
+    back.setAttribute("height", 0.28);
+    back.setAttribute("position", `0 ${-(halfH + 0.28)} 0`);
+    back.setAttribute(
+      "material",
+      "color: #000000; opacity: 0.55; shader: flat; transparent: true; fog: false"
+    );
+    ui.appendChild(back);
+
+    const titleEl = document.createElement("a-entity");
+    titleEl.setAttribute("text", {
+      value: title,
+      align: "center",
+      color: "#ffffff",
+      width: 2.2,
+    });
+    titleEl.setAttribute("position", `0 ${-(halfH + 0.28)} 0.02`);
+    ui.appendChild(titleEl);
+
+    this.el.sceneEl.appendChild(ui);
+    this.uiEl = ui;
+  },
+
+  teardownLabel: function () {
+    if (this.uiEl && this.uiEl.parentNode) {
+      this.uiEl.parentNode.removeChild(this.uiEl);
+    }
+    this.uiEl = null;
+  },
+
+  refreshRaycasters: function () {
+    ["rightHand", "leftHand"].forEach(function (id) {
+      const el = document.getElementById(id);
+      const rc = el && el.components && el.components.raycaster;
+      if (rc) rc.refreshObjects();
+    });
+  },
+
+  // ================= Web (HTML overlay) path =================
+  // The wall's blurred overlay, verbatim grammar: full-res picture flies in
+  // (FLIP) from the sphere's on-screen position; backdrop / Esc dismisses.
+  focusWeb: function (target) {
+    if (!this.overlay || !this.imgEl) {
+      this.mode = "vr"; // no overlay wired — in-world reveal still works
+      this.focusVR(target);
+      return;
+    }
+    this.focused = target;
+    this.busy = true;
+    // Freeze mouse-look so the sphere's screen rect stays valid for the
+    // return fly (same as wall-focus).
+    if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", false);
+
+    const rect = this.sphereScreenRect(target);
+    const file = target.dataset.file || "";
+    this.imgEl.src = file ? "web4map/" + encodeURIComponent(file) : "";
+    this.titleEl.textContent = target.getAttribute("data-title") || "";
+    this.yearEl.textContent = "2026"; // literal constant, matching the wall
+
+    // Centred target size at the wall tiles' aspect, leaving room for text.
+    const aspect = this.data.aspect;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const tH = Math.min(0.62 * vh, (0.72 * vw) / aspect);
+    this.imgEl.style.width = tH * aspect + "px";
+    this.imgEl.style.height = tH + "px";
+
+    this.overlay.classList.add("visible");
+
+    requestAnimationFrame(() => {
+      const fin = this.imgEl.getBoundingClientRect();
+      const dx = rect.left + rect.width / 2 - (fin.left + fin.width / 2);
+      const dy = rect.top + rect.height / 2 - (fin.top + fin.height / 2);
+      const sc = fin.width ? rect.width / fin.width : 1;
+      this.imgEl.style.transition = "none";
+      this.imgEl.style.transform = `translate(${dx}px, ${dy}px) scale(${sc})`;
+      void this.imgEl.offsetWidth; // force reflow so the start state applies
+      this.imgEl.style.transition = "transform 0.4s ease";
+      this.imgEl.style.transform = "none";
+      const done = () => {
+        this.imgEl.removeEventListener("transitionend", done);
+        this.busy = false;
+      };
+      this.imgEl.addEventListener("transitionend", done);
+      setTimeout(() => {
+        if (this.busy) {
+          this.imgEl.removeEventListener("transitionend", done);
+          this.busy = false;
+        }
+      }, 600);
+    });
+  },
+
+  dismissWeb: function () {
+    const target = this.focused;
+    if (!target) return;
+    this.busy = true;
+    const rect = this.sphereScreenRect(target);
+    const fin = this.imgEl.getBoundingClientRect();
+    const dx = rect.left + rect.width / 2 - (fin.left + fin.width / 2);
+    const dy = rect.top + rect.height / 2 - (fin.top + fin.height / 2);
+    const sc = fin.width ? rect.width / fin.width : 1;
+    this.imgEl.style.transition = "transform 0.4s ease";
+    this.imgEl.style.transform = `translate(${dx}px, ${dy}px) scale(${sc})`;
+    this.overlay.classList.remove("visible");
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      this.imgEl.removeEventListener("transitionend", done);
+      this.imgEl.style.transition = "none";
+      this.imgEl.style.transform = "none";
+      if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
+      this.focused = null;
+      this.mode = null;
+      this.busy = false;
+    };
+    this.imgEl.addEventListener("transitionend", done);
+    setTimeout(done, 600); // safety if transitionend doesn't fire
+  },
+
+  // The sphere's on-screen rectangle: project a camera-facing square of the
+  // sphere's diameter at its world position — the start/end of the web fly.
+  sphereScreenRect: function (target) {
+    const sceneEl = this.el.sceneEl;
+    const cam = sceneEl.camera;
+    const canvas = sceneEl.canvas || (sceneEl.renderer && sceneEl.renderer.domElement);
+    const w = (canvas && canvas.clientWidth) || window.innerWidth;
+    const h = (canvas && canvas.clientHeight) || window.innerHeight;
+    const r = this.dataSphereRadius();
+    const p = this.targetWorldPos(target);
+    const camQuat = cam.getWorldQuaternion(new THREE.Quaternion());
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camQuat);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camQuat);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const v = new THREE.Vector3();
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach((c) => {
+      v.copy(p).addScaledVector(right, c[0] * r).addScaledVector(up, c[1] * r);
+      v.project(cam);
+      const sx = (v.x * 0.5 + 0.5) * w;
+      const sy = (-v.y * 0.5 + 0.5) * h;
+      minX = Math.min(minX, sx); maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+    });
+    return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
+  },
+
+  remove: function () {
+    this.el.removeEventListener("click", this.onClick);
+    window.removeEventListener("keydown", this.onKey);
+    if (this.overlay && this.onOverlayClick) {
+      this.overlay.removeEventListener("click", this.onOverlayClick);
+    }
+    if (this.flyEl && this.flyEl.parentNode) {
+      this.flyEl.parentNode.removeChild(this.flyEl);
+    }
+    if (this.overlay && this.mode === "web") {
+      this.overlay.classList.remove("visible");
+    }
+    if (this.imgEl) {
+      this.imgEl.style.transition = "none";
+      this.imgEl.style.transform = "none";
+    }
+    this.teardownDim();
+    this.teardownLabel();
+    if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
+    this.focused = null;
+    this.mode = null;
+    this.busy = false;
+    this.home = null;
+    this.anim = null;
+    this.flyEl = null;
+  },
+});
