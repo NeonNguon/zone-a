@@ -178,6 +178,7 @@ AFRAME.registerComponent("image-wall", {
       img.setAttribute("height", tileH); // width/height set separately -> no squash
       img.setAttribute("data-title", entry.title || ""); // carried for focus mode
       img.dataset.file = entry.file; // also carry the source filename
+      img.setAttribute("class", "clickable"); // raycaster-targetable (focus mode)
       this.el.appendChild(img);
       this.tiles.push(img);
     }
@@ -356,5 +357,283 @@ AFRAME.registerComponent("wall-contact-cue", {
     if (this.geometry) this.geometry.dispose();
     if (this.material) this.material.dispose();
     if (this.texture) this.texture.dispose();
+  },
+});
+
+// ----------------------------------------------------------------
+// wall-focus — click/select a wall tile to bring it forward to a readable spot
+// in front of the camera (title + year shown, rest dimmed); select again (or
+// click the dimmed space) to send it back to its exact grid slot.
+//
+// Works on desktop mouse, mobile tap and Quest 3 controller identically: it
+// relies ENTIRELY on the scene's existing raycasters (cursor rayOrigin:mouse +
+// the two laser-controls), which all fire the same `click` on `.clickable`.
+// The tiles are made `.clickable` by image-wall; this one listener catches
+// their bubbled clicks (it lives on the wall entity, the tiles' DOM parent).
+//
+// In-world, NOT a 2D overlay: the ACTUAL tile mesh animates from its slot to
+// the focus spot and back — no separate copy. Its home transform is captured
+// before moving and restored exactly on dismiss, so the grid never drifts.
+// Dimming mirrors Zone A's VR focus: a camera-child dark sphere darkens
+// everything past its radius while the near focus tile stays bright.
+//
+// Only one tile focuses at a time; the dim sphere occludes the wall, so a
+// click while focused simply dismisses (you can't jump straight to another).
+//
+// Tunables (new — do not affect the grid/cue/loader tunables):
+//   distance  — metres in front of the camera (world-space, FOV-independent).
+//   height    — focused tile's world height in metres (readable size).
+//   dimRadius / dimOpacity — the dark sphere.
+//   dur       — animation duration (ms).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("wall-focus", {
+  schema: {
+    distance: { type: "number", default: 1.8 },
+    height: { type: "number", default: 1.4 },
+    dimRadius: { type: "number", default: 4 },
+    dimOpacity: { type: "number", default: 0.6 },
+    dur: { type: "number", default: 450 }, // ms
+  },
+
+  init: function () {
+    this.cameraEl = document.getElementById("camera");
+    this.focused = null; // the tile element currently focused
+    this.home = null; // captured LOCAL transform { pos, quat, scale }
+    this.anim = null; // active tween, or null
+    this.dimEl = null; // camera-child dark sphere
+    this.uiEl = null; // world-anchored title/year label
+
+    // Tiles are DOM children of this entity, so their bubbled `click` lands
+    // here — one delegated listener for every platform's raycaster.
+    this.onClick = this.onClick.bind(this);
+    this.el.addEventListener("click", this.onClick);
+    this.onDimClick = () => {
+      if (!this.anim && this.focused) this.dismiss();
+    };
+  },
+
+  onClick: function (e) {
+    if (this.anim) return; // ignore clicks mid-animation
+    const tile = e.target;
+    if (!tile || tile === this.el || !tile.classList) return;
+    if (!tile.classList.contains("clickable")) return;
+    if (this.focused) this.dismiss(); // any click while focused -> dismiss
+    else this.focus(tile);
+  },
+
+  focus: function (tile) {
+    const obj = tile.object3D;
+    const parent = obj.parent; // the wall container (constant during focus)
+
+    // Capture the exact home LOCAL transform to restore on dismiss (no drift).
+    this.home = {
+      pos: obj.position.clone(),
+      quat: obj.quaternion.clone(),
+      scale: obj.scale.clone(),
+    };
+
+    // Anchor a world spot `distance` m in front of the camera at eye height,
+    // facing the camera (computed once, like Zone A's VR focus — not head-locked).
+    const cam = this.cameraEl.object3D;
+    const camPos = cam.getWorldPosition(new THREE.Vector3());
+    const camQuat = cam.getWorldQuaternion(new THREE.Quaternion());
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat);
+    fwd.y = 0;
+    fwd.normalize();
+    const focusPos = camPos.clone().addScaledVector(fwd, this.data.distance);
+    focusPos.y = camPos.y; // eye level
+    // The tile's +Z (its visible face) should point back at the camera.
+    const dir = camPos.clone().sub(focusPos).normalize();
+    const faceQuat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      dir
+    );
+
+    // Convert the world target into the tile's LOCAL frame (parent is fixed).
+    const toPos = parent.worldToLocal(focusPos.clone());
+    const pQuat = parent.getWorldQuaternion(new THREE.Quaternion());
+    const toQuat = pQuat.clone().invert().multiply(faceQuat);
+    const pScale = parent.getWorldScale(new THREE.Vector3());
+    const hAttr = parseFloat(tile.getAttribute("height")) || 0.7;
+    const k = this.data.height / hAttr / (pScale.y || 1); // world height -> local scale
+    const toScale = new THREE.Vector3(k, k, k);
+
+    this.buildDim();
+    this.buildLabel(tile.getAttribute("data-title") || "", focusPos, faceQuat);
+
+    // Desktop: freeze mouse-look so the tile stays centred. VR keeps head
+    // tracking (never disable look-controls in a headset).
+    if (!this.el.sceneEl.is("vr-mode") && this.cameraEl) {
+      this.cameraEl.setAttribute("look-controls", "enabled", false);
+    }
+
+    this.focused = tile;
+    this.startAnim(obj, toPos, toQuat, toScale, null);
+  },
+
+  dismiss: function () {
+    const tile = this.focused;
+    if (!tile) return;
+    const obj = tile.object3D;
+    const home = this.home;
+
+    // Un-dim immediately; the tile flies back into the lit grid.
+    this.teardownDim();
+    this.teardownLabel();
+    if (this.cameraEl) {
+      this.cameraEl.setAttribute("look-controls", "enabled", true);
+    }
+
+    this.startAnim(obj, home.pos, home.quat, home.scale, () => {
+      // Snap to the captured home exactly (kills any interpolation residue).
+      obj.position.copy(home.pos);
+      obj.quaternion.copy(home.quat);
+      obj.scale.copy(home.scale);
+      this.focused = null;
+      this.home = null;
+      this.refreshRaycasters();
+    });
+  },
+
+  // --- easing tween over the tile's own object3D (pos/quat/scale) ----------
+  startAnim: function (obj, toPos, toQuat, toScale, onComplete) {
+    this.anim = {
+      obj: obj,
+      fromPos: obj.position.clone(),
+      toPos: toPos.clone(),
+      fromQuat: obj.quaternion.clone(),
+      toQuat: toQuat.clone(),
+      fromScale: obj.scale.clone(),
+      toScale: toScale.clone(),
+      t: 0,
+      dur: Math.max(0.001, this.data.dur / 1000),
+      onComplete: onComplete,
+    };
+  },
+
+  tick: function (time, dt) {
+    const a = this.anim;
+    if (!a) return;
+    a.t += dt / 1000;
+    let u = a.t / a.dur;
+    if (u > 1) u = 1;
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; // easeInOutQuad
+    a.obj.position.lerpVectors(a.fromPos, a.toPos, e);
+    a.obj.quaternion.copy(a.fromQuat).slerp(a.toQuat, e);
+    a.obj.scale.lerpVectors(a.fromScale, a.toScale, e);
+    if (u >= 1) {
+      a.obj.position.copy(a.toPos);
+      a.obj.quaternion.copy(a.toQuat);
+      a.obj.scale.copy(a.toScale);
+      const done = a.onComplete;
+      this.anim = null;
+      if (done) done();
+    }
+  },
+
+  // --- dim sphere (camera child): darkens everything past its radius -------
+  buildDim: function () {
+    const s = document.createElement("a-sphere");
+    s.setAttribute("radius", this.data.dimRadius);
+    s.setAttribute(
+      "material",
+      `color: #000000; opacity: ${this.data.dimOpacity}; shader: flat; transparent: true; fog: false; side: back`
+    );
+    s.setAttribute("class", "clickable"); // click empty space -> dismiss
+    this.cameraEl.appendChild(s);
+    s.addEventListener("click", this.onDimClick);
+    this.dimEl = s;
+    requestAnimationFrame(() => this.refreshRaycasters());
+  },
+
+  teardownDim: function () {
+    if (this.dimEl) {
+      this.dimEl.removeEventListener("click", this.onDimClick);
+      if (this.dimEl.parentNode) this.dimEl.parentNode.removeChild(this.dimEl);
+      this.dimEl = null;
+    }
+  },
+
+  // --- world-anchored title + year label below the focused tile ------------
+  buildLabel: function (title, focusPos, faceQuat) {
+    const ui = document.createElement("a-entity");
+    ui.setAttribute("position", `${focusPos.x} ${focusPos.y} ${focusPos.z}`);
+    const eu = new THREE.Euler().setFromQuaternion(faceQuat, "YXZ");
+    ui.setAttribute(
+      "rotation",
+      `${THREE.MathUtils.radToDeg(eu.x)} ${THREE.MathUtils.radToDeg(
+        eu.y
+      )} ${THREE.MathUtils.radToDeg(eu.z)}`
+    );
+
+    const halfH = this.data.height / 2;
+    // A dark strip behind the text so it stays legible over any environment.
+    const back = document.createElement("a-plane");
+    back.setAttribute("width", 2.6);
+    back.setAttribute("height", 0.62);
+    back.setAttribute("position", `0 ${-(halfH + 0.36)} 0`);
+    back.setAttribute(
+      "material",
+      "color: #000000; opacity: 0.55; shader: flat; transparent: true; fog: false"
+    );
+    ui.appendChild(back);
+
+    // Title (white, prominent) + year (grey), matching Zone A's VR label.
+    const titleEl = this.makeText(title, { width: 2.6, color: "#ffffff" });
+    titleEl.setAttribute("position", `0 ${-(halfH + 0.25)} 0.02`);
+    ui.appendChild(titleEl);
+
+    const yearEl = this.makeText("2026", { width: 1.8, color: "#c8c8c8" });
+    yearEl.setAttribute("position", `0 ${-(halfH + 0.5)} 0.02`);
+    ui.appendChild(yearEl);
+
+    this.el.sceneEl.appendChild(ui);
+    this.uiEl = ui;
+  },
+
+  teardownLabel: function () {
+    if (this.uiEl && this.uiEl.parentNode) {
+      this.uiEl.parentNode.removeChild(this.uiEl);
+    }
+    this.uiEl = null;
+  },
+
+  makeText: function (value, opts) {
+    const t = document.createElement("a-entity");
+    t.setAttribute(
+      "text",
+      Object.assign(
+        { value: value, align: "center", color: "#ffffff", width: 2 },
+        opts || {}
+      )
+    );
+    return t;
+  },
+
+  // Nudge the laser raycasters to rebuild their target lists after the dim
+  // sphere is added/removed (mirrors Zone A's VR focus).
+  refreshRaycasters: function () {
+    ["rightHand", "leftHand"].forEach(function (id) {
+      const el = document.getElementById(id);
+      const rc = el && el.components && el.components.raycaster;
+      if (rc) rc.refreshObjects();
+    });
+  },
+
+  remove: function () {
+    this.el.removeEventListener("click", this.onClick);
+    // If focused mid-teardown, snap the tile home so the grid isn't left broken.
+    if (this.focused && this.home) {
+      const obj = this.focused.object3D;
+      obj.position.copy(this.home.pos);
+      obj.quaternion.copy(this.home.quat);
+      obj.scale.copy(this.home.scale);
+    }
+    this.teardownDim();
+    this.teardownLabel();
+    if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
+    this.focused = null;
+    this.home = null;
+    this.anim = null;
   },
 });
