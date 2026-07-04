@@ -4,11 +4,19 @@
 #
 # Reads every image in a SOURCE folder (default: web4map/) and writes a
 # downscaled derivative of each into a SEPARATE sibling OUTPUT folder
-# (default: web4map-512/), at EXACTLY WxH (512x384 = 4:3) by scaling to fill
-# then centre-cropping (aspect preserved, never squashed) so tiles display
-# undistorted on the wall's 4:3 planes. Derivatives KEEP THE ORIGINAL FILENAME
-# exactly (only the folder + pixel size change — the filename carries the
-# ticket title used later in focus mode); the full-frame originals stay put.
+# (default: web4map-512/), FIT inside a WxH box (512x384) preserving aspect —
+# the full frame, never cropped or squashed (a 3:2 600x400 source lands at
+# 512x341). The wall's `aspect` tunable is set to match so tiles display
+# undistorted. Derivatives KEEP THE ORIGINAL FILENAME exactly (only the folder
+# + pixel size change — the filename carries the ticket title used later in
+# focus mode); the full-frame originals stay put.
+#
+# COLOUR: the originals carry a wide-gamut Kodak ROMM/ProPhoto RGB ICC profile.
+# A-Frame uploads derivatives as WebGL textures, which are NOT ICC-colour-
+# managed, so an embedded profile would be ignored and the colours would shift.
+# We therefore CONVERT each image from its embedded profile to sRGB and BAKE
+# that into the pixels (then strip all profiles). The sRGB target profile is
+# repo-local (tools/sRGB.icc) so the script stays portable.
 #
 # Emits manifest.json as an ARRAY OF OBJECTS, one per image:
 #     { "file": "112233x.jpg", "title": "Ticket 112233" }
@@ -57,6 +65,17 @@ fi
 
 mkdir -p "$OUT"
 
+# Colour management target: convert each image's embedded (wide-gamut) profile
+# to sRGB and bake it into the pixels. Repo-local profile keeps this portable;
+# if it's missing we warn and skip conversion rather than error.
+SRGB_ICC="${SRGB_ICC:-$SCRIPT_DIR/sRGB.icc}"
+if [ -f "$SRGB_ICC" ]; then
+  CM=(-profile "$SRGB_ICC")
+else
+  echo "WARNING: sRGB profile '$SRGB_ICC' not found; skipping colour conversion (colours may shift)." >&2
+  CM=()
+fi
+
 # --- Collect source images (not hardcoded), natural-sorted -----------------
 mapfile -t ALL < <(
   find "$SRC" -maxdepth 1 -type f \
@@ -98,14 +117,11 @@ for f in "${ALL[@]}"; do
     continue
   fi
 
-  # Derivative is EXACTLY WxH (512x384 = 4:3) so it displays undistorted on the
-  # wall's 4:3 tiles. `-resize WxH^` scales to FILL the box preserving aspect
-  # (no squash), then `-extent` centre-crops to the exact box: a 3:2 source
-  # (600x400) fills then loses a thin strip off the sides — never stretched.
-  # The full-frame original is kept in the source folder for focus mode.
-  # -auto-orient respects EXIF rotation; -strip drops metadata.
-  magick "$src" -auto-orient -strip \
-    -resize "${W}x${H}^" -gravity center -extent "${W}x${H}" "$dst"
+  # -auto-orient: apply EXIF rotation. CM: convert embedded profile -> sRGB
+  # (baked into pixels). -resize WxH (no '!'): fit INSIDE the box preserving the
+  # full frame — a 3:2 source lands at 512x341, never cropped or squashed.
+  # -strip: drop the now-sRGB profile + all metadata (pixels are already sRGB).
+  magick "$src" -auto-orient "${CM[@]}" -resize "${W}x${H}" -strip "$dst"
   made=$((made + 1))
 done
 
