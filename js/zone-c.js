@@ -647,8 +647,10 @@ AFRAME.registerComponent("zone-c-root", {
 //
 // The ellipse is the SAME radial-gradient texture on a non-uniform quad:
 // cueWidth spans the screen's width axis, cueDepth the front/back axis.
-// cueWidth 0 = AUTO: 1.2 × the parent zone-c-root's screenWidth (mirrors
-// image-wall's width-AUTO idiom).
+// cueWidth 0 = AUTO: 1.35 × the parent zone-c-root's screenWidth (mirrors
+// image-wall's width-AUTO idiom). `intensity` boosts the profile-resolved
+// opacity for THIS cue only — the big ellipse needs more presence than the
+// shared profiles (tuned for Zone A/B's small pools) give it.
 //
 // Env adaptation: identical contract to ring/wall cues — adopt the active
 // ground profile on init, retune the material on every `environmentchanged`
@@ -659,9 +661,15 @@ AFRAME.registerComponent("zone-c-root", {
 // ----------------------------------------------------------------
 AFRAME.registerComponent("screen-contact-cue", {
   schema: {
-    cueWidth: { type: "number", default: 0 }, // m; 0 = AUTO (1.2 × screenWidth)
-    cueDepth: { type: "number", default: 2.5 }, // m front-to-back
+    cueWidth: { type: "number", default: 0 }, // m; 0 = AUTO (1.35 × screenWidth)
+    cueDepth: { type: "number", default: 3.2 }, // m front-to-back
     opacity: { type: "number", default: 0.3 }, // base opacity; profile may override
+    // The env profiles' opacities are tuned for Zone A/B's small per-image
+    // pools and leave this one big ellipse too faint next to the player UI.
+    // intensity scales the PROFILE-RESOLVED opacity for this cue only, so it
+    // reads stronger in every environment without touching the shared
+    // profiles (shadow gets darker, glow gets brighter).
+    intensity: { type: "number", default: 1.6 },
     softness: { type: "number", default: 0.55 }, // gradient falloff 0 (hard)..1 (soft)
     yoffset: { type: "number", default: 0.02 }, // metres above the floor (world y)
     color: { type: "color", default: "#000000" }, // tint; profile may override
@@ -699,13 +707,22 @@ AFRAME.registerComponent("screen-contact-cue", {
     // already-active profile now, and follow every later switch.
     this.onEnvChange = (e) => {
       this.curProfile = (e.detail && e.detail.profile) || null;
-      ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+      this.tune();
     };
     this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
     this.curProfile = ContactCue.currentProfile();
-    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    this.tune();
 
     this.layout();
+  },
+
+  // Shared retune + this cue's own intensity boost on the resolved opacity.
+  tune: function () {
+    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    this.material.opacity = Math.min(
+      1,
+      this.material.opacity * this.data.intensity
+    );
   },
 
   update: function (oldData) {
@@ -722,20 +739,20 @@ AFRAME.registerComponent("screen-contact-cue", {
       this.buildGeometry();
     }
     if (oldData.yoffset !== d.yoffset) this.layout();
-    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    this.tune();
   },
 
-  // cueWidth=0 means AUTO: 1.2 × the screen's width, read live from the parent
-  // zone-c-root (so tuning screenWidth re-sizes the cue with it).
+  // cueWidth=0 means AUTO: 1.35 × the screen's width, read live from the
+  // parent zone-c-root (so tuning screenWidth re-sizes the cue with it).
   resolveWidth: function () {
     if (this.data.cueWidth > 0) return this.data.cueWidth;
     const root =
       this.el.parentNode &&
       this.el.parentNode.components &&
       this.el.parentNode.components["zone-c-root"];
-    if (root) return root.data.screenWidth * 1.2;
-    console.warn("screen-contact-cue: no zone-c-root parent; FALLBACK 14.4 m");
-    return 14.4;
+    if (root) return root.data.screenWidth * 1.35;
+    console.warn("screen-contact-cue: no zone-c-root parent; FALLBACK 16.2 m");
+    return 16.2;
   },
 
   buildGeometry: function () {
@@ -795,7 +812,9 @@ AFRAME.registerComponent("screen-contact-cue", {
 //
 // Ground contact cue:
 //   • Void/light environment: soft dark elliptical shadow pool under the
-//     screen — faint, wider than the screen (~1.2 × its width, ~2.5 m deep).
+//     screen — clearly wider than the screen (~1.35 × its width, ~3.2 m
+//     deep), reading distinctly darker than Zone A/B's small pools
+//     (intensity boost on the profile opacity).
 //   • Dataspace/dark environment: the same pool as a soft neon glow instead.
 //   • Cycle environments (`e` key / right-hand B) while standing in Zone C:
 //     the cue retunes colour/blend/opacity in place — no flicker, no rebuild.
