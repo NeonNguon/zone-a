@@ -44,7 +44,17 @@ AFRAME.registerComponent("zone-c-root", {
   },
 
   init: function () {
+    this.started = false; // becomes true on the first user-gesture play
+    this.buildVideo();
     this.build();
+
+    // First click on the screen is THE user gesture that unlocks playback
+    // (Quest/mobile refuse programmatic play before one). Desktop mouse and
+    // VR laser trigger both arrive here as the same `click`.
+    this.onScreenClick = () => {
+      if (!this.started) this.startPlayback();
+    };
+    this.screenEl.addEventListener("click", this.onScreenClick);
   },
 
   update: function () {
@@ -111,5 +121,70 @@ AFRAME.registerComponent("zone-c-root", {
     this.screenEl.setAttribute("position", `0 ${centerY} 0`);
 
     this.glyphEl.setAttribute("position", `0 ${centerY} 0.05`);
+  },
+
+  // --- the <video> element: created up front, PLAYED only on user gesture ---
+  buildVideo: function () {
+    const v = document.createElement("video");
+    // crossorigin BEFORE src so the fetch itself carries it. Same-origin
+    // today (no CORS in play), but this keeps the element CDN-ready.
+    v.crossOrigin = "anonymous";
+    v.preload = "metadata"; // duration/dimensions early; no eager full fetch
+    v.playsInline = true;
+    v.setAttribute("playsinline", ""); // attribute form for older mobile WebKit
+    v.loop = false;
+    v.src = VIDEO_URL;
+    this.videoEl = v;
+    this.videoTexture = null;
+  },
+
+  // First-gesture entry point: build the video texture, swap it onto the
+  // screen, and start playback — all inside the user's click so mobile/Quest
+  // gesture requirements are satisfied. (Positional audio hooks in here too,
+  // for the same reason: AudioContext creation needs the gesture.)
+  startPlayback: function () {
+    const v = this.videoEl;
+    if (!this.started) {
+      this.started = true;
+      this.applyVideoTexture();
+      this.glyphEl.setAttribute("visible", false);
+    }
+    if (v.ended) v.currentTime = 0; // replay from the top after a run-through
+    const p = v.play();
+    if (p && p.catch) {
+      p.catch((err) => console.warn("zone-c: video play() rejected", err));
+    }
+  },
+
+  applyVideoTexture: function () {
+    if (this.videoTexture) return;
+    const tex = new THREE.VideoTexture(this.videoEl);
+    // Video frames are sRGB; without this the screen renders washed out.
+    if ("colorSpace" in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    else tex.encoding = THREE.sRGBEncoding;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    this.videoTexture = tex;
+
+    // Swap the map directly on the existing flat material (set once in
+    // build()); nothing else re-sets the material attribute, so the map
+    // survives. VideoTexture re-uploads every frame on its own.
+    const mesh = this.screenEl.getObject3D("mesh");
+    if (!mesh) return;
+    mesh.material.map = tex;
+    mesh.material.color.set("#ffffff"); // stop the dark tint multiplying video
+    mesh.material.needsUpdate = true;
+  },
+
+  remove: function () {
+    this.screenEl.removeEventListener("click", this.onScreenClick);
+    const v = this.videoEl;
+    if (v) {
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+    }
+    if (this.videoTexture) this.videoTexture.dispose();
   },
 });
