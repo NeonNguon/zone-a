@@ -129,14 +129,15 @@
            ZONE C — outdoor cinema: one 16:9 video screen, OPPOSITE Zone B.
            zone-c-root offsets the WHOLE assembly (screen + controls + audio)
            as a unit (same pattern as zone-a-root / zone-b-root); the default
-           -13 3 0 mirrors Zone B's 13 3 0 across the spawn point, so facing
-           +x you see the wall and facing -x you see the cinema. The screen
-           is rotated inside the component to face back toward spawn.
+           started as Zone B's mirror across the spawn point (-13 3 0), then
+           was nudged 1 m closer to spawn (-12 3 0) — facing +x you see the
+           wall and facing -x you see the cinema. The screen is rotated
+           inside the component to face back toward spawn.
            All other tunables (screenWidth / screenHeightAboveFloor /
            controlsFadeDelay / audioRefDistance / audioRolloff) live on the
            zone-c-root schema — see js/zone-c.js.
            ============================================================ -->
-      <a-entity id="zone-c" zone-c-root="offset: -13 3 0">
+      <a-entity id="zone-c" zone-c-root="offset: -12 3 0">
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
              none). Lives under #zone-c so it PERSISTS across environment

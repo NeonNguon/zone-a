@@ -12,15 +12,17 @@
 // change ONLY this constant. Same-origin today, but the <video> element is
 // created with crossorigin="anonymous" so a CDN swap needs no code change.
 const VIDEO_URL = "video/GoEastV2.mp4";
+// Pre-play thumbnail shown on the screen until the first frame takes over.
+const POSTER_URL = "video/thumbnail.jpg";
 
 // ----------------------------------------------------------------
 // zone-c-root: the SINGLE placement handle for the whole Zone C assembly,
 // mirroring zone-a-root / zone-b-root. Every Zone C child (screen, control
 // strip, positional audio) is built under this entity, so moving the one
-// `offset` moves the entire cinema as a unit. Default offset mirrors Zone B
-// across the spawn point: Zone B sits at 13 3 0 (+x), so Zone C sits at
-// -13 3 0 (-x). Adjust live, e.g.:
-//   document.getElementById('zone-c').setAttribute('zone-c-root','offset','-15 3 0')
+// `offset` moves the entire cinema as a unit. Default offset started as Zone
+// B's mirror across the spawn point (Zone B at 13 3 0 → -13 3 0), then was
+// nudged 1 m closer to spawn: -12 3 0. Adjust live, e.g.:
+//   document.getElementById('zone-c').setAttribute('zone-c-root','offset','-14 3 0')
 //
 // TUNABLES (all schema properties — adjustable by eye, no code edits):
 //   offset                 — assembly position (vec3), the placement handle.
@@ -35,9 +37,12 @@ const VIDEO_URL = "video/GoEastV2.mp4";
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-c-root", {
   schema: {
-    offset: { type: "vec3", default: { x: -13, y: 3, z: 0 } },
-    screenWidth: { type: "number", default: 12 },
-    screenHeightAboveFloor: { type: "number", default: 1 },
+    offset: { type: "vec3", default: { x: -12, y: 3, z: 0 } },
+    // 9.6 = 80% of the original 12 m screen; the raised bottom edge (1.675 m)
+    // keeps the ORIGINAL screen centre (4.375 m) — it shrank in place rather
+    // than sinking with its bottom edge.
+    screenWidth: { type: "number", default: 9.6 },
+    screenHeightAboveFloor: { type: "number", default: 1.675 },
     controlsFadeDelay: { type: "number", default: 4000 }, // ms
     audioRefDistance: { type: "number", default: 8 },
     audioRolloff: { type: "number", default: 5 },
@@ -99,10 +104,12 @@ AFRAME.registerComponent("zone-c-root", {
     this.el.appendChild(container);
     this.container = container;
 
-    // The screen: a dark 16:9 plane until the video's first frame arrives —
-    // deliberately not pure black so it reads as a surface, not a hole.
-    // It is ALWAYS clickable: first click starts playback (the user gesture
-    // Quest/mobile require); later clicks just revive the control strip.
+    // The screen: shows the film's thumbnail until the video's first frame
+    // takes over (dark until the poster loads, so it never reads as a hole).
+    // No play glyph on top — the control strip appears on hover and carries
+    // the affordance. The screen is ALWAYS clickable: first click starts
+    // playback (the user gesture Quest/mobile require); later clicks just
+    // revive the control strip.
     const screen = document.createElement("a-plane");
     screen.setAttribute("class", "clickable");
     screen.setAttribute(
@@ -111,22 +118,35 @@ AFRAME.registerComponent("zone-c-root", {
     );
     container.appendChild(screen);
     this.screenEl = screen;
-
-    // Subtle play affordance floating just in front of the dark screen —
-    // a simple geometric triangle (no font dependency). Hidden forever after
-    // the first play.
-    const glyph = document.createElement("a-triangle");
-    glyph.setAttribute("vertex-a", "-0.45 0.6 0");
-    glyph.setAttribute("vertex-b", "-0.45 -0.6 0");
-    glyph.setAttribute("vertex-c", "0.75 0 0");
-    glyph.setAttribute(
-      "material",
-      "shader: flat; color: #d8d8d8; transparent: true; opacity: 0.55; fog: false"
-    );
-    container.appendChild(glyph);
-    this.glyphEl = glyph;
+    this.loadPoster();
 
     this.layout();
+  },
+
+  // Poster is loaded manually (not via the material's src) so it shares the
+  // same swap path as the video texture and can't race it: whichever of
+  // [poster loaded / mesh ready] finishes last applies it, and it never
+  // overwrites an already-running video map.
+  loadPoster: function () {
+    this.posterTexture = null;
+    const apply = () => {
+      const mesh = this.screenEl.getObject3D("mesh");
+      if (!mesh || !this.posterTexture || this.videoTexture) return;
+      mesh.material.map = this.posterTexture;
+      mesh.material.color.set("#ffffff");
+      mesh.material.needsUpdate = true;
+    };
+    new THREE.TextureLoader().load(
+      POSTER_URL,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        this.posterTexture = tex;
+        apply();
+      },
+      undefined,
+      () => console.warn("zone-c: poster failed to load", POSTER_URL)
+    );
+    this.screenEl.addEventListener("loaded", apply, { once: true });
   },
 
   // --- sizes/positions from the live schema (re-run on any tunable change) --
@@ -143,8 +163,6 @@ AFRAME.registerComponent("zone-c-root", {
     this.screenEl.setAttribute("width", w);
     this.screenEl.setAttribute("height", h);
     this.screenEl.setAttribute("position", `0 ${centerY} 0`);
-
-    this.glyphEl.setAttribute("position", `0 ${centerY} 0.05`);
 
     if (this.stripEl) this.layoutControls();
   },
@@ -538,7 +556,6 @@ AFRAME.registerComponent("zone-c-root", {
       this.started = true;
       this.applyVideoTexture();
       this.initAudio(); // AudioContext creation ALSO needs the user gesture
-      this.glyphEl.setAttribute("visible", false);
     }
     if (v.ended) v.currentTime = 0; // replay from the top after a run-through
     const p = v.play();
@@ -574,7 +591,7 @@ AFRAME.registerComponent("zone-c-root", {
   // element's output entirely, so nothing plays "in your head"). Exponential
   // distance model: full volume within audioRefDistance of the screen,
   // falling off at audioRolloff beyond it — with the defaults (8 / 5) the
-  // film is clearly present ~10 m out and near-silent at spawn, 13 m away.
+  // film is clearly present ~10 m out and near-silent at spawn, 12 m away.
   // Built here (not init) because creating an AudioContext outside a user
   // gesture leaves it suspended on Quest/mobile.
   initAudio: function () {
@@ -633,6 +650,7 @@ AFRAME.registerComponent("zone-c-root", {
       v.load();
     }
     if (this.videoTexture) this.videoTexture.dispose();
+    if (this.posterTexture) this.posterTexture.dispose();
   },
 });
 
@@ -789,10 +807,11 @@ AFRAME.registerComponent("screen-contact-cue", {
 // TESTING NOTES — Zone C Pass 1
 //
 // Desktop:
-//   • Load, turn to face -x (opposite the wall): dark 16:9 screen, subtle
-//     play triangle, bottom edge ~1 m off the floor.
+//   • Load, turn to face -x (opposite the wall): 16:9 screen showing the
+//     film's thumbnail (dark plane only until it loads), bottom edge
+//     ~1.7 m off the floor. No play glyph — hover brings up the strip.
 //   • Click the screen → video plays, sound clearly localised AT the screen.
-//   • Walk back to spawn (13 m) → audio falls to near-nothing; walk within
+//   • Walk back to spawn (12 m) → audio falls to near-nothing; walk within
 //     ~10 m → clearly present again.
 //   • Hover/move the mouse over screen or strip → strip fades in below the
 //     screen; leave everything idle ~4 s → strip fades out and no longer
