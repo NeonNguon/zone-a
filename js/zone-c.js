@@ -83,6 +83,10 @@ AFRAME.registerComponent("zone-c-root", {
     this.el.setAttribute("position", { x: o.x, y: o.y, z: o.z });
     if (this.container) this.layout();
     this.applyAudioTunables();
+    // Broadcast so the screen's floor cue re-derives against the new offset /
+    // screenWidth — it stays pinned to the world floor regardless of the
+    // root's y (same contract as zone-b-root's zonebrootchanged).
+    this.el.emit("zonecrootchanged");
   },
 
   // --- static scene graph: built once; layout() owns all sizes/positions ---
@@ -632,6 +636,138 @@ AFRAME.registerComponent("zone-c-root", {
   },
 });
 
+// ----------------------------------------------------------------
+// screen-contact-cue — the cinema screen's floor contact cue.
+//
+// ONE wide elliptical pool on the floor under the screen (the control strip
+// deliberately gets none), so the screen reads as deliberately-floating-but-
+// anchored — same philosophy as Zone A's ring cues and Zone B's wall cues.
+// ALL texture / material / env-retune logic is the shared ContactCue kit in
+// components.js; this component owns only its single quad's geometry+layout.
+//
+// The ellipse is the SAME radial-gradient texture on a non-uniform quad:
+// cueWidth spans the screen's width axis, cueDepth the front/back axis.
+// cueWidth 0 = AUTO: 1.2 × the parent zone-c-root's screenWidth (mirrors
+// image-wall's width-AUTO idiom).
+//
+// Env adaptation: identical contract to ring/wall cues — adopt the active
+// ground profile on init, retune the material on every `environmentchanged`
+// (shadow on light floors, glow on dark ones, dark-shadow fallback when the
+// preset declares no profile). GEOMETRY persists; only the material retunes.
+// Lives under #zone-c, which env teardown never touches, and re-pins to the
+// world floor on `zonecrootchanged` (offset / screenWidth tweaks).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("screen-contact-cue", {
+  schema: {
+    cueWidth: { type: "number", default: 0 }, // m; 0 = AUTO (1.2 × screenWidth)
+    cueDepth: { type: "number", default: 2.5 }, // m front-to-back
+    opacity: { type: "number", default: 0.3 }, // base opacity; profile may override
+    softness: { type: "number", default: 0.55 }, // gradient falloff 0 (hard)..1 (soft)
+    yoffset: { type: "number", default: 0.02 }, // metres above the floor (world y)
+    color: { type: "color", default: "#000000" }, // tint; profile may override
+    mode: { type: "string", default: "shadow" }, // "shadow" | "glow"
+  },
+
+  init: function () {
+    this.curProfile = null;
+
+    this.group = new THREE.Group();
+    this.el.setObject3D("cue", this.group);
+
+    // Shared texture + material (identical to Zone A/B cues).
+    this.texture = ContactCue.makeTexture(this.data.softness);
+    this.material = ContactCue.makeMaterial(this.data, this.texture);
+    this.geometry = null;
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
+    // Lie flat facing up, then spin a quarter turn about its own normal so the
+    // geometry's WIDTH axis runs along world z — the axis the screen (which
+    // faces +x) spans. Euler XYZ applies the z-spin before the x-flatten.
+    this.mesh.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
+    this.group.add(this.mesh);
+    this.buildGeometry();
+
+    // Re-pin/re-size when the whole Zone C assembly moves or resizes.
+    this.onMoved = () => {
+      this.buildGeometry(); // AUTO width follows screenWidth
+      this.layout();
+    };
+    if (this.el.parentNode) {
+      this.el.parentNode.addEventListener("zonecrootchanged", this.onMoved);
+    }
+
+    // Retune with the environment (same contract as ring/wall cues): adopt the
+    // already-active profile now, and follow every later switch.
+    this.onEnvChange = (e) => {
+      this.curProfile = (e.detail && e.detail.profile) || null;
+      ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    };
+    this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
+    this.curProfile = ContactCue.currentProfile();
+    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+
+    this.layout();
+  },
+
+  update: function (oldData) {
+    if (Object.keys(oldData).length === 0) return; // first update: init did it
+    const d = this.data;
+    if (oldData.softness !== d.softness) {
+      const old = this.texture;
+      this.texture = ContactCue.makeTexture(d.softness);
+      this.material.map = this.texture;
+      this.material.needsUpdate = true;
+      if (old) old.dispose();
+    }
+    if (oldData.cueWidth !== d.cueWidth || oldData.cueDepth !== d.cueDepth) {
+      this.buildGeometry();
+    }
+    if (oldData.yoffset !== d.yoffset) this.layout();
+    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+  },
+
+  // cueWidth=0 means AUTO: 1.2 × the screen's width, read live from the parent
+  // zone-c-root (so tuning screenWidth re-sizes the cue with it).
+  resolveWidth: function () {
+    if (this.data.cueWidth > 0) return this.data.cueWidth;
+    const root =
+      this.el.parentNode &&
+      this.el.parentNode.components &&
+      this.el.parentNode.components["zone-c-root"];
+    if (root) return root.data.screenWidth * 1.2;
+    console.warn("screen-contact-cue: no zone-c-root parent; FALLBACK 14.4 m");
+    return 14.4;
+  },
+
+  buildGeometry: function () {
+    const w = this.resolveWidth();
+    const old = this.geometry;
+    this.geometry = new THREE.PlaneGeometry(w, this.data.cueDepth);
+    this.mesh.geometry = this.geometry;
+    if (old) old.dispose();
+  },
+
+  // Pin the quad to the WORLD floor directly under the screen's centre (the
+  // screen sits at the root's x,z; only y needs forcing to floor+yoffset).
+  layout: function () {
+    this.el.object3D.updateWorldMatrix(true, false);
+    const v = this.el.object3D.getWorldPosition(new THREE.Vector3());
+    v.y = this.data.yoffset;
+    this.el.object3D.worldToLocal(v);
+    this.mesh.position.copy(v);
+  },
+
+  remove: function () {
+    this.el.sceneEl.removeEventListener("environmentchanged", this.onEnvChange);
+    if (this.el.parentNode) {
+      this.el.parentNode.removeEventListener("zonecrootchanged", this.onMoved);
+    }
+    this.el.removeObject3D("cue");
+    if (this.geometry) this.geometry.dispose();
+    if (this.material) this.material.dispose();
+    if (this.texture) this.texture.dispose();
+  },
+});
+
 // ================================================================
 // TESTING NOTES — Zone C Pass 1
 //
@@ -657,9 +793,20 @@ AFRAME.registerComponent("zone-c-root", {
 //     If Quest fps suffers, report it — we may generate a 720p derivative
 //     for the in-scene screen (VIDEO_URL is the single swap point).
 //
+// Ground contact cue:
+//   • Void/light environment: soft dark elliptical shadow pool under the
+//     screen — faint, wider than the screen (~1.2 × its width, ~2.5 m deep).
+//   • Dataspace/dark environment: the same pool as a soft neon glow instead.
+//   • Cycle environments (`e` key / right-hand B) while standing in Zone C:
+//     the cue retunes colour/blend/opacity in place — no flicker, no rebuild.
+//   • Move the zone (offset) or resize the screen (screenWidth): the cue
+//     follows the screen and re-sizes with it (cueWidth AUTO = 1.2 × width).
+//
 // Live tuning from the console, e.g.:
 //   document.getElementById('zone-c')
 //     .setAttribute('zone-c-root', 'audioRefDistance', 10)
 //   ...same for offset / screenWidth / screenHeightAboveFloor /
-//   controlsFadeDelay / audioRolloff.
+//   controlsFadeDelay / audioRolloff. The cue's knobs live on its own child
+//   entity: document.querySelector('[screen-contact-cue]')
+//     .setAttribute('screen-contact-cue', 'cueDepth', 3)
 // ================================================================

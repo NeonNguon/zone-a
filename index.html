@@ -136,7 +136,17 @@
            controlsFadeDelay / audioRefDistance / audioRolloff) live on the
            zone-c-root schema — see js/zone-c.js.
            ============================================================ -->
-      <a-entity id="zone-c" zone-c-root="offset: -13 3 0"></a-entity>
+      <a-entity id="zone-c" zone-c-root="offset: -13 3 0">
+        <!-- Floor contact cue under the screen: one wide elliptical pool
+             (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
+             none). Lives under #zone-c so it PERSISTS across environment
+             switches (env teardown only touches #environment); it reuses the
+             shared ContactCue kit and retunes its material to each preset's
+             ground profile, exactly like Zone A's ring cues and Zone B's
+             wall cues. Tunables: cueWidth / cueDepth / opacity / softness /
+             yoffset. -->
+        <a-entity screen-contact-cue></a-entity>
+      </a-entity>
 
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
            .clickable and emits mouseenter/mouseleave/click on the images. -->
