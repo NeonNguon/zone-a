@@ -61,23 +61,27 @@ AFRAME.registerComponent("image-wall", {
     rows: { type: "int", default: 10 },
     cols: { type: "int", default: 10 },
     aspect: { type: "number", default: 1.333 }, // tile w:h (4:3)
-    manifest: { type: "string", default: "lottery-512/manifest.json" },
-    basePath: { type: "string", default: "lottery-512/" }, // prefix for tile URLs
+    manifest: { type: "string", default: "web4map-512/manifest.json" },
+    basePath: { type: "string", default: "web4map-512/" }, // prefix for tile URLs
   },
 
   init: function () {
     this.tiles = []; // a-image elements this component created
-    this.names = null; // manifest filenames, once fetched
+    this.entries = null; // manifest entries { file, title }, once fetched
 
     // Fetch the manifest once, then build. update() re-lays-out on later prop
-    // tweaks (it no-ops until this resolves).
+    // tweaks (it no-ops until this resolves). The manifest is an array of
+    // objects { file, title }; a bare string is tolerated as a file with no
+    // title (older manifest shape).
     fetch(this.data.manifest)
       .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
       .then((list) => {
-        this.names = Array.isArray(list) ? list : [];
+        this.entries = (Array.isArray(list) ? list : []).map((e) =>
+          typeof e === "string" ? { file: e, title: "" } : e
+        );
         this.build();
       })
       .catch((err) => {
@@ -92,7 +96,7 @@ AFRAME.registerComponent("image-wall", {
   // Re-layout on any live tunable change (width/gap/rows/cols/aspect). No-op
   // until the manifest has arrived (the first update() runs before the fetch).
   update: function () {
-    if (this.names) this.build();
+    if (this.entries) this.build();
   },
 
   // width=0 means AUTO: read Zone A's ring radius from its own source of truth
@@ -139,7 +143,7 @@ AFRAME.registerComponent("image-wall", {
     const cellH = tileH + gapAbs;
     const height = rows * cellH;
 
-    const have = this.names.length;
+    const have = this.entries.length;
     const n = Math.min(have, slots);
     if (have < slots) {
       console.warn(
@@ -162,13 +166,18 @@ AFRAME.registerComponent("image-wall", {
 
       if (row === 0) this.bottomLocals.push(new THREE.Vector3(x, y, 0));
 
-      // Filenames carry spaces/parens; encode so the texture URL is valid.
-      const url = d.basePath + encodeURIComponent(this.names[i]);
+      // Each manifest entry is { file, title }. Use `file` for the texture URL
+      // (encoded so any special chars are valid) and CARRY `title` on the tile
+      // (data-title) so focus mode can read it later — not used for display now.
+      const entry = this.entries[i];
+      const url = d.basePath + encodeURIComponent(entry.file);
       const img = document.createElement("a-image");
       img.setAttribute("src", url); // plain URL, not an asset id
       img.setAttribute("position", `${x} ${y} 0`);
       img.setAttribute("width", tileW);
       img.setAttribute("height", tileH); // width/height set separately -> no squash
+      img.setAttribute("data-title", entry.title || ""); // carried for focus mode
+      img.dataset.file = entry.file; // also carry the source filename
       this.el.appendChild(img);
       this.tiles.push(img);
     }
