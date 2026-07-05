@@ -335,6 +335,24 @@
              this one big pool doesn't read faint. Tunables: cueWidth /
              cueDepth / intensity / opacity / softness / yoffset. -->
         <a-entity screen-contact-cue></a-entity>
+
+        <!-- Đá mài terrazzo bench at the seated viewing spot, ~6 m in front
+             of the screen, facing it (backrest toward spawn). Rides the
+             zone-c-root offset; the local y -3 counteracts the root's raised
+             y so the bench sits on the world floor. NUDGE BY EYE via these
+             two attributes (the component itself is zone-agnostic):
+               position — local; +x is toward spawn, y -3 = floor.
+               rotation — yaw -90 turns the sitter to face the screen (-x).
+             The contact cue reuses the shared spot-contact-cue with a
+             bench-sized elliptical footprint (width/depth), same env-switch
+             retune as every other cue. -->
+        <a-entity
+          id="zone-c-bench"
+          terrazzo-bench
+          position="6 -3 0"
+          rotation="0 -90 0"
+          spot-contact-cue="width: 1.7; depth: 1.0; yoffset: 0.02"
+        ></a-entity>
       </a-entity>
 
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
