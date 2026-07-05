@@ -38,6 +38,71 @@
     <!-- Zone B web focus overlay styles (blurred overlay, Helvetica). -->
     <link rel="stylesheet" href="css/zone-b-focus.css" />
 
+    <!-- Loading splash: full-viewport exhibition title card, visible from the
+         very first paint (plain HTML/CSS — no framework, no webfont: system
+         Roboto/Helvetica stack only). Dismissed by the small script at the end
+         of <body> when the A-Frame scene fires `loaded`: a 1 s opacity fade
+         (this transition), then display:none. pointer-events dies with the
+         fade's start so the Enter VR button is clickable immediately. -->
+    <style>
+      #title-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 10000; /* above canvas AND the dev HUD */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #0a0a0a;
+        color: #f4f4f4;
+        font-family: Roboto, Helvetica, Arial, sans-serif;
+        text-align: center;
+        padding: 0 1.5rem;
+        opacity: 1;
+        transition: opacity 1s ease;
+      }
+      #title-splash.dismissed {
+        opacity: 0;
+        pointer-events: none; /* Enter VR reachable as soon as the fade starts */
+      }
+      #title-splash h1 {
+        margin: 0;
+        font-size: clamp(1.7rem, 5.5vw, 3.1rem);
+        font-weight: 600;
+        line-height: 1.25;
+        letter-spacing: 0.01em;
+        max-width: 18em;
+      }
+      #title-splash .subtitle {
+        margin: 1.4em 0 0;
+        font-size: clamp(0.95rem, 2.8vw, 1.35rem);
+        font-weight: 400;
+        line-height: 1.55;
+        color: #c9c9c9;
+        max-width: 32em;
+      }
+      #title-splash .byline {
+        margin: 2.2em 0 0;
+        font-size: clamp(0.8rem, 2.2vw, 1rem);
+        font-weight: 400;
+        letter-spacing: 0.04em;
+        color: #969696;
+      }
+      /* Minimal loading indicator: one small pulsing dot (no spinner). */
+      #title-splash .loading-dot {
+        margin-top: 3rem;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #e8e8e8;
+        animation: title-splash-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes title-splash-pulse {
+        0%, 100% { opacity: 0.15; }
+        50% { opacity: 1; }
+      }
+    </style>
+
     <!-- Dev-only environment HUD. Plain 2D overlay, hidden by default; the
          environment-manager shows it only when ?debug is in the URL (or you
          press `h`). Never part of the normal experience, never in VR. -->
@@ -58,6 +123,18 @@
     </style>
   </head>
   <body>
+    <!-- Loading splash (styles in <head>): the exhibition title card shown
+         while A-Frame boots. First in <body> so it paints before the canvas. -->
+    <div id="title-splash">
+      <h1>New Topographies of Memory and&nbsp;Chance</h1>
+      <p class="subtitle">
+        Expanded Photography, Algorithms, and Transnational Belonging
+        in Ho Chi Minh City
+      </p>
+      <p class="byline">a virtual exhibition by Christian Berg</p>
+      <div class="loading-dot" aria-hidden="true"></div>
+    </div>
+
     <!-- <a-scene> is a NEUTRAL host: it sets no background, fog, or lighting
          itself. defaultLightsEnabled:false stops A-Frame injecting its default
          light rig, so the environment presets fully own lighting. -->
@@ -334,5 +411,26 @@
          focus-click in components.js routes to whichever is appropriate. -->
     <script src="js/focus-desktop.js"></script>
     <script src="js/focus-vr.js"></script>
+
+    <!-- Splash dismissal: fade the title card out (1 s CSS transition) when
+         the scene finishes loading, then remove it from the layout entirely.
+         Inline because it's three lines of glue owned by the splash markup. -->
+    <script>
+      (function () {
+        var splash = document.getElementById("title-splash");
+        var scene = document.querySelector("a-scene");
+        if (!splash || !scene) return;
+        function dismiss() {
+          scene.removeEventListener("loaded", dismiss);
+          splash.classList.add("dismissed"); // starts the fade; clicks pass through
+          setTimeout(function () {
+            splash.style.display = "none";
+          }, 1100); // just past the 1 s transition
+        }
+        // `loaded` may already have fired (cached assets, fast device).
+        if (scene.hasLoaded) dismiss();
+        else scene.addEventListener("loaded", dismiss);
+      })();
+    </script>
   </body>
 </html>
