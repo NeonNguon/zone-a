@@ -3,3 +3,6 @@
 tools/tile-cache/
 tools/node_modules/
 tools/package-lock.json
+
+# Nested git repo, managed independently — not a submodule.
+100locations/
