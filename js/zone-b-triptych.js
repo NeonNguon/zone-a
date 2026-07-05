@@ -91,6 +91,8 @@ AFRAME.registerComponent("zone-b-triptych", {
       img.setAttribute("height", imgH); // width/height set separately -> no squash
       img.setAttribute("class", "clickable"); // raycaster-targetable (hover/focus)
       img.setAttribute("wall-tile-hover", ""); // the wall's black frame + pop
+      img.setAttribute("data-title", d.title); // shown by the shared wall-focus
+      img.dataset.fullsrc = encodeURI(d.srcs[i]); // full-res lightbox URL (web)
       this.el.appendChild(img);
       this.images.push(img);
     }

@@ -281,9 +281,15 @@
              tunables (imageScale / bottomHeight / stackGap) live on
              zone-b-triptych. -->
         <a-entity id="zone-b-triptych" position="-1.2 -3 13.9" rotation="0 180 0">
+          <!-- wall-focus is the wall's own capture-and-restore lightbox,
+               reused UNFORKED: it delegates clicks from its child tiles, so
+               a second instance on the stack gives the triptych the exact
+               same focus grammar (VR fly-out + web blurred overlay, one at
+               a time — each instance's `focused` guard keeps them apart). -->
           <a-entity
             id="zone-b-triptych-stack"
             zone-b-triptych="wall: #zone-b-wall"
+            wall-focus
           ></a-entity>
         </a-entity>
       </a-entity>
