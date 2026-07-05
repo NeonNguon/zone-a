@@ -286,10 +286,16 @@
                a second instance on the stack gives the triptych the exact
                same focus grammar (VR fly-out + web blurred overlay, one at
                a time — each instance's `focused` guard keeps them apart). -->
+          <!-- One elliptical floor cue under the stack footprint: the shared
+               spot-contact-cue (same kit + env-switch retune as every other
+               cue; it persists across environment switches because it lives
+               under #zone-b, not #environment). Width spans the stack's
+               ~1.35 m of images with margin; size/opacity BY EYE. -->
           <a-entity
             id="zone-b-triptych-stack"
             zone-b-triptych="wall: #zone-b-wall"
             wall-focus
+            spot-contact-cue="width: 1.9; depth: 0.9; opacity: 0.3"
           ></a-entity>
         </a-entity>
       </a-entity>
