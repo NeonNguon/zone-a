@@ -118,11 +118,11 @@ AFRAME.registerComponent("exhibition-title", {
       t.setAttribute("width", line.width);
       t.setAttribute("wrap-count", line.wrapCount);
       t.setAttribute("position", `0 ${line.y} 0.01`);
-      // The default Roboto MSDF atlas renders INVERTED (hollow outline
-      // glyphs) under this A-Frame 1.7 setup with the default negate:true —
-      // verified with a bare stock <a-text> too, so it's the font/runtime
-      // combination, not this component. negate:false un-inverts it.
-      t.setAttribute("text", "negate", false);
+      // NOTE: leave the text component's `negate` at its default (true).
+      // Software WebGL (headless Chrome/SwiftShader) renders this MSDF text
+      // with hollow/boxy artifacts EITHER way — that is a renderer artifact,
+      // not a font problem; on real GPUs the default renders solid glyphs
+      // and negate:false draws white atlas-background boxes instead.
       this.el.appendChild(t);
       // The text mesh exists only once the MSDF font has loaded.
       t.addEventListener("textfontset", () => {
