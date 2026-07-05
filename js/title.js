@@ -27,6 +27,10 @@
 //   moveThreshold (m) — camera world-position delta that counts as walking.
 //   offset (vec3)     — the card's world position.
 //   textScale         — uniform scale of the whole card.
+//   backingOpacity    — the dark card behind the text (0 disables): white
+//                       text needs it to separate from light presets like
+//                       void, and it carries the splash's near-black look
+//                       into the scene. Fades out with the text.
 // ================================================================
 AFRAME.registerComponent("exhibition-title", {
   schema: {
@@ -36,6 +40,7 @@ AFRAME.registerComponent("exhibition-title", {
     moveThreshold: { type: "number", default: 0.15 },
     offset: { type: "vec3", default: { x: 0, y: 1.7, z: -3.5 } },
     textScale: { type: "number", default: 1 },
+    backingOpacity: { type: "number", default: 0.72 },
   },
 
   // The three lines, top to bottom. width/wrapCount pin the layout: the main
@@ -75,6 +80,33 @@ AFRAME.registerComponent("exhibition-title", {
     this.worldPos = new THREE.Vector3(); // scratch
     this.cameraEl = document.getElementById("camera");
 
+    // Backing card: near-black like the DOM splash, just behind the text —
+    // the separation that keeps white text legible on light presets (void's
+    // #eeeeee background) and against the ring images behind it.
+    this.backing = document.createElement("a-plane");
+    this.backing.setAttribute("width", 4.0);
+    this.backing.setAttribute("height", 1.5);
+    this.backing.setAttribute("position", "0 0.05 -0.02");
+    this.backing.setAttribute(
+      "material",
+      `color: #0a0a0a; shader: flat; transparent: true; ` +
+        `opacity: ${this.data.backingOpacity}; fog: false; depthWrite: false`
+    );
+    this.el.appendChild(this.backing);
+    // Explicit layering: the card and the text are transparent objects almost
+    // coplanar with each other and near the (transparent-tagged) ring images
+    // behind them — distance sorting alone draws them in the wrong order
+    // (ring over card, text hollow). renderOrder pins it: ring (default 0)
+    // -> card (1) -> text (2).
+    this.backing.addEventListener(
+      "loaded",
+      () => {
+        const m = this.backing.getObject3D("mesh");
+        if (m) m.renderOrder = 1;
+      },
+      { once: true }
+    );
+
     // Three stacked a-text children (default Roboto MSDF font, unlit).
     this.texts = this.LINES.map((line) => {
       const t = document.createElement("a-text");
@@ -85,8 +117,18 @@ AFRAME.registerComponent("exhibition-title", {
       t.setAttribute("baseline", "center");
       t.setAttribute("width", line.width);
       t.setAttribute("wrap-count", line.wrapCount);
-      t.setAttribute("position", `0 ${line.y} 0`);
+      t.setAttribute("position", `0 ${line.y} 0.01`);
+      // The default Roboto MSDF atlas renders INVERTED (hollow outline
+      // glyphs) under this A-Frame 1.7 setup with the default negate:true —
+      // verified with a bare stock <a-text> too, so it's the font/runtime
+      // combination, not this component. negate:false un-inverts it.
+      t.setAttribute("text", "negate", false);
       this.el.appendChild(t);
+      // The text mesh exists only once the MSDF font has loaded.
+      t.addEventListener("textfontset", () => {
+        const o = t.getObject3D("text");
+        if (o) o.renderOrder = 2;
+      });
       return t;
     });
 
@@ -117,6 +159,10 @@ AFRAME.registerComponent("exhibition-title", {
     const d = this.data;
     this.el.setAttribute("position", d.offset);
     this.el.setAttribute("scale", `${d.textScale} ${d.textScale} ${d.textScale}`);
+    // Live backing tune — but never fight the dissolve's own fade.
+    if (this.backing && this.phase < 2) {
+      this.backing.setAttribute("material", "opacity", d.backingOpacity);
+    }
   },
 
   activate: function () {
@@ -177,11 +223,16 @@ AFRAME.registerComponent("exhibition-title", {
       return;
     }
 
-    // phase 2: dissolve.
+    // phase 2: dissolve (backing fades in step with the text).
     this.fadeElapsed += dt;
     const u = Math.min(this.fadeElapsed / (this.data.fadeDuration * 1000), 1);
     const opacity = 1 - u;
     this.texts.forEach((t) => t.setAttribute("text", "opacity", opacity));
+    this.backing.setAttribute(
+      "material",
+      "opacity",
+      this.data.backingOpacity * opacity
+    );
     if (u >= 1) {
       this.el.object3D.visible = false;
       this.phase = 3; // next tick self-deregisters
