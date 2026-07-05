@@ -252,14 +252,16 @@
         <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
 
         <!-- Zone B info terminal: at the wall's LEFT edge (the teleport
-             terminal holds the right edge), facing spawn (-x) like the wall.
-             Local to #zone-b: y -3 counteracts the root's raised y (floor).
-             NUDGE BY EYE via position/rotation. -->
+             terminal holds the right edge), angled 45° from the wall's -x
+             facing toward the spawn point (which sits almost exactly on
+             that diagonal from this corner). Local to #zone-b: y -3
+             counteracts the root's raised y (floor). NUDGE BY EYE via
+             position/rotation. -->
         <a-entity
           id="info-terminal-b"
           info-terminal="key: b"
           position="-1.2 -3 -12.23"
-          rotation="0 -90 0"
+          rotation="0 -45 0"
           spot-contact-cue
         ></a-entity>
       </a-entity>
