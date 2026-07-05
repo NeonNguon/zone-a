@@ -473,3 +473,75 @@ AFRAME.registerComponent("ring-contact-cue", {
     if (this.texture) this.texture.dispose();
   },
 });
+
+// ----------------------------------------------------------------
+// spot-contact-cue — ONE contact cue under a single object (a terminal, a
+// pedestal, any standalone prop). The smallest possible consumer of the shared
+// ContactCue kit: same runtime radial-gradient texture, same shadow/glow
+// material, same per-environment retuning as the ring/wall/map cues — only the
+// placement differs (one quad at this entity's own local origin, which is
+// expected to sit at floor level). Lives wherever its object lives (never
+// under #environment), so it persists across environment switches and only
+// retunes its material.
+//
+// Tunables (same knobs as the other cue components):
+//   radius / opacity / softness / yoffset (+ color / mode fallbacks).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("spot-contact-cue", {
+  schema: {
+    radius: { type: "number", default: 0.45 },
+    opacity: { type: "number", default: 0.3 },
+    softness: { type: "number", default: 0.55 },
+    yoffset: { type: "number", default: 0.02 }, // metres above the local floor
+    color: { type: "color", default: "#000000" },
+    mode: { type: "string", default: "shadow" }, // "shadow" | "glow"
+  },
+
+  init: function () {
+    this.curProfile = null;
+    this.texture = ContactCue.makeTexture(this.data.softness);
+    this.material = ContactCue.makeMaterial(this.data, this.texture);
+    this.geometry = new THREE.PlaneGeometry(1, 1); // scaled to diameter below
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.mesh.rotation.x = -Math.PI / 2; // lie flat, facing up
+    this.el.setObject3D("cue", this.mesh);
+    this.layout();
+
+    // Retune with the environment (same contract as every other cue).
+    this.onEnvChange = (e) => {
+      this.curProfile = (e.detail && e.detail.profile) || null;
+      ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    };
+    this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
+    this.curProfile = ContactCue.currentProfile();
+    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+  },
+
+  update: function (oldData) {
+    if (Object.keys(oldData).length === 0) return; // first update: init did it
+    const d = this.data;
+    if (oldData.softness !== d.softness) {
+      const old = this.texture;
+      this.texture = ContactCue.makeTexture(d.softness);
+      this.material.map = this.texture;
+      this.material.needsUpdate = true;
+      if (old) old.dispose();
+    }
+    this.layout();
+    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+  },
+
+  layout: function () {
+    const s = this.data.radius * 2; // plane spans the cue diameter
+    this.mesh.scale.set(s, s, 1);
+    this.mesh.position.set(0, this.data.yoffset, 0);
+  },
+
+  remove: function () {
+    this.el.sceneEl.removeEventListener("environmentchanged", this.onEnvChange);
+    this.el.removeObject3D("cue");
+    if (this.geometry) this.geometry.dispose();
+    if (this.material) this.material.dispose();
+    if (this.texture) this.texture.dispose();
+  },
+});
