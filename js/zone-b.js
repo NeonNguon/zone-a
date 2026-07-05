@@ -143,6 +143,13 @@ AFRAME.registerComponent("image-wall", {
     const cellH = tileH + gapAbs;
     const height = rows * cellH;
 
+    // Expose the computed tile geometry for other Zone B furniture: the
+    // triptych (zone-b-triptych.js) sizes its images from these, so the wall
+    // stays the single source of truth for per-image dimensions.
+    this.tileW = tileW;
+    this.tileH = tileH;
+    this.wallHeight = height;
+
     const have = this.entries.length;
     const n = Math.min(have, slots);
     if (have < slots) {
@@ -728,7 +735,12 @@ AFRAME.registerComponent("wall-focus", {
     const rect = this.tileScreenRect(tile);
     const file = tile.dataset.file || "";
     // Full-res original (browser colour-manages the embedded profile correctly).
-    this.imgEl.src = file ? "web4map/" + encodeURIComponent(file) : "";
+    // A tile may carry its own complete URL (dataset.fullsrc — used by the
+    // triptych, whose sources don't live in web4map/); the wall's tiles keep
+    // the manifest-file convention.
+    this.imgEl.src =
+      tile.dataset.fullsrc ||
+      (file ? "web4map/" + encodeURIComponent(file) : "");
     this.titleEl.textContent = tile.getAttribute("data-title") || "";
     this.yearEl.textContent = "2026"; // literal constant, not read from data
 
