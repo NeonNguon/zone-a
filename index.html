@@ -270,17 +270,17 @@
         ></a-entity>
 
         <!-- TRIPTYCH SUB-ZONE — three stacked Ticket 485496 images just past
-             teleport Terminal A (to its left as the terminal faces you),
-             turned 90° to the wall: the `0 180 0` yaw faces the stack along
-             the wall's axis, back toward the wall (world -z), so it reads
-             face-on when you walk the wall toward its right end. Local to
-             #zone-b: y -3 counteracts the root's raised y (floor); x -1.2
-             lines up with Terminal A's own wall clearance; z 13.9 clears the
-             terminal's hit box by ~1 m. PLACEHOLDER — NUDGE BY EYE via this
-             position/rotation (the whole sub-zone moves as a unit). Stack
-             tunables (imageScale / bottomHeight / stackGap) live on
-             zone-b-triptych. -->
-        <a-entity id="zone-b-triptych" position="-1.2 -3 13.9" rotation="0 180 0">
+             the wall's LEFT end (opposite Terminal A's side, beyond
+             info-terminal-b), turned 90° to the wall: at yaw 0 the stack
+             faces +z, back along the wall's axis, so it reads face-on as
+             you walk the wall toward its left end (it is edge-on from
+             spawn — by design). Local to #zone-b: y -3 counteracts the
+             root's raised y (floor); x -1.2 lines up with the terminals'
+             wall clearance; z -13.9 clears info-terminal-b's hit box by
+             ~1 m. PLACEHOLDER — NUDGE BY EYE via this position/rotation
+             (the whole sub-zone moves as a unit). Stack tunables
+             (imageScale / bottomHeight / stackGap) live on zone-b-triptych. -->
+        <a-entity id="zone-b-triptych" position="-1.2 -3 -13.9" rotation="0 0 0">
           <!-- wall-focus is the wall's own capture-and-restore lightbox,
                reused UNFORKED: it delegates clicks from its child tiles, so
                a second instance on the stack gives the triptych the exact
@@ -299,11 +299,11 @@
           ></a-entity>
 
           <!-- Triptych info terminal: to the stack's LEFT as a visitor faces
-               it (group-local -x = toward the wall plane, which has ended by
-               here), screen facing the same way as the images. The local x
-               clears the stack's images (~0.67 m half-width) and the
-               terminal's own hit box (~0.57 m half-width) with margin, and
-               its world footprint stays ~1 m from Terminal A's hit box.
+               it (group-local -x = the spawn side, open floor), screen
+               facing the same way as the images. The local x clears the
+               stack's images (~0.67 m half-width) and the terminal's own
+               hit box (~0.57 m half-width) with margin, and its world
+               footprint stays ~1 m from info-terminal-b's hit box.
                NUDGE BY EYE via position/rotation (the placement-offset
                tunable for this terminal). -->
           <a-entity
