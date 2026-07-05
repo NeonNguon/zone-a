@@ -218,3 +218,53 @@ AFRAME.registerComponent("transition-glitch", {
   },
 });
 
+// ----------------------------------------------------------------
+// TeleportRig — moves the camera RIG so the VISITOR lands where intended.
+//
+// In immersive WebXR the headset's physical position is a LOCAL offset inside
+// the rig (however far they've walked from playspace centre), so naively
+// setting the rig onto the target would put the VISITOR beside it by that
+// offset. Instead: pick the rig yaw that makes the visitor's CURRENT head yaw
+// equal the intended facing, rotate the in-playspace offset by that yaw, and
+// subtract it from the target — the camera's floor-projected world position
+// lands exactly on the target point, facing the intended way.
+//
+// Desktop degrades gracefully BY THE SAME MATH: wasd-controls moves the
+// camera's local position (the "playspace walk") and look-controls its local
+// yaw (the "head yaw"), so no special casing. Pitch/roll are ignored — only
+// yaw is compensated (the rig must stay upright).
+// ----------------------------------------------------------------
+window.TeleportRig = {
+  _euler: new THREE.Euler(),
+  _off: new THREE.Vector3(),
+  _up: new THREE.Vector3(0, 1, 0),
+
+  // target: THREE.Vector3-like world point the visitor's feet land on.
+  // faceDeg: intended world yaw of the visitor's view (A-Frame convention:
+  //          0 faces -z, -90 faces +x, +90 faces -x, 180 faces +z).
+  go: function (target, faceDeg) {
+    const rigEl = document.getElementById("rig");
+    const camEl = document.getElementById("camera");
+    if (!rigEl || !camEl) return;
+    const rig = rigEl.object3D;
+    const cam = camEl.object3D;
+
+    // Head yaw INSIDE the rig (YXZ: .y is pure yaw regardless of pitch).
+    this._euler.setFromQuaternion(cam.quaternion, "YXZ");
+    const rigYaw = THREE.MathUtils.degToRad(faceDeg) - this._euler.y;
+    rig.rotation.set(0, rigYaw, 0);
+
+    // In-playspace offset (floor-projected), rotated into the NEW rig frame,
+    // subtracted so the VISITOR — not the rig origin — lands on the target.
+    this._off.set(cam.position.x, 0, cam.position.z);
+    this._off.applyAxisAngle(this._up, rigYaw);
+    rig.position.set(target.x - this._off.x, target.y, target.z - this._off.z);
+  },
+
+  // World yaw (deg, camera convention) that looks from `from` toward `to`.
+  yawToward: function (from, to) {
+    return THREE.MathUtils.radToDeg(
+      Math.atan2(-(to.x - from.x), -(to.z - from.z))
+    );
+  },
+};
