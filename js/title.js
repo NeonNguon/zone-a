@@ -34,7 +34,7 @@
 // ================================================================
 AFRAME.registerComponent("exhibition-title", {
   schema: {
-    holdDuration: { type: "number", default: 10 },
+    holdDuration: { type: "number", default: 30 },
     fadeDuration: { type: "number", default: 2.5 },
     gracePeriod: { type: "number", default: 1 },
     moveThreshold: { type: "number", default: 0.15 },
