@@ -486,10 +486,16 @@ AFRAME.registerComponent("ring-contact-cue", {
 //
 // Tunables (same knobs as the other cue components):
 //   radius / opacity / softness / yoffset (+ color / mode fallbacks).
+//   width / depth — OPTIONAL rectangular footprint (metres, local x / z):
+//   either overrides its axis of the circular radius*2 default, so wide
+//   objects (a bench, a console) get an elliptical pool like Zone C's
+//   screen cue.
 // ----------------------------------------------------------------
 AFRAME.registerComponent("spot-contact-cue", {
   schema: {
     radius: { type: "number", default: 0.45 },
+    width: { type: "number", default: 0 }, // m along local x; 0 = radius*2
+    depth: { type: "number", default: 0 }, // m along local z; 0 = radius*2
     opacity: { type: "number", default: 0.3 },
     softness: { type: "number", default: 0.55 },
     yoffset: { type: "number", default: 0.02 }, // metres above the local floor
@@ -532,9 +538,12 @@ AFRAME.registerComponent("spot-contact-cue", {
   },
 
   layout: function () {
-    const s = this.data.radius * 2; // plane spans the cue diameter
-    this.mesh.scale.set(s, s, 1);
-    this.mesh.position.set(0, this.data.yoffset, 0);
+    const d = this.data;
+    const s = d.radius * 2; // circular default; width/depth override per axis
+    // The quad is rotated flat (-90° about x), so its local x spans world x
+    // and its local y spans world z: scale (width, depth) gives the ellipse.
+    this.mesh.scale.set(d.width > 0 ? d.width : s, d.depth > 0 ? d.depth : s, 1);
+    this.mesh.position.set(0, d.yoffset, 0);
   },
 
   remove: function () {
