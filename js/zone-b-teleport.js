@@ -56,7 +56,13 @@ AFRAME.registerComponent("teleport-terminal", {
     base.setAttribute("material", "color: #14141a; shader: flat");
     this.el.appendChild(base);
 
-    const standH = Math.max(0.1, d.screenHeightAboveFloor - 0.05);
+    // Column ENDS below the screen's lowest edge — running it any higher
+    // pokes through the (tilted) screen face and reads as a black block in
+    // the middle of the picture.
+    const standH = Math.max(
+      0.1,
+      d.screenHeightAboveFloor - d.screenHeight / 2 - 0.04
+    );
     const stand = document.createElement("a-box");
     stand.setAttribute("width", 0.06);
     stand.setAttribute("height", standH);
@@ -66,8 +72,9 @@ AFRAME.registerComponent("teleport-terminal", {
     this.el.appendChild(stand);
 
     // --- head: bezel + screen, tilted like a console at standing height.
+    // Slightly proud of the column (+z) so no tilt value can intersect it.
     const head = document.createElement("a-entity");
-    head.setAttribute("position", `0 ${d.screenHeightAboveFloor} 0`);
+    head.setAttribute("position", `0 ${d.screenHeightAboveFloor} 0.02`);
     head.setAttribute("rotation", `${d.tilt} 0 0`);
     this.el.appendChild(head);
     this.head = head;
