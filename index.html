@@ -20,6 +20,9 @@
     <!-- Zone B floor map (100 locations behind the wall). AFTER zone-b.js so
          it can read the wall's placement + width as its own defaults. -->
     <script src="js/zone-b-map.js"></script>
+    <!-- Shared transition + teleport machinery (transition-glitch component,
+         TeleportRig helper) — zone-agnostic, reused by the zone teleports. -->
+    <script src="js/transition.js"></script>
     <!-- Zone C (outdoor cinema screen). -->
     <script src="js/zone-c.js"></script>
     <!-- Swappable environment layer: presets + environment-manager. Loaded
@@ -211,12 +214,17 @@
              far-off surfaces — the floor, skyline plane edges — stop shimmering
              at grazing angles. far left at default so distant a-sky preset
              skies still render. -->
+        <!-- transition-glitch: the reusable full-view glitch that masks
+             teleports (and later, zone entries). Idle it renders nothing and
+             ticks nothing; triggered by zone-b-teleport. Tunables: dur /
+             intensity / color / style / sound (file replaces the synth blip). -->
         <a-entity
           id="camera"
           camera="near: 0.1"
           look-controls
           wasd-controls
           position="0 1.6 0"
+          transition-glitch
         ></a-entity>
 
         <!-- RIGHT controller: laser pointer + right-stick smooth movement.
