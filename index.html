@@ -290,20 +290,23 @@
                spot-contact-cue (same kit + env-switch retune as every other
                cue; it persists across environment switches because it lives
                under #zone-b, not #environment). Width spans the stack's
-               ~1.35 m of images with margin; size/opacity BY EYE. -->
+               ~1.62 m of images with margin; size/opacity BY EYE.
+               The stack sits LEFT of the info terminal as a visitor faces
+               the sub-zone (group-local -x): x -3.0 keeps ~0.2 m between
+               the images' edge and the terminal's hit box. -->
           <a-entity
             id="zone-b-triptych-stack"
-            zone-b-triptych="wall: #zone-b-wall"
+            position="-3.0 0 0"
+            zone-b-triptych="wall: #zone-b-wall; imageScale: 1.5"
             wall-focus
-            spot-contact-cue="width: 1.9; depth: 0.9; opacity: 0.3"
+            spot-contact-cue="width: 2.1; depth: 0.9; opacity: 0.3"
           ></a-entity>
 
-          <!-- Triptych info terminal: to the stack's LEFT as a visitor faces
-               it (group-local -x = the spawn side, open floor), screen
-               facing the same way as the images. The local x clears the
-               stack's images (~0.67 m half-width) and the terminal's own
-               hit box (~0.57 m half-width) with margin, and its world
-               footprint stays ~1 m from info-terminal-b's hit box.
+          <!-- Triptych info terminal: to the stack's RIGHT as a visitor
+               faces the sub-zone (the stack sits at group-local x -3.0,
+               this terminal at -1.4), screen facing the same way as the
+               images. Its hit box (~0.57 m half-width) clears the stack's
+               images by ~0.2 m and stays ~1 m from info-terminal-b's.
                NUDGE BY EYE via position/rotation (the placement-offset
                tunable for this terminal). -->
           <a-entity
