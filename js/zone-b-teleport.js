@@ -47,105 +47,19 @@ AFRAME.registerComponent("teleport-terminal", {
   init: function () {
     const d = this.data;
 
-    // --- stand: base plate + slim column, unlit dark (exhibition furniture).
-    const base = document.createElement("a-box");
-    base.setAttribute("width", 0.34);
-    base.setAttribute("height", 0.02);
-    base.setAttribute("depth", 0.26);
-    base.setAttribute("position", "0 0.01 0");
-    base.setAttribute("material", "color: #14141a; shader: flat");
-    this.el.appendChild(base);
-
-    // Column ENDS below the screen's lowest edge — running it any higher
-    // pokes through the (tilted) screen face and reads as a black block in
-    // the middle of the picture.
-    const standH = Math.max(
-      0.1,
-      d.screenHeightAboveFloor - d.screenHeight / 2 - 0.04
-    );
-    const stand = document.createElement("a-box");
-    stand.setAttribute("width", 0.06);
-    stand.setAttribute("height", standH);
-    stand.setAttribute("depth", 0.06);
-    stand.setAttribute("position", `0 ${standH / 2} 0`);
-    stand.setAttribute("material", "color: #14141a; shader: flat");
-    this.el.appendChild(stand);
-
-    // --- head: bezel + screen, tilted like a console at standing height.
-    // Slightly proud of the column (+z) so no tilt value can intersect it.
-    const head = document.createElement("a-entity");
-    head.setAttribute("position", `0 ${d.screenHeightAboveFloor} 0.02`);
-    head.setAttribute("rotation", `${d.tilt} 0 0`);
-    this.el.appendChild(head);
-    this.head = head;
-
-    const bezel = document.createElement("a-plane");
-    bezel.setAttribute("width", d.screenWidth + 0.05);
-    bezel.setAttribute("height", d.screenHeight + 0.05);
-    bezel.setAttribute("position", "0 0 -0.006");
-    bezel.setAttribute("material", "color: #101014; shader: flat");
-    head.appendChild(bezel);
-
-    // Hover frame: a light rim just behind the bezel, hidden until pointed at
-    // (the dark-on-light inverse of the wall tiles' black hover frame).
-    const rim = document.createElement("a-plane");
-    rim.setAttribute("width", d.screenWidth + 0.1);
-    rim.setAttribute("height", d.screenHeight + 0.1);
-    rim.setAttribute("position", "0 0 -0.012");
-    rim.setAttribute("material", "color: #bfe6ff; shader: flat");
-    rim.setAttribute("visible", false);
-    head.appendChild(rim);
-    this.rim = rim;
-
-    // Screen: manual mesh so the CanvasTexture is fully ours (no geometry /
-    // texture cache interactions with other planes).
-    this.screenTex = new THREE.CanvasTexture(this.makeScreenCanvas());
-    this.screenTex.colorSpace = THREE.SRGBColorSpace;
-    this.screenGeo = new THREE.PlaneGeometry(d.screenWidth, d.screenHeight);
-    this.screenMat = new THREE.MeshBasicMaterial({ map: this.screenTex });
-    const screenEnt = document.createElement("a-entity");
-    head.appendChild(screenEnt);
-    screenEnt.addEventListener(
-      "loaded",
-      () => screenEnt.setObject3D("screen", new THREE.Mesh(this.screenGeo, this.screenMat)),
-      { once: true }
-    );
-
-    // --- hit target: one generous INVISIBLE box from the floor to above the
-    // screen (opacity 0 + colorWrite off — still ray-hittable), the only
-    // clickable part, so pointing anywhere at the terminal works.
-    const hitW = d.screenWidth * d.hitScale;
-    const hitH = d.screenHeightAboveFloor + d.screenHeight * d.hitScale * 0.5;
-    this.hitGeo = new THREE.BoxGeometry(hitW, hitH, 0.5);
-    this.hitMat = new THREE.MeshBasicMaterial({
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
+    // Furniture (stand / head / bezel / hover rim / screen mesh / hit box)
+    // comes from the shared TerminalKit (js/terminal-kit.js) — extracted
+    // verbatim from this component, so the look and behaviour are unchanged.
+    // This component owns only the screen canvas CONTENT and the teleport.
+    this.rig = TerminalKit.build(this.el, {
+      canvas: this.makeScreenCanvas(),
+      screenWidth: d.screenWidth,
+      screenHeight: d.screenHeight,
+      screenHeightAboveFloor: d.screenHeightAboveFloor,
+      tilt: d.tilt,
+      hitScale: d.hitScale,
     });
-    this.hitMat.colorWrite = false;
-    const hit = document.createElement("a-entity");
-    hit.setAttribute("position", `0 ${hitH / 2} 0`);
-    hit.setAttribute("class", "clickable");
-    hit.addEventListener(
-      "loaded",
-      () => hit.setObject3D("hit", new THREE.Mesh(this.hitGeo, this.hitMat)),
-      { once: true }
-    );
-    this.el.appendChild(hit);
-
-    // Hover response on the hit target: rim on + slight head pop. The same
-    // mouseenter/mouseleave arrive from the desktop cursor and both lasers.
-    this.onEnter = () => {
-      this.rim.setAttribute("visible", true);
-      this.head.object3D.scale.set(1.05, 1.05, 1.05);
-    };
-    this.onLeave = () => {
-      this.rim.setAttribute("visible", false);
-      this.head.object3D.scale.set(1, 1, 1);
-    };
-    hit.addEventListener("mouseenter", this.onEnter);
-    hit.addEventListener("mouseleave", this.onLeave);
-    this.hitEl = hit;
+    this.screenTex = this.rig.screenTex;
 
     // Image screens draw asynchronously once the (browser-cached) image loads.
     if (d.screenSrc) this.loadScreenImage();
@@ -211,15 +125,7 @@ AFRAME.registerComponent("teleport-terminal", {
   },
 
   remove: function () {
-    if (this.hitEl) {
-      this.hitEl.removeEventListener("mouseenter", this.onEnter);
-      this.hitEl.removeEventListener("mouseleave", this.onLeave);
-    }
-    if (this.screenGeo) this.screenGeo.dispose();
-    if (this.screenMat) this.screenMat.dispose();
-    if (this.screenTex) this.screenTex.dispose();
-    if (this.hitGeo) this.hitGeo.dispose();
-    if (this.hitMat) this.hitMat.dispose();
+    if (this.rig) this.rig.dispose();
   },
 });
 

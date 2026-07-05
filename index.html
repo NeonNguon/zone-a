@@ -23,6 +23,9 @@
     <!-- Shared transition + teleport machinery (transition-glitch component,
          TeleportRig helper) — zone-agnostic, reused by the zone teleports. -->
     <script src="js/transition.js"></script>
+    <!-- Shared terminal furniture (pedestal + screen + hover + hit box),
+         used by the teleport terminals and the per-zone info terminals. -->
+    <script src="js/terminal-kit.js"></script>
     <!-- Zone B teleport terminals (wall <-> floor map). AFTER zone-b-map.js
          and transition.js: it reads their live config and triggers the
          camera's glitch. -->
