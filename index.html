@@ -130,28 +130,35 @@
 
       <!-- ============================================================
            ZONE B FLOOR MAP — the "100 locations" dataset as a walkable street
-           map on the floor directly BEHIND the image wall (further from spawn
-           along +x), centred on the wall's lateral position. A pale Saigon
-           street map (baked offline by tools/bake-map-texture.js — no runtime
-           tile fetching) lies flat on the floor; 100 colored spheres float
-           above their real coordinates, grounded by small contact cues on the
-           map; clicking a sphere reveals its artwork (the wall's focus
-           grammar, by-ID image mapping).
+           map: a pale Saigon street map (baked offline by
+           tools/bake-map-texture.js — no runtime tile fetching) flat on the
+           floor, 100 colored spheres above their real coordinates, grounded
+           by small contact cues; clicking a sphere reveals its artwork (the
+           wall's focus grammar, by-ID image mapping).
+
+           NOW A TELEPORT DESTINATION: the root offset parks the whole
+           assembly 400 m out on -z — far past every environment's geometry
+           (skyline ring 18 m, cityroom 32 m), unreachable and invisible by
+           walking — and `shown: false` hides it (a pure visibility flip; the
+           texture still loads and is GPU-preloaded, so the first jump has no
+           hitch). The terminal beside the image wall teleports you there
+           (see zone-b-teleport below); Terminal B inside this assembly
+           brings you back, and moves/hides with the map automatically.
 
            zone-b-map-root offsets the WHOLE assembly as a unit (same pattern
            as the other zone roots); its base spot is DERIVED live from
            #zone-b's offset, so `offset` here is a delta from "on the wall
-           line, at floor level" — the board extends behind the wall from
-           there. The inner container carries the wall's same `0 -90 0` yaw so
-           the map width spans the wall's width.
+           line, at floor level" — the board extends along +x from there. The
+           inner container carries the wall's same `0 -90 0` yaw so the map
+           width matches the wall's width.
 
-           Tunables: root offset (here); mapWidth (0 = wall width) /
+           Tunables: root offset + shown (here); mapWidth (0 = wall width) /
            basePlaneOpacity / sphereRadius / hoverHeight / gapBehindWall on
            map-board; radius / opacity / softness / yoffset on map-contact-cue;
            distance / height / dimRadius / dimOpacity / dur / aspect on
            map-focus.
            ============================================================ -->
-      <a-entity id="zone-b-map" zone-b-map-root>
+      <a-entity id="zone-b-map" zone-b-map-root="offset: 0 0 -400; shown: false">
         <a-entity
           id="zone-b-map-board"
           rotation="0 -90 0"

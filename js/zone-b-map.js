@@ -27,8 +27,14 @@
 AFRAME.registerComponent("zone-b-map-root", {
   schema: {
     offset: { type: "vec3", default: { x: 0, y: 0, z: 0 } },
+    // Visibility toggle for the teleport flow: hidden in the main exhibition,
+    // shown on arrival. A PURE visibility flip (object3D.visible) — nothing is
+    // torn down or rebuilt, materials/textures stay resident (the texture is
+    // GPU-preloaded by map-board), so the first teleport has no load hitch.
+    shown: { type: "boolean", default: true },
   },
   update: function () {
+    this.el.object3D.visible = this.data.shown;
     // Read the wall's placement from its own source of truth (the zone-b-root
     // attribute in index.html) — never a copied number.
     let base = { x: 13, y: 3, z: 0 }; // fallback = zone-b-root's current default
@@ -190,6 +196,22 @@ AFRAME.registerComponent("map-board", {
     );
     this.el.appendChild(plane);
     this.planeEl = plane;
+
+    // Force the map texture onto the GPU as soon as it decodes, even while
+    // the whole assembly is hidden (visible:false skips rendering, and an
+    // unrendered texture would otherwise upload — and hitch — on the first
+    // frame after teleporting in).
+    plane.addEventListener(
+      "materialtextureloaded",
+      () => {
+        const mesh = plane.getObject3D("mesh");
+        const renderer = this.el.sceneEl.renderer;
+        if (mesh && mesh.material && mesh.material.map && renderer) {
+          renderer.initTexture(mesh.material.map);
+        }
+      },
+      { once: true }
+    );
 
     // --- project the 100 points into the plane's local frame via the
     // sidecar's EXACT bbox (texture corners and spheres share one truth).
