@@ -29,6 +29,9 @@
     <script src="js/zone-b-teleport.js"></script>
     <!-- Zone C (outdoor cinema screen). -->
     <script src="js/zone-c.js"></script>
+    <!-- In-scene exhibition title (floats in front of spawn, dissolves on
+         first exploration input or after a hold time). -->
+    <script src="js/title.js"></script>
     <!-- Swappable environment layer: presets + environment-manager. Loaded
          before <a-scene> parses so the component is registered in time. -->
     <script src="js/environment.js"></script>
@@ -163,6 +166,19 @@
            (VR) cycles the active set. See js/environment.js.
            ============================================================ -->
       <a-entity id="environment" environment-manager="preset: void"></a-entity>
+
+      <!-- ============================================================
+           EXHIBITION TITLE — the in-scene counterpart of the loading splash:
+           the same three lines floating ~3.5 m in front of spawn at eye
+           height, facing spawn, WORLD-FIXED (clear of Zone A's ring, whose
+           nearest image sits ~4.3 m out). Activates when the scene loads
+           (in sync with the splash fade) and dissolves on the first
+           exploration input — or after holdDuration on its own. One-shot;
+           zero per-frame cost once gone. Tunables: holdDuration /
+           fadeDuration / gracePeriod / moveThreshold / offset / textScale
+           (see js/title.js).
+           ============================================================ -->
+      <a-entity id="exhibition-title" exhibition-title></a-entity>
 
       <!-- ============================================================
            ZONE A — the exhibition itself: ONLY the ring, its nine images
