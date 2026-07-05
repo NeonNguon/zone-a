@@ -7,13 +7,15 @@
 // Lifecycle (one-shot per session):
 //  - Becomes active when the scene fires `loaded` — the same moment the DOM
 //    splash starts its fade, so the two hand over seamlessly.
-//  - Arms a dissolve timer (holdDuration). After a short gracePeriod (so the
-//    Enter VR / splash-era click can't do it), ANY exploration input starts
-//    the dissolve immediately: canvas click/touch, controller trigger,
-//    WASD/arrow keydown, joystick axis input, or the camera's WORLD position
-//    drifting past moveThreshold (camera world pos moves both when the rig
-//    is driven by stick locomotion AND when the visitor physically walks in
-//    the headset — one check covers both).
+//  - Arms a dissolve timer (holdDuration). After a short gracePeriod,
+//    MOVEMENT — and only movement — starts the dissolve early: WASD/arrow
+//    keydown, joystick axis input, or the camera's world position drifting
+//    past moveThreshold HORIZONTALLY (covers stick locomotion and physical
+//    walking; y is ignored so head height/sway doesn't count). Clicks,
+//    touches and controller triggers deliberately do NOT dissolve it, and
+//    the walking baseline re-captures on enter-vr/exit-vr — the headset
+//    pose replacing the desktop camera position is a reference switch, not
+//    a step.
 //  - Dissolve: opacity 1 -> 0 on all three lines over fadeDuration, then the
 //    root goes visible:false, every listener is removed, and the tick
 //    self-deregisters from the scene loop (A-Frame's play() wrapper re-adds
@@ -135,7 +137,7 @@ AFRAME.registerComponent("exhibition-title", {
     // Every dissolve trigger routes through ONE handler that raises a flag
     // for the tick to consume. The grace period is judged HERE, at event
     // time, on the wall clock: a long frame right after load must not let an
-    // in-grace click survive until a tick that lands past the boundary.
+    // in-grace input survive until a tick that lands past the boundary.
     this.onInput = () => {
       if (performance.now() - this.wallStart < this.data.gracePeriod * 1000) return;
       this.pendingInput = true;
@@ -147,6 +149,15 @@ AFRAME.registerComponent("exhibition-title", {
       const x = (e.detail && e.detail.x) || 0;
       const y = (e.detail && e.detail.y) || 0;
       if (Math.abs(x) > 0.2 || Math.abs(y) > 0.2) this.onInput();
+    };
+    // Entering/leaving VR swaps the camera between the desktop position and
+    // the real headset pose — a reference-frame jump, not walking. The first
+    // real pose lands a few frames AFTER the enter-vr event, so instead of a
+    // one-shot re-anchor, the tick keeps re-anchoring the movement baseline
+    // for a short window around the transition.
+    this.rebaselineUntil = 0;
+    this.onXRChange = () => {
+      this.rebaselineUntil = performance.now() + 600;
     };
 
     // Activate in sync with the splash fade (both key off scene `loaded`).
@@ -173,20 +184,18 @@ AFRAME.registerComponent("exhibition-title", {
     if (this.cameraEl) {
       this.cameraEl.object3D.getWorldPosition(this.startPos);
     }
-    // Exploration inputs (attached only for the title's short life).
-    const canvas = this.el.sceneEl.canvas;
-    if (canvas) {
-      canvas.addEventListener("mousedown", this.onInput);
-      canvas.addEventListener("touchstart", this.onInput);
-    }
+    // Movement inputs only (attached just for the title's short life):
+    // keys + joysticks here, walking via the tick's drift check. No click /
+    // touch / trigger listeners — pointing and grabbing must not dismiss it.
     window.addEventListener("keydown", this.onKey);
     this.hands = ["rightHand", "leftHand"]
       .map((id) => document.getElementById(id))
       .filter(Boolean);
     this.hands.forEach((h) => {
-      h.addEventListener("triggerdown", this.onInput);
       h.addEventListener("thumbstickmoved", this.onStick);
     });
+    this.el.sceneEl.addEventListener("enter-vr", this.onXRChange);
+    this.el.sceneEl.addEventListener("exit-vr", this.onXRChange);
   },
 
   tick: function (time, dt) {
@@ -206,10 +215,20 @@ AFRAME.registerComponent("exhibition-title", {
       const input = this.pendingInput;
       this.pendingInput = false;
       // Camera world-position drift = stick locomotion or physical walking.
+      // HORIZONTAL only: standing head sway / height change must not count.
+      // Inside the post-XR-transition window the baseline follows the camera
+      // (the headset pose replacing the desktop position is not a step).
       let moved = false;
-      if (pastGrace && this.cameraEl) {
+      if (this.cameraEl) {
         this.cameraEl.object3D.getWorldPosition(this.worldPos);
-        moved = this.worldPos.distanceTo(this.startPos) > this.data.moveThreshold;
+        if (performance.now() < this.rebaselineUntil) {
+          this.startPos.copy(this.worldPos);
+        } else if (pastGrace) {
+          const dx = this.worldPos.x - this.startPos.x;
+          const dz = this.worldPos.z - this.startPos.z;
+          moved =
+            dx * dx + dz * dz > this.data.moveThreshold * this.data.moveThreshold;
+        }
       }
       if (
         this.elapsed >= this.data.holdDuration * 1000 ||
@@ -240,17 +259,13 @@ AFRAME.registerComponent("exhibition-title", {
   },
 
   removeListeners: function () {
-    const canvas = this.el.sceneEl.canvas;
-    if (canvas) {
-      canvas.removeEventListener("mousedown", this.onInput);
-      canvas.removeEventListener("touchstart", this.onInput);
-    }
     window.removeEventListener("keydown", this.onKey);
     (this.hands || []).forEach((h) => {
-      h.removeEventListener("triggerdown", this.onInput);
       h.removeEventListener("thumbstickmoved", this.onStick);
     });
     this.hands = [];
+    this.el.sceneEl.removeEventListener("enter-vr", this.onXRChange);
+    this.el.sceneEl.removeEventListener("exit-vr", this.onXRChange);
   },
 
   remove: function () {
