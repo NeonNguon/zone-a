@@ -5,11 +5,15 @@
 // the bottom edge to signal there is more. Clicking it opens the full text
 // on a large in-scene focus panel:
 //
-//  - Same capture-and-restore grammar as the wall/map focus: the panel
-//    springs from the terminal's head to a readable spot in front of the
-//    camera (computed once, not head-locked), a camera-child dim sphere
-//    darkens everything else, and dismissing flies it back to the terminal.
-//    Works identically on desktop and in the headset (all in-scene, no DOM).
+//  - Two presentations, forked on session type like wall-focus:
+//    WEB (desktop/mobile) — the #info-focus DOM overlay: the same blurred
+//    pale backdrop + Helvetica grammar as the other web focus modes, body
+//    scrolling NATIVELY (wheel/trackpad/native scrollbar); backdrop click
+//    or Esc dismisses.
+//    VR (in-scene) — the capture-and-restore panel below: it springs from
+//    the terminal's head to a readable spot in front of the camera
+//    (computed once, not head-locked), a camera-child dim sphere darkens
+//    everything else, and dismissing flies it back to the terminal.
 //  - One panel at a time (focused guard; the dim occludes the other
 //    terminals); clicking the dim = click-outside-to-close, matching the
 //    lightbox behaviour, plus a drawn close button and Esc on desktop.
@@ -79,8 +83,44 @@ AFRAME.registerComponent("info-terminal", {
       hitScale: this.data.hitScale,
     });
 
-    this.onClick = () => this.openPanel();
+    // The click fork, same convention as wall-focus: in-scene panel only in
+    // the headset; the DOM overlay everywhere else.
+    this.onClick = () => {
+      if (this.el.sceneEl.is("vr-mode")) this.openPanel();
+      else this.openWeb();
+    };
     this.rig.hitEl.addEventListener("click", this.onClick);
+
+    // Web overlay dismissal: backdrop click / Esc (bound for the terminal's
+    // life; they no-op unless THIS terminal's overlay is open).
+    this.overlay = document.getElementById("info-focus");
+    this.onOverlayClick = (e) => {
+      if (this.webOpen && e.target === this.overlay) this.closeWeb();
+    };
+    this.onWebKey = (e) => {
+      if (this.webOpen && e.key === "Escape") this.closeWeb();
+    };
+    if (this.overlay) {
+      this.overlay.addEventListener("click", this.onOverlayClick);
+      window.addEventListener("keydown", this.onWebKey);
+    }
+  },
+
+  // ================= web (DOM overlay) path =================
+  openWeb: function () {
+    if (!this.overlay) return this.openPanel(); // no overlay wired — fall back
+    if (this.overlay.classList.contains("visible")) return; // one at a time
+    this.webOpen = true;
+    document.getElementById("info-focus-title").textContent = this.title;
+    const body = document.getElementById("info-focus-text");
+    body.textContent = this.text;
+    body.scrollTop = 0;
+    this.overlay.classList.add("visible");
+  },
+
+  closeWeb: function () {
+    this.webOpen = false;
+    this.overlay.classList.remove("visible");
   },
 
   // The NEAR screen: title prominently, the first lines of the body small
@@ -494,6 +534,11 @@ AFRAME.registerComponent("info-terminal", {
   },
 
   remove: function () {
+    if (this.webOpen) this.closeWeb();
+    if (this.overlay) {
+      this.overlay.removeEventListener("click", this.onOverlayClick);
+      window.removeEventListener("keydown", this.onWebKey);
+    }
     this.detachInputs();
     this.teardownDim();
     if (this.panelEl && this.panelEl.parentNode) {

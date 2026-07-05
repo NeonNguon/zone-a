@@ -51,6 +51,8 @@
     <link rel="stylesheet" href="css/focus.css" />
     <!-- Zone B web focus overlay styles (blurred overlay, Helvetica). -->
     <link rel="stylesheet" href="css/zone-b-focus.css" />
+    <!-- Info-terminal web focus overlay styles (same blurred grammar). -->
+    <link rel="stylesheet" href="css/info-focus.css" />
 
     <!-- Loading splash: full-viewport exhibition title card, visible from the
          very first paint (plain HTML/CSS — no framework, no webfont: system
@@ -480,6 +482,17 @@
         <img id="zoneb-focus-img" src="" alt="" />
         <div id="zoneb-focus-title"></div>
         <div id="zoneb-focus-year"></div>
+      </div>
+    </div>
+
+    <!-- Info-terminal web focus overlay DOM. Outside <a-scene>: plain
+         HTML/CSS over the canvas (does NOT render in VR — the headset gets
+         the in-scene scrolling panel instead; see js/info-terminal.js).
+         Hidden until an info terminal is clicked on desktop/mobile. -->
+    <div id="info-focus">
+      <div id="info-focus-col">
+        <div id="info-focus-title"></div>
+        <div id="info-focus-text"></div>
       </div>
     </div>
 

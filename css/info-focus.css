@@ -1,0 +1,54 @@
+/* Info-terminal web focus overlay — the SAME grammar as Zone A's and Zone
+   B's web focus (blurred pale backdrop, minimal Helvetica type): on desktop
+   the full zone text opens as a DOM overlay with native scrolling, NOT the
+   in-scene panel (that stays the VR path, mirroring wall-focus's fork). */
+
+#info-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(238, 238, 238, 0.55); /* pale tint over the blur */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); /* Safari */
+  opacity: 0;
+  pointer-events: none; /* click through to the canvas while hidden */
+  transition: opacity 0.25s ease;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+#info-focus.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+#info-focus * {
+  font-family: inherit;
+}
+
+#info-focus-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 640px;
+  padding: 0 24px;
+}
+#info-focus-title {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #111;
+  margin: 0 0 18px;
+}
+/* The body scrolls NATIVELY (wheel, trackpad, native scrollbar) — the web
+   way, rather than the VR panel's drawn scrollbar. */
+#info-focus-text {
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.65;
+  color: #222;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 18px; /* breathing room beside the scrollbar */
+  white-space: pre-line;
+}
