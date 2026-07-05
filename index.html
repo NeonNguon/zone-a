@@ -30,6 +30,10 @@
          and transition.js: it reads their live config and triggers the
          camera's glitch. -->
     <script src="js/zone-b-teleport.js"></script>
+    <!-- Zone B triptych sub-zone (three stacked Ticket 485496 images).
+         AFTER zone-b.js: it sizes its images from the wall's live tile
+         metrics and reuses its hover/focus components. -->
+    <script src="js/zone-b-triptych.js"></script>
     <!-- Zone C (outdoor cinema screen). -->
     <script src="js/zone-c.js"></script>
     <!-- In-scene exhibition title (floats in front of spawn, dissolves on
@@ -264,6 +268,24 @@
           rotation="0 -45 0"
           spot-contact-cue
         ></a-entity>
+
+        <!-- TRIPTYCH SUB-ZONE — three stacked Ticket 485496 images just past
+             teleport Terminal A (to its left as the terminal faces you),
+             turned 90° to the wall: the `0 180 0` yaw faces the stack along
+             the wall's axis, back toward the wall (world -z), so it reads
+             face-on when you walk the wall toward its right end. Local to
+             #zone-b: y -3 counteracts the root's raised y (floor); x -1.2
+             lines up with Terminal A's own wall clearance; z 13.9 clears the
+             terminal's hit box by ~1 m. PLACEHOLDER — NUDGE BY EYE via this
+             position/rotation (the whole sub-zone moves as a unit). Stack
+             tunables (imageScale / bottomHeight / stackGap) live on
+             zone-b-triptych. -->
+        <a-entity id="zone-b-triptych" position="-1.2 -3 13.9" rotation="0 180 0">
+          <a-entity
+            id="zone-b-triptych-stack"
+            zone-b-triptych="wall: #zone-b-wall"
+          ></a-entity>
+        </a-entity>
       </a-entity>
 
       <!-- ============================================================
