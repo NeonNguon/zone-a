@@ -97,7 +97,7 @@ function makeTerrazzoTexture(base, flecks, density, seed) {
 AFRAME.registerComponent("terrazzo-bench", {
   schema: {
     // seat slab
-    width: { type: "number", default: 1.2 },
+    width: { type: "number", default: 1.5 },
     depth: { type: "number", default: 0.45 },
     seatThickness: { type: "number", default: 0.09 },
     seatHeight: { type: "number", default: 0.45 }, // seat TOP above local floor
@@ -187,14 +187,19 @@ AFRAME.registerComponent("terrazzo-bench", {
     });
 
     // --- rolled end caps: cylinders on the seat's side ends + back's top.
+    // Each roll runs a small LIP past the faces of the slab it caps: at the
+    // exact slab length the flat cylinder caps are COPLANAR with the slab
+    // faces and z-fight (flicker at the junctions); the lip also reads as
+    // the curl wrapping proud of the edge, like the reference benches.
+    const lip = 0.015;
     if (d.rollEnds) {
       [-1, 1].forEach((side) => {
-        const roll = cyl(d.rollRadius, d.depth, endMat);
+        const roll = cyl(d.rollRadius, d.depth + 2 * lip, endMat);
         roll.rotation.x = Math.PI / 2; // axis along local z (front-back)
         roll.position.set(side * (d.width / 2), d.seatHeight - d.seatThickness / 2, 0);
         group.add(roll);
       });
-      const topRoll = cyl(d.rollRadius, d.width, endMat);
+      const topRoll = cyl(d.rollRadius, d.width + 2 * lip, endMat);
       topRoll.rotation.z = Math.PI / 2; // axis along local x (bench length)
       topRoll.position.y = backLen; // top edge, follows the backrest tilt
       backGroup.add(topRoll);
