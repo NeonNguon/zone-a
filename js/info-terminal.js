@@ -31,7 +31,7 @@
 // runtime cost. Fonts are the CSS system stack ("Helvetica Neue", Helvetica,
 // Arial) — canvas text handles the Vietnamese diacritics in Zone B.
 //
-// Content comes from window.ZoneTexts via `key` (a | b | c), or from the
+// Content comes from window.ZoneTexts via `key` (a | b | c | d), or from the
 // `title` / `text` properties directly for one-off use.
 //
 // TUNABLES: key/title/text (content); screenWidth/screenHeight/
@@ -40,7 +40,7 @@
 // ================================================================
 AFRAME.registerComponent("info-terminal", {
   schema: {
-    key: { type: "string", default: "" }, // ZoneTexts key: a | b | c
+    key: { type: "string", default: "" }, // ZoneTexts key: a | b | c | d
     title: { type: "string", default: "" }, // direct override
     text: { type: "string", default: "" },
     screenWidth: { type: "number", default: 0.52 },
@@ -152,17 +152,22 @@ AFRAME.registerComponent("info-terminal", {
     ctx.fillStyle = "#9fb0c8";
     ctx.font = "17px " + this.FONT;
     const bodyLines = this.wrapText(ctx, this.text, 512 - 2 * 34);
-    for (let i = 0; i < bodyLines.length && y < 350; i++) {
+    let i = 0;
+    for (; i < bodyLines.length && y < 350; i++) {
       ctx.fillText(bodyLines[i], 34, y);
       y += 25;
     }
 
-    // Fade the bottom edge back to the ground color (more below the fold).
-    const fade = ctx.createLinearGradient(0, 250, 0, 352);
-    fade.addColorStop(0, "rgba(11, 11, 16, 0)");
-    fade.addColorStop(1, "rgba(11, 11, 16, 1)");
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, 250, canvas.width, 110);
+    // Fade the bottom edge back to the ground color — ONLY when lines were
+    // cut off ("there is more below the fold"). A short text that fits
+    // entirely (the triptych's) renders unfaded.
+    if (i < bodyLines.length) {
+      const fade = ctx.createLinearGradient(0, 250, 0, 352);
+      fade.addColorStop(0, "rgba(11, 11, 16, 0)");
+      fade.addColorStop(1, "rgba(11, 11, 16, 1)");
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, 250, canvas.width, 110);
+    }
 
     // Thin frame LAST so the fade never covers it (family face).
     ctx.strokeStyle = "#3a4a66";

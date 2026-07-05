@@ -1,5 +1,5 @@
 // ================================================================
-// ZoneTexts — the three zones' titles + wall texts, verbatim, in ONE place.
+// ZoneTexts — the zones' titles + wall texts, verbatim, in ONE place.
 // Plain string constants consumed by the info terminals (and anything else
 // that needs them later). This file is UTF-8: Zone B contains Vietnamese
 // diacritics ("số đề") and Zone B references Dürer — the canvas renderer
@@ -20,5 +20,11 @@ window.ZoneTexts = {
     title: "Go East, Young Man",
     text:
       "Go East, Young Man is an overarching video essay that connects the whole exhibition and explores the complex entanglements of personal biography, visual narrative tropes about Southeast Asia, migration, history and culture of a place, traditional and expanded photography, artificial intelligence, glitch art, conceptual art and creative coding in my artistic practice. The video essay with its AI generated footage works as meta-analytic space not only to weave the previous projects together into a cohesive narrative but also critiques AI generated imagery biases and visual tropes through autobiographical storytelling. The essay therefore functions as a new form of expanded photographic practice that makes the practice research itself visible.",
+  },
+  // The Zone B triptych sub-zone (three stacked Ticket 485496 images).
+  d: {
+    title: "Ticket 485496",
+    text:
+      "This triptych shows the different artifacts that led to the creation of Ticket 485496 of The Lottery of Forgotten Dreams.",
   },
 };

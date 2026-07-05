@@ -297,6 +297,22 @@
             wall-focus
             spot-contact-cue="width: 1.9; depth: 0.9; opacity: 0.3"
           ></a-entity>
+
+          <!-- Triptych info terminal: to the stack's LEFT as a visitor faces
+               it (group-local -x = toward the wall plane, which has ended by
+               here), screen facing the same way as the images. The local x
+               clears the stack's images (~0.67 m half-width) and the
+               terminal's own hit box (~0.57 m half-width) with margin, and
+               its world footprint stays ~1 m from Terminal A's hit box.
+               NUDGE BY EYE via position/rotation (the placement-offset
+               tunable for this terminal). -->
+          <a-entity
+            id="info-terminal-d"
+            info-terminal="key: d"
+            position="-1.4 0 0"
+            rotation="0 0 0"
+            spot-contact-cue
+          ></a-entity>
         </a-entity>
       </a-entity>
 
