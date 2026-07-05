@@ -208,6 +208,17 @@
              #environment); it retunes its material to each preset's profile.
              Tunables: radius / opacity / softness / yoffset / color / mode. -->
         <a-entity ring-contact-cue position="0 0 0"></a-entity>
+
+        <!-- Zone A info terminal: beside the ring's right end, screen facing
+             spawn (+z). NUDGE BY EYE via position/rotation (local; the
+             zone-a-root offset carries it). Cue = shared spot-contact-cue. -->
+        <a-entity
+          id="info-terminal-a"
+          info-terminal="key: a"
+          position="4.6 0 1.2"
+          rotation="0 0 0"
+          spot-contact-cue
+        ></a-entity>
       </a-entity>
 
       <!-- ============================================================
@@ -237,6 +248,18 @@
              Count + positions derive from the wall's live grid (#zone-b-wall).
              Tunables: radius / opacity / softness / yoffset. -->
         <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
+
+        <!-- Zone B info terminal: at the wall's LEFT edge (the teleport
+             terminal holds the right edge), facing spawn (-x) like the wall.
+             Local to #zone-b: y -3 counteracts the root's raised y (floor).
+             NUDGE BY EYE via position/rotation. -->
+        <a-entity
+          id="info-terminal-b"
+          info-terminal="key: b"
+          position="-1.2 -3 -12.23"
+          rotation="0 -90 0"
+          spot-contact-cue
+        ></a-entity>
       </a-entity>
 
       <!-- ============================================================
@@ -360,6 +383,18 @@
           position="6 -3 0"
           rotation="0 -90 0"
           spot-contact-cue="width: 2.0; depth: 1.0; yoffset: 0.02"
+        ></a-entity>
+
+        <!-- Zone C info terminal: beside the bench at the seated viewing
+             spot, screen facing the visitor approach (+x, toward spawn).
+             Local to #zone-c: y -3 counteracts the root's raised y (floor).
+             NUDGE BY EYE via position/rotation. -->
+        <a-entity
+          id="info-terminal-c"
+          info-terminal="key: c"
+          position="6.5 -3 3.2"
+          rotation="0 90 0"
+          spot-contact-cue
         ></a-entity>
       </a-entity>
 
