@@ -188,16 +188,6 @@ AFRAME.registerComponent("floorplan", {
     // Matte plaster. Only used by lit shaders; `flat` ignores both.
     roughness: { type: "number", default: 1 },
     metalness: { type: "number", default: 0 },
-    // Corridor surfaces are painted this instead of `color`, so passages read
-    // as MATERIALLY darker than the rooms — a fixed step that does not depend on
-    // where you stand or on getting a point light to fall off just so. (Light
-    // alone could not do it: a lamp strong enough to dim a passage clips the
-    // surface nearest it; see environment.js. So the room-vs-corridor contrast
-    // is carried by paint, and the lamps just add life.) The seams land exactly
-    // at the door heads and doorway edges — where a passage SHOULD change — so
-    // they read as architecture, not as a glitch. A hallway's own `style.color`
-    // still overrides this. Raise toward #ffffff for less contrast.
-    corridorColor: { type: "color", default: "#c4c4c4" },
     // Edge lines — see buildEdges(). OFF now that the walls are lit: shading
     // reads the corners, and these 1px lines shimmer in a headset (hairline
     // GL_LINES alias as your head micro-moves, which no depth tweak fixes).
@@ -235,12 +225,10 @@ AFRAME.registerComponent("floorplan", {
   // by the room's/hallway's own `style`, overridden (for a ceiling or a
   // corridor roof) by its `ceilingStyle`. An item that declares nothing looks
   // exactly like the rest of the gallery, so adding this changed no surface.
-  styleFor: function (owner, kind, corridor) {
+  styleFor: function (owner, kind) {
     const d = this.data;
     const s = {
-      // Corridors start from the darker corridorColor; a hallway's own
-      // style.color (applied just below) still wins over it.
-      color: corridor ? d.corridorColor : d.color,
+      color: d.color,
       shader: d.shader,
       roughness: d.roughness,
       metalness: d.metalness,
@@ -435,7 +423,7 @@ AFRAME.registerComponent("floorplan", {
     const lo = Math.min(h.corridor.from, h.corridor.to) - half;
     const hi = Math.max(h.corridor.from, h.corridor.to) + half;
     let built = 0;
-    const style = this.styleFor(h, "wall", true); // true = corridor: darker paint
+    const style = this.styleFor(h, "wall");
     [-1, 1].forEach((s) => {
       built += this.wall(
         runAxis, h.center + s * offset, lo, hi, `hall-${h.id}`, 0, hallH,
@@ -456,7 +444,7 @@ AFRAME.registerComponent("floorplan", {
     if (c1 - c0 > MIN_SEGMENT) {
       const mid = (c0 + c1) / 2;
       const span = c1 - c0;
-      const roof = this.styleFor(h, "ceiling", true); // corridor: darker paint
+      const roof = this.styleFor(h, "ceiling");
       if (runAxis === "x") this.cap(mid, hallH, h.center, span, h.width, roof);
       else this.cap(h.center, hallH, mid, h.width, span, roof);
     }

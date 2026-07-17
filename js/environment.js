@@ -115,15 +115,13 @@ const SKYLINE_CROP = 0.25; // fraction of the image height (from the BOTTOM) to
 //   wall facing the key ~#f9  |  lit only by fill ~#e5  |  edge-on ~#d8
 //   ceiling ~#d4 (no directional reaches it — it faces down)  |  floor ~#e7
 // That spread across a room's four walls IS the thing that makes corners read.
-// Ambient + hemisphere are the EVEN BASE WASH. They are flat — no falloff, no
-// direction — so they are cheap, hotspot-free, and light the whole gallery to a
-// clean white. They deliberately carry MOST of the brightness, because the
-// alternative (leaning on the point lamps) makes hotspots: a point light bright
-// enough to light a room on its own blows a bright pool onto whatever surface
-// is nearest it. So the lamps below are only a gentle top-up that falls off into
-// the corridors; the base wash keeps everything from going murky.
-const GALLERY_AMBIENT = { color: "#ffffff", intensity: 1.25 };
-const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.5 };
+// Ambient + hemisphere are FILL only, kept LOW on purpose: they are flat (no
+// falloff, no direction), so every unit of them lights the corridors exactly as
+// much as the rooms and washes out the room-vs-passage contrast. The room
+// fixtures below carry the room brightness — that is what lets a passage, which
+// has no fixture of its own, read as dimmer.
+const GALLERY_AMBIENT = { color: "#ffffff", intensity: 0.75 };
+const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.35 };
 // `dir` is the light's POSITION: it shines from there toward the origin. Both
 // have x AND z so that all four wall facings differ — a key aligned to an axis
 // would leave two of them matched, and those corners would vanish again.
@@ -158,30 +156,27 @@ const FIXTURE_SPACING = 14; // metres: one lamp per ~this much room, per axis
 // hotspot rides up ABOVE the 3 m doorways (hidden behind the corridor roof from
 // a passage) and the floor pool spreads. Not 1.0: a lamp jammed into the
 // ceiling lights the ceiling right above it into its own hotspot.
-const FIXTURE_HEIGHT = 0.7;
-// Gentle: the base wash does the lighting, the lamp only lifts a room a little
-// above the passages. Low enough that its peak never blows out a nearby wall —
-// this was tuned by sweeping (height, intensity, decay) and reading the render:
-// higher intensity clips the surface nearest the lamp before it meaningfully
-// dims the corridors, so this is about as far as a single point lamp per room
-// can be pushed. Gives a ~10-level corridor-vs-room falloff with 0% clipping.
-const FIXTURE_INTENSITY = 4; // as calibrated for a room of FIXTURE_REF_HEIGHT
-// Intensity is HEIGHT-COMPENSATED. A lamp hangs at FIXTURE_HEIGHT of the room's
-// height, so in a 5 m room it sits at 2.25 m and in a 10 m room at 4.5 m — half
-// the distance to the floor. Illuminance on the floor below falls off as
-// distance^decay, so a fixed intensity makes the SHORT rooms' floors ~2.6x
-// brighter (they blew out). Scaling each lamp by its own height^decay, relative
-// to a reference height, holds floor brightness constant whatever a room's
-// height is — so this keeps working when room heights change. Referenced to the
-// tall rooms (10 m), which read correctly, so those are left untouched and only
-// the 5 m rooms (foyer, Zone A) come down.
-const FIXTURE_REF_HEIGHT = 10;
+const FIXTURE_HEIGHT = 0.45;
+// Strong: the lamps carry the room brightness, which is what makes the passages
+// (no lamp of their own) read clearly dimmer than the rooms — the whole point.
+const FIXTURE_INTENSITY = 9;
+// PARTIAL height-compensation. A lamp hangs at FIXTURE_HEIGHT of the room's
+// height, so in a 5 m room it sits at 2.25 m vs 4.5 m in a 10 m room — half the
+// distance to the floor. Floor illuminance falls off as distance^decay, so at a
+// fixed intensity the SHORT rooms' floors blow out. FULL compensation (scaling
+// each lamp by (height/ref)^decay) fixes the blowout but ALSO dims the short
+// rooms so much their corridors stop standing out — the effect we want to keep.
+// So compensate only PARTWAY: strength 0 = none (floor blows out), 1 = full
+// (over-dimmed, flat corridors). Tuned to the least dimming that still clears
+// the clip, so the short rooms come down "just a little" and the corridor
+// contrast survives. This is `dim the light there a little`.
+const FIXTURE_COMP = 0.45;
+const FIXTURE_REF_HEIGHT = 10; // rooms at this height are never dimmed
 // Falloff exponent. 2 is physical inverse-square, but it makes a 28.8 m room
-// wildly uneven from a handful of lamps AND peaks hard near the lamp (clips the
-// nearest surface); 1 is nearly flat and barely dims the corridors. 1.2 keeps
-// the near-lamp peak below clipping while still dropping the passages. Tune this
-// first if corridors read too dark or too similar.
-const FIXTURE_DECAY = 1.2;
+// wildly uneven from a handful of lamps; 1 is nearly flat and barely dims the
+// corridors. 1.4 keeps galleries reasonably even while still dropping the
+// passages. Tune this first if corridors read too dark or too similar.
+const FIXTURE_DECAY = 1.4;
 const FIXTURE_DISTANCE = 0; // 0 = no hard cutoff
 
 // --- floor finish -------------------------------------------------------
@@ -328,6 +323,7 @@ AFRAME.registerComponent("room-fixtures", {
     spacing: { type: "number", default: FIXTURE_SPACING },
     height: { type: "number", default: FIXTURE_HEIGHT },
     intensity: { type: "number", default: FIXTURE_INTENSITY },
+    comp: { type: "number", default: FIXTURE_COMP },
     refHeight: { type: "number", default: FIXTURE_REF_HEIGHT },
     decay: { type: "number", default: FIXTURE_DECAY },
     distance: { type: "number", default: FIXTURE_DISTANCE },
@@ -365,17 +361,21 @@ AFRAME.registerComponent("room-fixtures", {
     if (!rooms) return; // floorplan not up yet — `floorplanbuilt` calls us back
 
     const d = this.data;
+    const comp = d.comp;
     let n = 0;
     Object.keys(rooms).forEach((name) => {
       const r = rooms[name];
       const h = r.height != null ? r.height : attr.height;
       const lampY = h * d.height;
-      // Height-compensate: a lower lamp lights its floor harder (distance^decay),
-      // so a short room would blow out at a fixed intensity. Scale by this lamp's
-      // height vs the reference, so the floor gets the same illuminance in every
-      // room. At the reference height the factor is 1 (tall rooms unchanged).
+      // PARTIAL height-compensation: a lower lamp lights its floor harder
+      // (distance^decay), so a short room blows out at a fixed intensity. FULL
+      // compensation (comp = 1) equalises floor brightness but over-dims short
+      // rooms and flattens their corridors; comp = 0 leaves the blowout. The
+      // exponent is scaled by comp so short rooms come down only partway — just
+      // enough to clear the clip while keeping the corridor contrast. Rooms at
+      // the reference height are never touched (ratio = 1).
       const refY = d.refHeight * d.height;
-      const intensity = d.intensity * Math.pow(lampY / refY, d.decay);
+      const intensity = d.intensity * Math.pow(lampY / refY, d.decay * comp);
       // Spread lamps evenly, one per ~spacing on each axis, so a long room gets
       // a row rather than one hot spot in the middle.
       const nx = Math.max(1, Math.round(r.w / d.spacing));
