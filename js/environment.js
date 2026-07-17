@@ -237,18 +237,48 @@ function envEl(tag, attrs) {
   return e;
 }
 
+// The ground plane is a BACKDROP: thin things sit on it — the floorplan's black
+// edge lines along every wall base, and every zone's contact cues — and they
+// must win the depth test against it, not flicker.
+//
+// A fixed height above the floor is not enough on its own, because what decides
+// the fight is DEPTH difference, not distance. Seen from eye height 25 m away,
+// a line 4 mm up is only ~0.25 mm deeper than the floor, and the depth buffer
+// only resolves ~0.37 mm there (near 0.1, 24-bit) — so it flickers. The rooms
+// are up to 28.8 m long, so this is well inside the exhibition. (The camera's
+// near was already raised 0.005 -> 0.1 for the same reason; see index.html.)
+//
+// polygonOffset pushes this plane a hair away from the camera in depth. Its
+// FACTOR term scales with the polygon's depth slope, so it grows exactly in the
+// grazing case that a fixed offset cannot cover — which is every distant floor
+// view. A-Frame's material component does not expose it, so set it on the THREE
+// material once the entity has initialised.
+const GROUND_DEPTH_BIAS = 1;
+function biasGround(el) {
+  el.addEventListener("loaded", function () {
+    const mesh = el.getObject3D("mesh");
+    if (!mesh || !mesh.material) return;
+    mesh.material.polygonOffset = true;
+    mesh.material.polygonOffsetFactor = GROUND_DEPTH_BIAS;
+    mesh.material.polygonOffsetUnits = GROUND_DEPTH_BIAS;
+  });
+  return el;
+}
+
 // Ground plane — built by EVERY preset. Locomotion is free-fly so it isn't
 // strictly required for movement, but the brief mandates a floor in all looks
 // (comfort/orientation).
 function buildGround(parent, color) {
   parent.appendChild(
-    envEl("a-plane", {
-      position: "0 0 0",
-      rotation: "-90 0 0",
-      width: GROUND_SIZE,
-      height: GROUND_SIZE,
-      color: color,
-    })
+    biasGround(
+      envEl("a-plane", {
+        position: "0 0 0",
+        rotation: "-90 0 0",
+        width: GROUND_SIZE,
+        height: GROUND_SIZE,
+        color: color,
+      })
+    )
   );
 }
 
@@ -329,15 +359,18 @@ const ENV_PRESETS = {
     );
     // Floor: pure white and UNLIT (shader: flat), like the cityroom floor, so
     // it reads bright white rather than a light-dimmed grey. Still a ground
-    // plane (dependency rule).
+    // plane (dependency rule). Depth-biased so the floorplan's wall-base lines
+    // and the zones' contact cues sit on it cleanly — see biasGround().
     env.appendChild(
-      envEl("a-plane", {
-        position: "0 0 0",
-        rotation: "-90 0 0",
-        width: GROUND_SIZE,
-        height: GROUND_SIZE,
-        material: "color: #ffffff; shader: flat; side: double",
-      })
+      biasGround(
+        envEl("a-plane", {
+          position: "0 0 0",
+          rotation: "-90 0 0",
+          width: GROUND_SIZE,
+          height: GROUND_SIZE,
+          material: "color: #ffffff; shader: flat; side: double",
+        })
+      )
     );
   },
 

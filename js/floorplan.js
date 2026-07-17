@@ -137,6 +137,39 @@ function throughAxis(side) {
   return side.charAt(1); // '-x'/'+x' -> 'x'; '-z'/'+z' -> 'z'
 }
 
+// Push a SURFACE a hair away from the camera in the depth buffer, so the edge
+// lines drawn just in front of it win the depth test instead of flickering
+// against it.
+//
+// Why this is needed at all: the lines sit `edgeLift` (4 mm) proud of their
+// surface, which is plenty up close but not at range or at a grazing angle,
+// because what matters is the DEPTH difference, not the distance. A floor line
+// 4 mm up is only ~0.25 mm deeper than the floor when seen from eye height 25 m
+// away — and the depth buffer can only resolve ~0.37 mm out there (near 0.1,
+// 24-bit). So it z-fights. Zone B's room is 28.8 m long and Zone C's 24.4 m,
+// which is exactly where it showed up on the Quest. Raising edgeLift instead
+// would need ~18 mm, enough to visibly detach the lines from their corners.
+//
+// polygonOffset is the right tool: its FACTOR term scales with the polygon's
+// depth slope, so it grows precisely in the grazing case that defeats a fixed
+// offset. It only applies to triangles (WebGL has POLYGON_OFFSET_FILL and no
+// line equivalent), which is why the surfaces move and not the lines.
+//
+// A-Frame's material component does not expose polygonOffset, so reach the
+// THREE material once the entity has initialised.
+function biasSurface(el, bias) {
+  if (!bias) return;
+  const apply = function () {
+    const mesh = el.getObject3D("mesh");
+    if (!mesh || !mesh.material) return;
+    mesh.material.polygonOffset = true;
+    mesh.material.polygonOffsetFactor = bias;
+    mesh.material.polygonOffsetUnits = bias;
+  };
+  if (el.hasLoaded) apply();
+  else el.addEventListener("loaded", apply);
+}
+
 AFRAME.registerComponent("floorplan", {
   schema: {
     // Fallback room height, for rooms that do not set their own.
@@ -155,9 +188,15 @@ AFRAME.registerComponent("floorplan", {
     edges: { type: "boolean", default: true },
     edgeColor: { type: "color", default: "#000000" },
     // How far the lines sit proud of the surfaces they trace (metres). Small
-    // but non-zero: at 0 they are coplanar with the walls and the floor and
-    // would z-fight. Raise it if you see stitching on a headset.
+    // but non-zero: at 0 they are coplanar with the walls and the floor. This
+    // alone is NOT what keeps them from flickering at range — see depthBias.
     edgeLift: { type: "number", default: 0.004 },
+    // Depth bias applied to the walls and ceilings (polygonOffset factor AND
+    // units) to stop the edge lines flickering against them at distance and at
+    // grazing angles — see biasSurface() for why this rather than a bigger
+    // edgeLift. 0 disables it. Raise it if any flicker survives; too high and a
+    // wall can start to poke through its neighbours at corners.
+    depthBias: { type: "number", default: 1 },
     // Config objects. `parse` accepts a live object (setAttribute with an
     // object) or a JSON string (an HTML attribute), so both routes work.
     rooms: {
@@ -393,6 +432,7 @@ AFRAME.registerComponent("floorplan", {
     // side: double so the lid also reads from above — locomotion is free-fly,
     // so you can get up there and a one-sided lid would vanish.
     el.setAttribute("material", `color: ${d.color}; shader: ${d.shader}; side: double`);
+    biasSurface(el, d.depthBias);
     this.el.appendChild(el);
     this.capCount++;
   },
@@ -449,6 +489,7 @@ AFRAME.registerComponent("floorplan", {
     el.setAttribute("height", tall);
     el.setAttribute("material", `color: ${d.color}; shader: ${d.shader}`);
     el.setAttribute("data-wall", label); // dev handle; nothing reads it
+    biasSurface(el, d.depthBias);
     this.el.appendChild(el);
     return 1;
   },
