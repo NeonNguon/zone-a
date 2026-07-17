@@ -178,6 +178,13 @@ const FIXTURE_REF_HEIGHT = 10; // rooms at this height are never dimmed
 // passages. Tune this first if corridors read too dark or too similar.
 const FIXTURE_DECAY = 1.4;
 const FIXTURE_DISTANCE = 0; // 0 = no hard cutoff
+// VR-ONLY lamp dim. The Quest renders the scene hotter than a desktop browser
+// (different exposure / tone handling on the headset), so a floor that is fine
+// on the web still clips to white in the headset. This multiplies the lamp
+// intensity ONLY while an immersive session is active — web mode is untouched.
+// The lamps are rebuilt on enter-vr / exit-vr so the change tracks the mode.
+// Lower it if the floor still blows out in the headset; 1 = no VR difference.
+const FIXTURE_VR_SCALE = 0.8;
 
 // --- floor finish -------------------------------------------------------
 // The floor is the one surface always in view and the ONLY one you move
@@ -324,6 +331,7 @@ AFRAME.registerComponent("room-fixtures", {
     height: { type: "number", default: FIXTURE_HEIGHT },
     intensity: { type: "number", default: FIXTURE_INTENSITY },
     comp: { type: "number", default: FIXTURE_COMP },
+    vrScale: { type: "number", default: FIXTURE_VR_SCALE },
     refHeight: { type: "number", default: FIXTURE_REF_HEIGHT },
     decay: { type: "number", default: FIXTURE_DECAY },
     distance: { type: "number", default: FIXTURE_DISTANCE },
@@ -339,6 +347,13 @@ AFRAME.registerComponent("room-fixtures", {
     // changes. (Same shape as the zone-b-map-root fix.)
     this.onBuilt = () => this.build();
     if (this.fpEl) this.fpEl.addEventListener("floorplanbuilt", this.onBuilt);
+
+    // Rebuild dimmer on entering VR and back to full on leaving, so the VR-only
+    // lamp dim (vrScale) tracks the actual mode. The scene fires these when the
+    // immersive session starts/ends.
+    this.onVrChange = () => this.build();
+    this.el.sceneEl.addEventListener("enter-vr", this.onVrChange);
+    this.el.sceneEl.addEventListener("exit-vr", this.onVrChange);
   },
 
   update: function () {
@@ -347,6 +362,8 @@ AFRAME.registerComponent("room-fixtures", {
 
   remove: function () {
     if (this.fpEl) this.fpEl.removeEventListener("floorplanbuilt", this.onBuilt);
+    this.el.sceneEl.removeEventListener("enter-vr", this.onVrChange);
+    this.el.sceneEl.removeEventListener("exit-vr", this.onVrChange);
     this.teardown();
   },
 
@@ -362,6 +379,8 @@ AFRAME.registerComponent("room-fixtures", {
 
     const d = this.data;
     const comp = d.comp;
+    // Dim the lamps only while an immersive session is active (see vrScale).
+    const vr = this.el.sceneEl.is("vr-mode") ? d.vrScale : 1;
     let n = 0;
     Object.keys(rooms).forEach((name) => {
       const r = rooms[name];
@@ -375,7 +394,7 @@ AFRAME.registerComponent("room-fixtures", {
       // enough to clear the clip while keeping the corridor contrast. Rooms at
       // the reference height are never touched (ratio = 1).
       const refY = d.refHeight * d.height;
-      const intensity = d.intensity * Math.pow(lampY / refY, d.decay * comp);
+      const intensity = d.intensity * Math.pow(lampY / refY, d.decay * comp) * vr;
       // Spread lamps evenly, one per ~spacing on each axis, so a long room gets
       // a row rather than one hot spot in the middle.
       const nx = Math.max(1, Math.round(r.w / d.spacing));
