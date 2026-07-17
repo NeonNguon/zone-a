@@ -115,12 +115,15 @@ const SKYLINE_CROP = 0.25; // fraction of the image height (from the BOTTOM) to
 //   wall facing the key ~#f9  |  lit only by fill ~#e5  |  edge-on ~#d8
 //   ceiling ~#d4 (no directional reaches it — it faces down)  |  floor ~#e7
 // That spread across a room's four walls IS the thing that makes corners read.
-// Ambient and hemisphere are FILL, deliberately lower than they were: they are
-// flat (no falloff, no direction), so every unit of them is a unit that makes
-// the corridors look exactly like the rooms. The room fixtures below now carry
-// the room brightness instead, and that is what lets a passage read as dimmer.
-const GALLERY_AMBIENT = { color: "#ffffff", intensity: 0.75 };
-const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.35 };
+// Ambient + hemisphere are the EVEN BASE WASH. They are flat — no falloff, no
+// direction — so they are cheap, hotspot-free, and light the whole gallery to a
+// clean white. They deliberately carry MOST of the brightness, because the
+// alternative (leaning on the point lamps) makes hotspots: a point light bright
+// enough to light a room on its own blows a bright pool onto whatever surface
+// is nearest it. So the lamps below are only a gentle top-up that falls off into
+// the corridors; the base wash keeps everything from going murky.
+const GALLERY_AMBIENT = { color: "#ffffff", intensity: 1.25 };
+const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.5 };
 // `dir` is the light's POSITION: it shines from there toward the origin. Both
 // have x AND z so that all four wall facings differ — a key aligned to an axis
 // would leave two of them matched, and those corners would vanish again.
@@ -151,8 +154,18 @@ const GALLERY_FLOOR = "#dcdcdc";
 // useful here: a corridor still catches some spill from the rooms at both ends,
 // attenuated by distance, which is roughly what it should get.
 const FIXTURE_SPACING = 14; // metres: one lamp per ~this much room, per axis
-const FIXTURE_HEIGHT = 0.45; // fraction of the room's height
-const FIXTURE_INTENSITY = 9; // as calibrated for a room of FIXTURE_REF_HEIGHT
+// Fraction of the room's height the lamp hangs at. High-ish, so any residual
+// hotspot rides up ABOVE the 3 m doorways (hidden behind the corridor roof from
+// a passage) and the floor pool spreads. Not 1.0: a lamp jammed into the
+// ceiling lights the ceiling right above it into its own hotspot.
+const FIXTURE_HEIGHT = 0.7;
+// Gentle: the base wash does the lighting, the lamp only lifts a room a little
+// above the passages. Low enough that its peak never blows out a nearby wall —
+// this was tuned by sweeping (height, intensity, decay) and reading the render:
+// higher intensity clips the surface nearest the lamp before it meaningfully
+// dims the corridors, so this is about as far as a single point lamp per room
+// can be pushed. Gives a ~10-level corridor-vs-room falloff with 0% clipping.
+const FIXTURE_INTENSITY = 4; // as calibrated for a room of FIXTURE_REF_HEIGHT
 // Intensity is HEIGHT-COMPENSATED. A lamp hangs at FIXTURE_HEIGHT of the room's
 // height, so in a 5 m room it sits at 2.25 m and in a 10 m room at 4.5 m — half
 // the distance to the floor. Illuminance on the floor below falls off as
@@ -164,10 +177,11 @@ const FIXTURE_INTENSITY = 9; // as calibrated for a room of FIXTURE_REF_HEIGHT
 // the 5 m rooms (foyer, Zone A) come down.
 const FIXTURE_REF_HEIGHT = 10;
 // Falloff exponent. 2 is physical inverse-square, but it makes a 28.8 m room
-// wildly uneven from a handful of lamps; 1 is nearly flat and barely dims the
-// corridors. ~1.4 keeps galleries reasonably even while still dropping the
-// passages. Tune this first if corridors read too dark or too similar.
-const FIXTURE_DECAY = 1.4;
+// wildly uneven from a handful of lamps AND peaks hard near the lamp (clips the
+// nearest surface); 1 is nearly flat and barely dims the corridors. 1.2 keeps
+// the near-lamp peak below clipping while still dropping the passages. Tune this
+// first if corridors read too dark or too similar.
+const FIXTURE_DECAY = 1.2;
 const FIXTURE_DISTANCE = 0; // 0 = no hard cutoff
 
 // --- floor finish -------------------------------------------------------
