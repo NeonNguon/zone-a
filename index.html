@@ -190,12 +190,19 @@
       <a-entity id="environment" environment-manager="preset: void"></a-entity>
 
       <!-- ============================================================
-           FLOORPLAN — the architecture: four white-walled, open-topped rooms
-           (spawn/central + one per zone) joined by open hallways. Every wall
-           is generated at runtime from the component's room/hallway config —
-           primitives only, no asset files (same no-asset approach as the
-           contact cues). It builds NO floor: the environment preset's ground
-           plane is the floor, so the rooms sit on whatever preset is active.
+           FLOORPLAN — the architecture: four white-walled rooms (foyer/central
+           + one per zone) joined by low hallways. Every wall is generated at
+           runtime from the component's room/hallway config — primitives only,
+           no asset files (same no-asset approach as the contact cues). It
+           builds NO floor: the environment preset's ground plane is the floor,
+           so the rooms sit on whatever preset is active.
+
+           Heights are per-room, and the hallways are deliberately LOWER than
+           the rooms, so you duck through a passage and the space opens up:
+           foyer 5 m and Zone A 5 m (open-topped, the preset's background reads
+           as sky); Zones B & C 10 m with ceilings (their screen/image wall top
+           out at ~7.1 m / ~4.9 m); hallways 3 m, roofed, with a lintel of wall
+           carried over each doorway.
 
            A SIBLING of #environment, not a child: the walls are architecture,
            so they must PERSIST across environment switches (env teardown only
