@@ -206,7 +206,7 @@
            B & C. Tune via the zone-a-root `offset` property — never the ring
            math or the nine coordinates.
            ============================================================ -->
-      <a-entity id="zone-a" zone-a-root="offset: 0 0 -8">
+      <a-entity id="zone-a" zone-a-root="offset: 0 0 -12.5">
         <!-- Ring container: ring-layout fills it with nine image entities. -->
         <a-entity ring-layout position="0 0 0"></a-entity>
 
@@ -240,7 +240,7 @@
            ahead, its width spanning the view. All wall tunables (width / gap /
            rows / cols / aspect) live on the image-wall component.
            ============================================================ -->
-      <a-entity id="zone-b" zone-b-root="offset: 13 3 0">
+      <a-entity id="zone-b" zone-b-root="offset: 25 3 -1.2">
         <a-entity
           id="zone-b-wall"
           rotation="0 -90 0"
@@ -413,7 +413,7 @@
            controlsFadeDelay / audioRefDistance / audioRolloff) live on the
            zone-c-root schema — see js/zone-c.js.
            ============================================================ -->
-      <a-entity id="zone-c" zone-c-root="offset: -10 3 0">
+      <a-entity id="zone-c" zone-c-root="offset: -19.7 3 -0.5">
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
              none). Lives under #zone-c so it PERSISTS across environment
