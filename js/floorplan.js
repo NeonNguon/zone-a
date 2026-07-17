@@ -120,6 +120,15 @@ AFRAME.registerComponent("floorplan", {
     thickness: { type: "number", default: 0.15 }, // metres
     color: { type: "color", default: "#ffffff" },
     shader: { type: "string", default: "flat" }, // unlit: cheap on Quest
+    // Edge lines — see buildEdges(). Flat white walls under flat white light
+    // have NO shading, so without these every corner and floor junction reads
+    // as one continuous white field and you cannot see where a wall runs.
+    edges: { type: "boolean", default: true },
+    edgeColor: { type: "color", default: "#000000" },
+    // How far the lines sit proud of the surfaces they trace (metres). Small
+    // but non-zero: at 0 they are coplanar with the walls and the floor and
+    // would z-fight. Raise it if you see stitching on a headset.
+    edgeLift: { type: "number", default: 0.004 },
     // Config objects. `parse` accepts a live object (setAttribute with an
     // object) or a JSON string (an HTML attribute), so both routes work.
     rooms: {
@@ -155,12 +164,23 @@ AFRAME.registerComponent("floorplan", {
 
   teardown: function () {
     while (this.el.firstChild) this.el.removeChild(this.el.firstChild);
+    // The edge lines are an object3D on this entity, not a child entity, so
+    // they need disposing by hand (the walls' own materials go with their
+    // elements).
+    if (this.lines) {
+      this.el.removeObject3D("edges");
+      this.lines.geometry.dispose();
+      this.lines.material.dispose();
+      this.lines = null;
+    }
   },
 
   build: function () {
     const d = this.data;
     const rooms = d.rooms || {};
     const hallways = d.hallways || [];
+    // Each wall records its footprint here for the edge pass to trace.
+    this.footprints = [];
 
     // Index the openings by "room/side" so each wall knows what to cut.
     const openings = {};
@@ -189,9 +209,80 @@ AFRAME.registerComponent("floorplan", {
     hallways.forEach((h) => {
       count += this.buildCorridor(h);
     });
+    const lines = this.buildEdges(rooms);
     console.log(
-      `[floorplan] ${Object.keys(rooms).length} rooms, ${hallways.length} hallways, ${count} wall segments`
+      `[floorplan] ${Object.keys(rooms).length} rooms, ${hallways.length} hallways, ` +
+        `${count} wall segments, ${lines} edge lines`
     );
+  },
+
+  // Black edge lines, so the architecture reads. The walls are unlit flat white
+  // on a flat white floor: nothing shades a corner, so without lines the whole
+  // plan is one white field and you cannot tell where a wall runs, where it
+  // meets the floor, or where a doorway is.
+  //
+  // ONE THREE.LineSegments for the entire plan — a single draw call and a
+  // single material, which is the cheapest thing available on Quest. (Line
+  // width is 1px on WebGL regardless of the material's linewidth; if these ever
+  // need to read thicker, they have to become thin black boxes instead.)
+  //
+  // Every line is nudged `edgeLift` PROUD of the surface it traces — outward in
+  // x/z, upward in y — so it never lies coplanar with a wall face or the floor
+  // plane and never z-fights.
+  buildEdges: function (rooms) {
+    const d = this.data;
+    if (!d.edges) return 0;
+
+    const lift = d.edgeLift;
+    const y0 = lift; // floor line, just above the ground plane at y = 0
+    const y1 = d.height + lift; // top line, just above the wall's open top
+    const pts = [];
+    const seg = (ax, ay, az, bx, by, bz) => pts.push(ax, ay, az, bx, by, bz);
+
+    // Trace each wall box: its floor rectangle, its top rectangle, and a
+    // vertical at each of its four footprint corners. At a doorway those
+    // verticals are the jamb reveals; at a room corner they are buried inside
+    // the neighbouring wall and simply never draw (the depth test hides them).
+    this.footprints.forEach((f) => {
+      const c = [
+        [f.x0 - lift, f.z0 - lift],
+        [f.x1 + lift, f.z0 - lift],
+        [f.x1 + lift, f.z1 + lift],
+        [f.x0 - lift, f.z1 + lift],
+      ];
+      for (let i = 0; i < 4; i++) {
+        const a = c[i];
+        const b = c[(i + 1) % 4];
+        seg(a[0], y0, a[1], b[0], y0, b[1]); // floor junction
+        seg(a[0], y1, a[1], b[0], y1, b[1]); // open top edge
+        seg(a[0], y0, a[1], a[0], y1, a[1]); // vertical
+      }
+    });
+
+    // Room corners need drawing EXPLICITLY. Perimeter walls span their room's
+    // full extent, so they overlap by half a thickness at each corner — which
+    // is what closes the corner, but it also means the box edges there sit
+    // buried inside the adjoining wall. The corner you actually SEE, where the
+    // two inner faces meet, has no box edge on it at all. So place a vertical
+    // on each inner corner, nudged into the room to sit proud of both faces.
+    // This lands exactly where the two walls' floor lines meet.
+    Object.keys(rooms).forEach((name) => {
+      const r = rooms[name];
+      const ix = r.w / 2 - d.thickness / 2 - lift;
+      const iz = r.d / 2 - d.thickness / 2 - lift;
+      [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach((s) => {
+        const x = r.cx + s[0] * ix;
+        const z = r.cz + s[1] * iz;
+        seg(x, y0, z, x, y1, z);
+      });
+    });
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    const mat = new THREE.LineBasicMaterial({ color: new THREE.Color(d.edgeColor) });
+    this.lines = new THREE.LineSegments(geo, mat);
+    this.el.setObject3D("edges", this.lines);
+    return pts.length / 6;
   },
 
   // One room side: the full run minus each opening, left to right.
@@ -252,17 +343,22 @@ AFRAME.registerComponent("floorplan", {
     if (len < MIN_SEGMENT) return 0;
     const mid = (a + b) / 2;
 
+    const half = d.thickness / 2;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
     const el = document.createElement("a-box");
     if (axis === "z") {
       // Runs along z; its plane faces ±x.
       el.setAttribute("position", `${fixed} ${d.height / 2} ${mid}`);
       el.setAttribute("width", d.thickness);
       el.setAttribute("depth", len);
+      this.footprints.push({ x0: fixed - half, x1: fixed + half, z0: lo, z1: hi });
     } else {
       // Runs along x; its plane faces ±z.
       el.setAttribute("position", `${mid} ${d.height / 2} ${fixed}`);
       el.setAttribute("width", len);
       el.setAttribute("depth", d.thickness);
+      this.footprints.push({ x0: lo, x1: hi, z0: fixed - half, z1: fixed + half });
     }
     el.setAttribute("height", d.height);
     el.setAttribute("material", `color: ${d.color}; shader: ${d.shader}`);
