@@ -38,7 +38,15 @@ const ENV_CYCLE_ENABLED = false;
 // only controls what the e/b cycle visits.
 const CYCLE_ORDER = ["void", "dataspace", "cityroom"];
 
-const GROUND_SIZE = 30; // metres square; matches the original plane
+// Ground plane size, metres square, CENTRED on the origin (so it reaches
+// ±GROUND_SIZE/2 on both axes). It must cover the whole floorplan: the binding
+// constraint is Zone B's far wall, whose outer face sits at x 28.275 (see
+// js/floorplan.js — room zoneB, cx 19.2 + w/2 9 + half a wall thickness), so
+// anything under ~56.6 leaves rooms standing on nothing. 64 clears every outer
+// wall face with ~3.7 m to spare — the margin matters because locomotion is
+// free-fly: you can rise above the open-topped rooms and see the floor's edge.
+// Was 30, which predates the rooms and only covered the central area.
+const GROUND_SIZE = 64;
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps
 const PARTICLE_SPREAD = 30; // half-extent of the cube the points fill (m)
 const PARTICLE_DRIFT = 0.02; // radians/sec — slow yaw of the whole field
