@@ -152,7 +152,17 @@ const GALLERY_FLOOR = "#dcdcdc";
 // attenuated by distance, which is roughly what it should get.
 const FIXTURE_SPACING = 14; // metres: one lamp per ~this much room, per axis
 const FIXTURE_HEIGHT = 0.45; // fraction of the room's height
-const FIXTURE_INTENSITY = 9;
+const FIXTURE_INTENSITY = 9; // as calibrated for a room of FIXTURE_REF_HEIGHT
+// Intensity is HEIGHT-COMPENSATED. A lamp hangs at FIXTURE_HEIGHT of the room's
+// height, so in a 5 m room it sits at 2.25 m and in a 10 m room at 4.5 m — half
+// the distance to the floor. Illuminance on the floor below falls off as
+// distance^decay, so a fixed intensity makes the SHORT rooms' floors ~2.6x
+// brighter (they blew out). Scaling each lamp by its own height^decay, relative
+// to a reference height, holds floor brightness constant whatever a room's
+// height is — so this keeps working when room heights change. Referenced to the
+// tall rooms (10 m), which read correctly, so those are left untouched and only
+// the 5 m rooms (foyer, Zone A) come down.
+const FIXTURE_REF_HEIGHT = 10;
 // Falloff exponent. 2 is physical inverse-square, but it makes a 28.8 m room
 // wildly uneven from a handful of lamps; 1 is nearly flat and barely dims the
 // corridors. ~1.4 keeps galleries reasonably even while still dropping the
@@ -304,6 +314,7 @@ AFRAME.registerComponent("room-fixtures", {
     spacing: { type: "number", default: FIXTURE_SPACING },
     height: { type: "number", default: FIXTURE_HEIGHT },
     intensity: { type: "number", default: FIXTURE_INTENSITY },
+    refHeight: { type: "number", default: FIXTURE_REF_HEIGHT },
     decay: { type: "number", default: FIXTURE_DECAY },
     distance: { type: "number", default: FIXTURE_DISTANCE },
     color: { type: "color", default: "#ffffff" },
@@ -344,6 +355,13 @@ AFRAME.registerComponent("room-fixtures", {
     Object.keys(rooms).forEach((name) => {
       const r = rooms[name];
       const h = r.height != null ? r.height : attr.height;
+      const lampY = h * d.height;
+      // Height-compensate: a lower lamp lights its floor harder (distance^decay),
+      // so a short room would blow out at a fixed intensity. Scale by this lamp's
+      // height vs the reference, so the floor gets the same illuminance in every
+      // room. At the reference height the factor is 1 (tall rooms unchanged).
+      const refY = d.refHeight * d.height;
+      const intensity = d.intensity * Math.pow(lampY / refY, d.decay);
       // Spread lamps evenly, one per ~spacing on each axis, so a long room gets
       // a row rather than one hot spot in the middle.
       const nx = Math.max(1, Math.round(r.w / d.spacing));
@@ -355,12 +373,12 @@ AFRAME.registerComponent("room-fixtures", {
               light:
                 "type: point; castShadow: false" +
                 "; color: " + d.color +
-                "; intensity: " + d.intensity +
+                "; intensity: " + intensity +
                 "; decay: " + d.decay +
                 "; distance: " + d.distance,
               position:
                 r.cx + r.w * ((i + 0.5) / nx - 0.5) + " " +
-                h * d.height + " " +
+                lampY + " " +
                 (r.cz + r.d * ((j + 0.5) / nz - 0.5)),
             })
           );
