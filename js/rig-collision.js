@@ -50,6 +50,16 @@
 // last-valid is the return position and there's no snap-back. Both directions
 // handled; see js/zone-b-teleport.js.
 //
+// TELEPORT SAFETY NET — the explicit disable above is the clean path, but we
+// don't want the clamp to be able to FIGHT a teleport if that hook is ever
+// missing (a stale teleport script, a different teleport, a future change). So
+// the tick also treats any single-frame jump larger than teleportThreshold as
+// a teleport, not locomotion: it SUSPENDS clamping (rather than sliding you
+// back) until the mover is inside the walkable region again — so you can jump
+// out to the map, move around out there, and jump back, with the clamp
+// resuming automatically on arrival. Locomotion never moves more than a few cm
+// per frame, so this can't trip on normal movement.
+//
 // TUNABLES (no code edit — setAttribute on #rig):
 //   playerRadius — how far short of a wall the camera stops (m, default 0.25)
 //   doorOverlap  — how far corridor rects reach into each room past its inset
@@ -61,6 +71,10 @@ AFRAME.registerComponent("rig-collision", {
   schema: {
     playerRadius: { type: "number", default: 0.25 },
     doorOverlap: { type: "number", default: 0.3 },
+    // A one-frame jump beyond this (m) is a teleport, not locomotion — see the
+    // teleport safety net in the header. Well above any per-frame walk step,
+    // well below the ~400 m map jump.
+    teleportThreshold: { type: "number", default: 10 },
     enabled: { type: "boolean", default: true },
     debug: { type: "boolean", default: false },
   },
@@ -69,6 +83,9 @@ AFRAME.registerComponent("rig-collision", {
     // Internal active flag, separate from the `enabled` tunable: the Zone B
     // teleport flips this to park us while the visitor is out on the map.
     this.active = true;
+    // Auto-suspend state (teleport safety net): true while a detected teleport
+    // has carried the mover outside the region; cleared when it's back inside.
+    this.suspended = false;
     this.rects = null; // walkable rectangles; null until the floorplan is read
 
     // Last known-good VISITOR floor (x,z), in WORLD space. Seeded from the
@@ -226,9 +243,34 @@ AFRAME.registerComponent("rig-collision", {
     const newX = m.x;
     const newZ = m.z;
 
+    // Teleport safety net: a prior big jump suspended clamping. Stay hands-off
+    // until the mover is back inside the walkable region (e.g. the return
+    // teleport), then resume from there. Lets you move freely out on the map.
+    if (this.suspended) {
+      if (this.isWalkable(newX, newZ)) {
+        this.suspended = false;
+        this.lastX = newX;
+        this.lastZ = newZ;
+        if (this.data.debug) console.log("[rig-collision] resume (back in region)");
+      }
+      return;
+    }
+
     // Moved nowhere this frame — nothing to check (keeps last-valid current
     // when the visitor is parked).
     if (newX === this.lastX && newZ === this.lastZ) return;
+
+    // A one-frame jump too large to be locomotion is a teleport — suspend
+    // rather than sliding the rig back (defends the teleport even if it didn't
+    // disable us; see the header).
+    const jx = newX - this.lastX;
+    const jz = newZ - this.lastZ;
+    const thr = this.data.teleportThreshold;
+    if (jx * jx + jz * jz > thr * thr) {
+      this.suspended = true;
+      if (this.data.debug) console.log("[rig-collision] teleport detected -> suspend");
+      return;
+    }
 
     if (this.isWalkable(newX, newZ)) {
       this.lastX = newX;
@@ -288,6 +330,8 @@ AFRAME.registerComponent("rig-collision", {
   // re-enables us on return.
   setActive: function (on) {
     this.active = !!on;
+    // Re-enabling explicitly clears any auto-suspend, so the two paths agree.
+    if (this.active) this.suspended = false;
     if (this.data.debug) console.log("[rig-collision] active = " + this.active);
   },
 
@@ -298,6 +342,7 @@ AFRAME.registerComponent("rig-collision", {
   resync: function () {
     const inVR = this.el.sceneEl.is("vr-mode");
     this._inVR = inVR;
+    this.suspended = false;
     const m = this.moverXZ(inVR, this._m);
     this.lastX = m.x;
     this.lastZ = m.z;
