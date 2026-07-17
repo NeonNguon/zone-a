@@ -33,18 +33,44 @@ AFRAME.registerComponent("zone-b-map-root", {
     // GPU-preloaded by map-board), so the first teleport has no load hitch.
     shown: { type: "boolean", default: true },
   },
+  init: function () {
+    this.wallRootEl = document.getElementById("zone-b");
+    // The base spot is DERIVED from #zone-b's zone-b-root offset, but that
+    // component is not guaranteed to have initialised by the time THIS
+    // component's first update() runs — when it hasn't, getAttribute returns
+    // nothing and place() would be stuck on the fallback. zone-b-root emits
+    // `zonebrootchanged` on every placement, so re-derive from that: the first
+    // one settles the init-order race, and any later one keeps the map tracking
+    // the wall if the wall moves (this component's documented intent).
+    this.onWallRootChange = () => this.place();
+    if (this.wallRootEl) {
+      this.wallRootEl.addEventListener("zonebrootchanged", this.onWallRootChange);
+    }
+  },
+
+  remove: function () {
+    if (this.wallRootEl) {
+      this.wallRootEl.removeEventListener("zonebrootchanged", this.onWallRootChange);
+    }
+  },
+
   update: function () {
+    this.place();
+  },
+
+  place: function () {
     this.el.object3D.visible = this.data.shown;
     // Read the wall's placement from its own source of truth (the zone-b-root
     // attribute in index.html) — never a copied number.
-    let base = { x: 13, y: 3, z: 0 }; // fallback = zone-b-root's current default
-    const wallRoot = document.getElementById("zone-b");
-    const attr = wallRoot && wallRoot.getAttribute("zone-b-root");
+    let base = { x: 13, y: 3, z: 0 }; // last-resort fallback only
+    const attr = this.wallRootEl && this.wallRootEl.getAttribute("zone-b-root");
     if (attr && attr.offset) {
       base = attr.offset;
-    } else {
+    } else if (!this.wallRootEl) {
       console.warn("zone-b-map-root: #zone-b not found; using fallback base");
     }
+    // else: zone-b-root simply hasn't initialised yet — `zonebrootchanged`
+    // re-places us the moment it does, so this is not worth warning about.
     const o = this.data.offset;
     // Wall x/z (its lateral centre), but FLOOR level — the wall's y raises the
     // wall only; the map lies on the ground.
