@@ -50,6 +50,10 @@
     <!-- Swappable environment layer: presets + environment-manager. Loaded
          before <a-scene> parses so the component is registered in time. -->
     <script src="js/environment.js"></script>
+    <!-- Floorplan: the white-walled rooms + open hallways the zones sit in.
+         Independent of the environment layer (it is architecture, not
+         atmosphere) and of the zones — it reads nothing from either. -->
+    <script src="js/floorplan.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -184,6 +188,27 @@
            overrides on load for dev/debug. See js/environment.js.
            ============================================================ -->
       <a-entity id="environment" environment-manager="preset: void"></a-entity>
+
+      <!-- ============================================================
+           FLOORPLAN — the architecture: four white-walled, open-topped rooms
+           (spawn/central + one per zone) joined by open hallways. Every wall
+           is generated at runtime from the component's room/hallway config —
+           primitives only, no asset files (same no-asset approach as the
+           contact cues). It builds NO floor: the environment preset's ground
+           plane is the floor, so the rooms sit on whatever preset is active.
+
+           A SIBLING of #environment, not a child: the walls are architecture,
+           so they must PERSIST across environment switches (env teardown only
+           touches #environment) — same reasoning as the zones' contact cues.
+
+           Visual only — no collision this pass; you can walk through a wall,
+           and the hallways are the intended path rather than the enforced one.
+
+           Tunables (no code edits — setAttribute on #floorplan): height /
+           thickness / color / shader, plus the full `rooms` and `hallways`
+           config. See js/floorplan.js.
+           ============================================================ -->
+      <a-entity id="floorplan" floorplan></a-entity>
 
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
