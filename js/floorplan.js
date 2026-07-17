@@ -8,7 +8,7 @@
 //
 // HEIGHTS are per-room, and the hallways are deliberately LOWER than the rooms
 // they join, so you duck through a passage and the space opens up on arrival:
-//   foyer (central) 5 m, open top      zoneA  5 m, open top
+//   foyer (central) 5 m, ceiling       zoneA  5 m, ceiling
 //   zoneB          10 m, ceiling       zoneC 10 m, ceiling
 //   hallways        3 m, roofed
 // Two things fall out of that and are easy to miss:
@@ -46,11 +46,10 @@
 // names the hallway config refers to. `height` and `ceiling` are per-room and
 // both fall back to the component's `height` / `ceiling` defaults when omitted.
 const DEFAULT_ROOMS = {
-  // Foyer — the spawn room (the rig is at the origin). Open-topped: arriving in
-  // a lidded box would read as a lobby rather than an entrance.
-  central: { cx: 0, cz: 0, w: 10, d: 10, height: 5 },
+  // Foyer — the spawn room (the rig is at the origin).
+  central: { cx: 0, cz: 0, w: 10, d: 10, height: 5, ceiling: true },
   // The ring, forward (-z). Its images top out ~2.3 m, so 5 m is ample.
-  zoneA: { cx: 0, cz: -11.85, w: 11.2, d: 11.1, height: 5 },
+  zoneA: { cx: 0, cz: -11.85, w: 11.2, d: 11.1, height: 5, ceiling: true },
   // Image wall + triptych, right (+x). The wall tops out ~4.9 m.
   zoneB: { cx: 19.2, cz: -3, w: 18, d: 28.8, height: 10, ceiling: true },
   // Cinema, left (-x). The screen tops out ~7.1 m — the tallest thing in the
@@ -220,8 +219,11 @@ AFRAME.registerComponent("floorplan", {
     const d = this.data;
     const rooms = d.rooms || {};
     const hallways = d.hallways || [];
-    // Each wall records its footprint here for the edge pass to trace.
+    // Each wall records its footprint here for the edge pass to trace, and each
+    // doorway records its jambs (the only verticals a wall actually has —
+    // see buildEdges).
     this.footprints = [];
+    this.jambs = [];
     this.capCount = 0;
 
     // Index the openings by "room/side" so each wall knows what to cut. The
@@ -292,6 +294,9 @@ AFRAME.registerComponent("floorplan", {
       built += this.wall(
         g.axis, g.fixed, c.start, c.end, `${roomName}${side}-lintel`, c.height, roomH, capped
       );
+      // The doorway's two reveals — the wall's only genuine vertical edges.
+      this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.start, height: c.height });
+      this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.end, height: c.height });
       cursor = c.end;
     });
     built += this.wall(g.axis, g.fixed, cursor, g.max, `${roomName}${side}`, 0, roomH, capped);
@@ -387,7 +392,13 @@ AFRAME.registerComponent("floorplan", {
     const half = d.thickness / 2;
     const lo = Math.min(a, b);
     const hi = Math.max(a, b);
-    const box = { y0: y0, y1: y1, topCapped: !!capped, bottomOpen: y0 > MIN_SEGMENT };
+    const box = {
+      axis: axis,
+      y0: y0,
+      y1: y1,
+      topCapped: !!capped,
+      bottomOpen: y0 > MIN_SEGMENT,
+    };
 
     const el = document.createElement("a-box");
     if (axis === "z") {
@@ -427,6 +438,15 @@ AFRAME.registerComponent("floorplan", {
   // Every line is nudged `edgeLift` PROUD of the surface it traces — and which
   // way is "proud" depends on the side you SEE that surface from, so each is
   // placed deliberately. See the notes inline.
+  //
+  // ONLY REAL EDGES. The walls are built as a set of overlapping boxes, but the
+  // boxes are an implementation detail — an edge is only an edge where the
+  // SURFACE actually turns a corner or stops. In particular a wall segment, the
+  // lintel above a doorway and the segment on the far side are three boxes
+  // making ONE flat, continuous wall, so their joins must not be drawn: a
+  // vertical there would score a line straight down blank wall. So verticals
+  // come only from the two places a wall genuinely has them — the room's
+  // corners and a doorway's reveals — never from the box edges themselves.
   buildEdges: function (rooms) {
     const d = this.data;
     if (!d.edges) return 0;
@@ -435,10 +455,6 @@ AFRAME.registerComponent("floorplan", {
     const pts = [];
     const seg = (ax, ay, az, bx, by, bz) => pts.push(ax, ay, az, bx, by, bz);
 
-    // Trace each wall box: its bottom rectangle, its top rectangle, and a
-    // vertical at each of its four footprint corners. At a doorway those
-    // verticals are the jamb reveals; at a room corner they are buried inside
-    // the neighbouring wall and simply never draw (the depth test hides them).
     this.footprints.forEach((f) => {
       // Vertical placement, per surface, on the side it is seen from:
       //  - bottom: a wall SITS on the floor, so its line goes just above (below
@@ -449,18 +465,50 @@ AFRAME.registerComponent("floorplan", {
       //    would be hidden BY the lid — so just below it.
       const yb = f.bottomOpen ? f.y0 - lift : f.y0 + lift;
       const yt = f.topCapped ? f.y1 - lift : f.y1 + lift;
-      const c = [
-        [f.x0 - lift, f.z0 - lift],
-        [f.x1 + lift, f.z0 - lift],
-        [f.x1 + lift, f.z1 + lift],
-        [f.x0 - lift, f.z1 + lift],
-      ];
-      for (let i = 0; i < 4; i++) {
-        const a = c[i];
-        const b = c[(i + 1) % 4];
-        seg(a[0], yb, a[1], b[0], yb, b[1]); // floor junction / lintel underside
-        seg(a[0], yt, a[1], b[0], yt, b[1]); // top edge / ceiling junction
-        seg(a[0], yb, a[1], a[0], yt, a[1]); // vertical
+      const x0 = f.x0 - lift;
+      const x1 = f.x1 + lift;
+      const z0 = f.z0 - lift;
+      const z1 = f.z1 + lift;
+
+      // BOTTOM, all four edges. The long pair is the floor junction — or, on a
+      // lintel, the underside of the door head. The short pair closes the ends:
+      // at a doorway that is the reveal meeting the floor (the threshold), and
+      // at a room corner it is buried inside the neighbouring wall and never
+      // draws anyway.
+      seg(x0, yb, z0, x1, yb, z0);
+      seg(x1, yb, z0, x1, yb, z1);
+      seg(x1, yb, z1, x0, yb, z1);
+      seg(x0, yb, z1, x0, yb, z0);
+
+      // TOP, long pair only: the two faces meeting the ceiling. The short pair
+      // is skipped deliberately — over a doorway this box's top butts the
+      // lintel's top in the same plane, and a line across that join marks
+      // nothing. The long edges of the segments and their lintel are collinear,
+      // so they read as one unbroken line along the wall.
+      if (f.axis === "z") {
+        seg(x0, yt, z0, x0, yt, z1);
+        seg(x1, yt, z0, x1, yt, z1);
+      } else {
+        seg(x0, yt, z0, x1, yt, z0);
+        seg(x0, yt, z1, x1, yt, z1);
+      }
+    });
+
+    // DOORWAY REVEALS — a wall's only real verticals, and only up to the
+    // opening's height: above the head the wall is continuous, so nothing is
+    // drawn there. One per face, so you get the near edge and, looking through,
+    // the far edge — which is also the corner where the corridor's side wall
+    // meets this wall.
+    const off = d.thickness / 2 + lift;
+    this.jambs.forEach((j) => {
+      const y1 = j.height - lift;
+      if (y1 - lift < MIN_SEGMENT) return;
+      if (j.axis === "z") {
+        seg(j.fixed - off, lift, j.at, j.fixed - off, y1, j.at);
+        seg(j.fixed + off, lift, j.at, j.fixed + off, y1, j.at);
+      } else {
+        seg(j.at, lift, j.fixed - off, j.at, y1, j.fixed - off);
+        seg(j.at, lift, j.fixed + off, j.at, y1, j.fixed + off);
       }
     });
 
