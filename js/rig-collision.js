@@ -1,12 +1,18 @@
 // ================================================================
-// rig-collision — constrains smooth-locomotion to the walkable floor.
+// rig-collision — constrains locomotion to the walkable floor (VR + desktop).
 //
-// The visitor is SEATED (office chair) and never physically walks, so the
-// camera rig only ever moves via thumbstick locomotion. That means clamping
-// the RIG's (x,z) fully controls where the player can be — and, crucially, we
-// never touch the camera or fight head tracking (which would cause nausea).
-// This component only ever reads/writes the rig's x and z; never y, never the
-// camera.
+// WHAT MOVES depends on the mode, so WHAT WE CLAMP does too:
+//   - VR: the visitor is SEATED and never physically walks, so the rig only
+//     moves via thumbstick locomotion. We clamp the RIG's (x,z) and leave the
+//     camera alone — correcting the camera against HEAD TRACKING would cause
+//     nausea. (The head's small seated offset from the rig is ignored, per the
+//     seated-visitor assumption.)
+//   - Desktop: wasd-controls moves the CAMERA's local position (the rig stays
+//     put), so clamping the rig would do nothing. Here the camera's local
+//     translation IS the locomotion — not head tracking — so we measure the
+//     camera's WORLD position and push the CAMERA's local position back. Safe:
+//     desktop has no headset, so there's nothing to fight.
+// Either way we only ever touch x and z, never y.
 //
 // WALKABLE REGION — the single source of truth is the `floorplan` component's
 // OWN live config (rooms + hallways + wall thickness), read straight off
@@ -65,11 +71,21 @@ AFRAME.registerComponent("rig-collision", {
     this.active = true;
     this.rects = null; // walkable rectangles; null until the floorplan is read
 
-    // Last known-good rig (x,z). Seeded from the rig's current spot (spawn is
-    // the foyer origin, inside the walkable region).
+    // Last known-good VISITOR floor (x,z), in WORLD space. Seeded from the
+    // rig's current spot (spawn is the foyer origin, inside the region).
     const p = this.el.object3D.position;
     this.lastX = p.x;
     this.lastZ = p.z;
+    // Force the first tick to reseed against the actual mover for the current
+    // mode (see tick): null never equals a real boolean.
+    this._inVR = null;
+
+    this.camEl = document.getElementById("camera");
+    // Scratch, reused per frame so tick allocates nothing.
+    this._m = { x: 0, z: 0 }; // measured mover position
+    this._wp = new THREE.Vector3(); // camera world position
+    this._d = new THREE.Vector3(); // world-space correction delta
+    this._invQ = new THREE.Quaternion(); // inverse rig rotation
 
     this.fpEl = document.getElementById("floorplan");
 
@@ -93,8 +109,9 @@ AFRAME.registerComponent("rig-collision", {
   },
 
   // Move this behavior to the end of the scene's tick list so the collision
-  // correction fires after every mover (notably smooth-locomotion, which sits
-  // on a child of the rig and would otherwise tick first). Idempotent: it
+  // correction fires after every mover — smooth-locomotion (VR) and
+  // wasd-controls (desktop) both sit on children of the rig and, by A-Frame's
+  // parent-before-child play order, would otherwise tick first. Idempotent: it
   // splices itself out before re-appending, so repeated calls just keep us
   // last.
   reorderTickLast: function () {
@@ -174,15 +191,43 @@ AFRAME.registerComponent("rig-collision", {
     return false;
   },
 
+  // The (x,z) of the thing that locomotion actually moves this frame, in WORLD
+  // space: the rig in VR, the camera on desktop (see the header note).
+  moverXZ: function (inVR, out) {
+    if (inVR) {
+      const p = this.el.object3D.position; // rig is a scene child: local == world
+      out.x = p.x;
+      out.z = p.z;
+    } else {
+      this.camEl.object3D.getWorldPosition(this._wp);
+      out.x = this._wp.x;
+      out.z = this._wp.z;
+    }
+    return out;
+  },
+
   tick: function () {
     if (!this.data.enabled || !this.active) return;
 
-    const pos = this.el.object3D.position;
-    const newX = pos.x;
-    const newZ = pos.z;
+    const inVR = this.el.sceneEl.is("vr-mode");
+    // Entering/leaving VR swaps which entity we measure (rig <-> camera) and
+    // those disagree by the head offset, so reseed last-valid and skip a frame
+    // rather than correcting against the discontinuity. Also covers the very
+    // first tick (_inVR starts null).
+    if (inVR !== this._inVR) {
+      this._inVR = inVR;
+      const m = this.moverXZ(inVR, this._m);
+      this.lastX = m.x;
+      this.lastZ = m.z;
+      return;
+    }
+
+    const m = this.moverXZ(inVR, this._m);
+    const newX = m.x;
+    const newZ = m.z;
 
     // Moved nowhere this frame — nothing to check (keeps last-valid current
-    // when the rig is parked).
+    // when the visitor is parked).
     if (newX === this.lastX && newZ === this.lastZ) return;
 
     if (this.isWalkable(newX, newZ)) {
@@ -191,19 +236,49 @@ AFRAME.registerComponent("rig-collision", {
       return;
     }
 
-    // Outside — try to slide along whichever wall we hit (axis-separated).
+    // Outside — pick the corrected target via an axis-separated slide, so you
+    // glide along whichever wall you hit instead of sticking.
+    let cx, cz, how;
     if (this.isWalkable(newX, this.lastZ)) {
-      pos.z = this.lastZ; // slide along x, blocked in z
-      this.lastX = newX;
-      if (this.data.debug) console.log("[rig-collision] slid along x at z=" + this.lastZ.toFixed(2));
+      cx = newX;
+      cz = this.lastZ; // slide along x, blocked in z
+      how = "slid-x";
     } else if (this.isWalkable(this.lastX, newZ)) {
-      pos.x = this.lastX; // slide along z, blocked in x
-      this.lastZ = newZ;
-      if (this.data.debug) console.log("[rig-collision] slid along z at x=" + this.lastX.toFixed(2));
+      cx = this.lastX; // slide along z, blocked in x
+      cz = newZ;
+      how = "slid-z";
     } else {
-      pos.x = this.lastX; // fully blocked — revert
-      pos.z = this.lastZ;
-      if (this.data.debug) console.log("[rig-collision] blocked; reverted to " + this.lastX.toFixed(2) + "," + this.lastZ.toFixed(2));
+      cx = this.lastX; // fully blocked — revert
+      cz = this.lastZ;
+      how = "blocked";
+    }
+
+    this.applyCorrection(inVR, newX, newZ, cx, cz);
+    this.lastX = cx;
+    this.lastZ = cz;
+    if (this.data.debug) {
+      console.log("[rig-collision] " + how + " -> " + cx.toFixed(2) + "," + cz.toFixed(2));
+    }
+  },
+
+  // Move the visitor's world floor position from (newX,newZ) to the corrected
+  // (cx,cz). In VR the mover is the rig, so we set it straight. On desktop the
+  // mover is the camera (wasd shifted its LOCAL position), so we push the
+  // camera's local position by the world-space correction, rotated into the
+  // rig's frame — exact even if a desktop teleport left the rig yawed. Only
+  // x,z; y is never touched.
+  applyCorrection: function (inVR, newX, newZ, cx, cz) {
+    if (inVR) {
+      const pos = this.el.object3D.position;
+      pos.x = cx;
+      pos.z = cz;
+    } else {
+      this._d.set(cx - newX, 0, cz - newZ); // world-space correction
+      this._invQ.copy(this.el.object3D.quaternion).invert();
+      this._d.applyQuaternion(this._invQ); // -> rig-local
+      const cam = this.camEl.object3D;
+      cam.position.x += this._d.x;
+      cam.position.z += this._d.z;
     }
   },
 
@@ -216,13 +291,16 @@ AFRAME.registerComponent("rig-collision", {
     if (this.data.debug) console.log("[rig-collision] active = " + this.active);
   },
 
-  // Re-seed last-valid to the rig's CURRENT (x,z). Called after a teleport
-  // lands the rig at the return spot, so re-enabling the clamp doesn't snap the
-  // rig back toward a stale pre-teleport position.
+  // Re-seed last-valid to the visitor's CURRENT world (x,z) for the active
+  // mode. Called after a teleport lands the rig at the return spot, so
+  // re-enabling the clamp doesn't snap back toward a stale pre-teleport
+  // position.
   resync: function () {
-    const p = this.el.object3D.position;
-    this.lastX = p.x;
-    this.lastZ = p.z;
+    const inVR = this.el.sceneEl.is("vr-mode");
+    this._inVR = inVR;
+    const m = this.moverXZ(inVR, this._m);
+    this.lastX = m.x;
+    this.lastZ = m.z;
     if (this.data.debug) console.log("[rig-collision] resync -> " + this.lastX.toFixed(2) + "," + this.lastZ.toFixed(2));
   },
 
