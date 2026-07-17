@@ -127,6 +127,34 @@ const GALLERY_FILL = { color: "#ffffff", intensity: 0.5, dir: "-5 4 -6" };
 // walls, so they stay the brightest surface, as in a real gallery.
 const GALLERY_FLOOR = "#dcdcdc";
 
+// --- floor finish -------------------------------------------------------
+// The floor is the one surface always in view and the ONLY one you move
+// relative to, so it carries the scale and motion cues for the whole
+// exhibition. A flat colour gives no parallax whatsoever: nothing streams past
+// as you walk, which is a large part of why an empty white room reads as
+// drifting rather than walking, and why it is hard to judge how big a room is.
+// A fine speckle fixes both — it is the cheapest presence win available.
+//
+// Reuses makeTerrazzoTexture() from js/bench.js (loaded earlier) rather than a
+// second speckle generator: đá mài terrazzo is already this exhibition's floor
+// vocabulary via the bench, so a pale terrazzo floor reads as the same
+// building. Runtime canvas, no asset file — same as the bench and the cues.
+//
+// Keep it PALE. This is a gallery floor, not a feature: the flecks should be
+// felt underfoot rather than looked at, and the artworks stay the only strong
+// contrast in the room. Set GALLERY_FLOOR_TERRAZZO false for a plain floor.
+const GALLERY_FLOOR_TERRAZZO = true;
+const FLOOR_TERRAZZO_BASE = "#ffffff"; // multiplied by GALLERY_FLOOR above
+const FLOOR_TERRAZZO_FLECKS = ["#ededed", "#e0e0e0", "#f4f4f4", "#e7e7e7"];
+const FLOOR_TERRAZZO_DENSITY = 300; // flecks per tile
+const FLOOR_TERRAZZO_SEED = 7;
+// Metres per texture tile — this sets the FLECK SCALE, since the generator
+// draws its flecks in pixels. At 1.8 m the chips land ~1.7-6 cm, near real
+// terrazzo; at 2.5 they read chunky underfoot. Keep it a value that does not
+// divide GROUND_SIZE evenly, so the tiling never lines up with the room grid
+// and the repeat stays invisible.
+const FLOOR_TERRAZZO_TILE = 1.8;
+
 // `cityroom` preset (flat panels on a white box room) -------------------
 const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the ring; tune)
 const CITYROOM_HEIGHT = 20; // metres, box height (>= panel height below)
@@ -280,6 +308,41 @@ function envEl(tag, attrs) {
   return e;
 }
 
+// Give a ground plane its terrazzo finish. Set on the THREE material once the
+// entity has initialised, because the texture is generated at runtime and has
+// to be tiled and filtered for a surface this big.
+function finishGround(el) {
+  if (!GALLERY_FLOOR_TERRAZZO || typeof makeTerrazzoTexture !== "function") return el;
+  el.addEventListener("loaded", function () {
+    const mesh = el.getObject3D("mesh");
+    if (!mesh || !mesh.material) return;
+    // CLONE: makeTerrazzoTexture caches and SHARES textures by parameter key,
+    // so setting repeat on the original would retile any other surface built
+    // from the same palette. The clone shares the canvas, carries own tiling.
+    const tex = makeTerrazzoTexture(
+      FLOOR_TERRAZZO_BASE,
+      FLOOR_TERRAZZO_FLECKS,
+      FLOOR_TERRAZZO_DENSITY,
+      FLOOR_TERRAZZO_SEED
+    ).clone();
+    tex.needsUpdate = true;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const tiles = GROUND_SIZE / FLOOR_TERRAZZO_TILE;
+    tex.repeat.set(tiles, tiles);
+    // Anisotropy matters more here than anywhere else in the scene: a floor is
+    // seen almost edge-on over most of its area, and without it the speckle
+    // aliases into a shimmering mess at range — trading one flicker for
+    // another. Ask the renderer for its real ceiling rather than guessing.
+    const renderer = el.sceneEl && el.sceneEl.renderer;
+    tex.anisotropy = renderer
+      ? Math.min(8, renderer.capabilities.getMaxAnisotropy())
+      : 8;
+    mesh.material.map = tex;
+    mesh.material.needsUpdate = true;
+  });
+  return el;
+}
+
 // Ground plane — built by EVERY preset. Locomotion is free-fly so it isn't
 // strictly required for movement, but the brief mandates a floor in all looks
 // (comfort/orientation).
@@ -390,17 +453,20 @@ const ENV_PRESETS = {
     });
     // Floor: LIT now, so it shades with the rest of the gallery instead of
     // being a flat white slab brighter than every wall. (It was deliberately
-    // unlit before, back when nothing else in the scene was lit.)
+    // unlit before, back when nothing else in the scene was lit.) Terrazzo
+    // finish on top — see finishGround().
     env.appendChild(
-      envEl("a-plane", {
-        position: "0 0 0",
-        rotation: "-90 0 0",
-        width: GROUND_SIZE,
-        height: GROUND_SIZE,
-        material:
-          "color: " + GALLERY_FLOOR +
-          "; shader: standard; roughness: 1; metalness: 0; side: double",
-      })
+      finishGround(
+        envEl("a-plane", {
+          position: "0 0 0",
+          rotation: "-90 0 0",
+          width: GROUND_SIZE,
+          height: GROUND_SIZE,
+          material:
+            "color: " + GALLERY_FLOOR +
+            "; shader: standard; roughness: 1; metalness: 0; side: double",
+        })
+      )
     );
   },
 
