@@ -285,21 +285,30 @@ AFRAME.registerComponent("floorplan", {
       }))
       .sort((a, b) => a.start - b.start);
 
+    // Which way this wall's ROOM lies: '+x'/'+z' walls face outward that way, so
+    // the room is on the other side. The edge pass needs it because the two
+    // faces of a wall are not equivalent — see buildEdges.
+    const innerSign = side.charAt(0) === "+" ? -1 : 1;
+    const solid = { capped: capped, bottomLong: "both", bottomShorts: true };
+
     let cursor = g.min;
     let built = 0;
     cuts.forEach((c) => {
-      built += this.wall(g.axis, g.fixed, cursor, c.start, `${roomName}${side}`, 0, roomH, capped);
+      built += this.wall(g.axis, g.fixed, cursor, c.start, `${roomName}${side}`, 0, roomH, solid);
       // LINTEL over the doorway. wall() drops it on its own if the room is no
       // taller than its hallway (nothing left to span).
       built += this.wall(
-        g.axis, g.fixed, c.start, c.end, `${roomName}${side}-lintel`, c.height, roomH, capped
+        g.axis, g.fixed, c.start, c.end, `${roomName}${side}-lintel`, c.height, roomH,
+        // Its underside is flush with the corridor roof beyond, so only the
+        // ROOM-side edge of that underside is a real one: the door head.
+        { capped: capped, bottomLong: "inner", bottomShorts: false, innerSign: innerSign }
       );
-      // The doorway's two reveals — the wall's only genuine vertical edges.
-      this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.start, height: c.height });
-      this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.end, height: c.height });
+      // The doorway's two reveals.
+      this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.start, height: c.height, innerSign: innerSign });
+      this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.end, height: c.height, innerSign: innerSign });
       cursor = c.end;
     });
-    built += this.wall(g.axis, g.fixed, cursor, g.max, `${roomName}${side}`, 0, roomH, capped);
+    built += this.wall(g.axis, g.fixed, cursor, g.max, `${roomName}${side}`, 0, roomH, solid);
     return built;
   },
 
@@ -308,8 +317,11 @@ AFRAME.registerComponent("floorplan", {
   //
   // The side-walls are placed so their INNER faces are flush with the opening's
   // edges — the corridor keeps the opening's full clear width and reads as a
-  // straight continuation of it. They run the corridor's whole span, so they
-  // tuck into both room walls at the ends with no seam.
+  // straight continuation of it. Flush is the operative word: a side-wall is
+  // COPLANAR with the doorway reveal it continues, so the passage is one
+  // seamless tube from room face to room face, with no edge where they join.
+  // They run the corridor's whole span PLUS half a wall thickness at each end,
+  // so they reach the rooms' inner faces and tuck inside both room walls.
   buildCorridor: function (h) {
     const side = h.openings && h.openings[0] && h.openings[0].side;
     if (!side || !h.corridor) {
@@ -321,11 +333,19 @@ AFRAME.registerComponent("floorplan", {
     // Walk across the wall's through axis; the side-walls run along it.
     const runAxis = throughAxis(side);
     const offset = h.width / 2 + d.thickness / 2;
+    const half = d.thickness / 2;
+    // Reach the rooms' inner faces, so the passage's floor and ceiling lines run
+    // its full length instead of stopping half a wall short of each doorway.
+    // The overhang is buried inside the room walls.
+    const lo = Math.min(h.corridor.from, h.corridor.to) - half;
+    const hi = Math.max(h.corridor.from, h.corridor.to) + half;
     let built = 0;
     [-1, 1].forEach((s) => {
       built += this.wall(
-        runAxis, h.center + s * offset, h.corridor.from, h.corridor.to,
-        `hall-${h.id}`, 0, hallH, true // roofed, see below
+        runAxis, h.center + s * offset, lo, hi, `hall-${h.id}`, 0, hallH,
+        // Roofed. No end shorts: those ends are buried in the room walls, and
+        // the floor and ceiling run straight through the doorway unbroken.
+        { capped: true, bottomLong: "both", bottomShorts: false }
       );
     });
 
@@ -335,7 +355,6 @@ AFRAME.registerComponent("floorplan", {
     // bodies (whose centres are the corridor's end planes, so each straddles it
     // by half a thickness) and the opening's clear width — meeting the lintels
     // and the side-walls edge-to-edge, overlapping neither, so nothing z-fights.
-    const half = d.thickness / 2;
     const c0 = Math.min(h.corridor.from, h.corridor.to) + half;
     const c1 = Math.max(h.corridor.from, h.corridor.to) - half;
     if (c1 - c0 > MIN_SEGMENT) {
@@ -380,14 +399,20 @@ AFRAME.registerComponent("floorplan", {
 
   // One wall segment: a box running along `axis` from `a` to `b`, with its
   // plane at `fixed` on the other horizontal axis, spanning y0..y1. y0 > 0
-  // makes it a lintel (it hangs over a doorway); `capped` means something lids
-  // it, which only the edge pass cares about.
-  wall: function (axis, fixed, a, b, label, y0, y1, capped) {
+  // makes it a lintel (it hangs over a doorway). `opts` is the box's own record
+  // of which of its edges are REAL — only the edge pass reads it:
+  //   capped       — something lids it (a ceiling or a corridor roof)
+  //   bottomLong   — 'both' | 'inner' | 'none': which of the two long bottom
+  //                  edges to draw ('inner' needs innerSign)
+  //   bottomShorts — draw the bottom's end edges
+  //   innerSign    — which way along the face-normal axis the room lies
+  wall: function (axis, fixed, a, b, label, y0, y1, opts) {
     const d = this.data;
     const len = Math.abs(b - a);
     const tall = y1 - y0;
     if (len < MIN_SEGMENT || tall < MIN_SEGMENT) return 0;
 
+    opts = opts || {};
     const mid = (a + b) / 2;
     const half = d.thickness / 2;
     const lo = Math.min(a, b);
@@ -396,8 +421,11 @@ AFRAME.registerComponent("floorplan", {
       axis: axis,
       y0: y0,
       y1: y1,
-      topCapped: !!capped,
+      topCapped: !!opts.capped,
       bottomOpen: y0 > MIN_SEGMENT,
+      bottomLong: opts.bottomLong || "both",
+      bottomShorts: opts.bottomShorts !== false,
+      innerSign: opts.innerSign || -1,
     };
 
     const el = document.createElement("a-box");
@@ -470,15 +498,33 @@ AFRAME.registerComponent("floorplan", {
       const z0 = f.z0 - lift;
       const z1 = f.z1 + lift;
 
-      // BOTTOM, all four edges. The long pair is the floor junction — or, on a
-      // lintel, the underside of the door head. The short pair closes the ends:
-      // at a doorway that is the reveal meeting the floor (the threshold), and
-      // at a room corner it is buried inside the neighbouring wall and never
-      // draws anyway.
-      seg(x0, yb, z0, x1, yb, z0);
-      seg(x1, yb, z0, x1, yb, z1);
-      seg(x1, yb, z1, x0, yb, z1);
-      seg(x0, yb, z1, x0, yb, z0);
+      // BOTTOM long edges — the floor junction on a wall, or the door head on a
+      // lintel. A wall standing on the floor draws both (each face meets the
+      // floor). A lintel draws only its ROOM-side one: its underside is flush
+      // with the corridor roof beyond it, one continuous passage ceiling, so a
+      // line on that side would cross an unbroken surface.
+      const long0 = f.bottomLong === "both" || f.innerSign < 0;
+      const long1 = f.bottomLong === "both" || f.innerSign > 0;
+      if (f.bottomLong !== "none") {
+        if (f.axis === "z") {
+          if (long0) seg(x0, yb, z0, x0, yb, z1);
+          if (long1) seg(x1, yb, z0, x1, yb, z1);
+        } else {
+          if (long0) seg(x0, yb, z0, x1, yb, z0);
+          if (long1) seg(x0, yb, z1, x1, yb, z1);
+        }
+      }
+      // BOTTOM end edges. At a doorway this is the threshold, where the reveal
+      // meets the floor; at a room corner it is buried in the neighbouring wall.
+      if (f.bottomShorts) {
+        if (f.axis === "z") {
+          seg(x0, yb, z0, x1, yb, z0);
+          seg(x0, yb, z1, x1, yb, z1);
+        } else {
+          seg(x0, yb, z0, x0, yb, z1);
+          seg(x1, yb, z0, x1, yb, z1);
+        }
+      }
 
       // TOP, long pair only: the two faces meeting the ceiling. The short pair
       // is skipped deliberately — over a doorway this box's top butts the
@@ -494,22 +540,19 @@ AFRAME.registerComponent("floorplan", {
       }
     });
 
-    // DOORWAY REVEALS — a wall's only real verticals, and only up to the
-    // opening's height: above the head the wall is continuous, so nothing is
-    // drawn there. One per face, so you get the near edge and, looking through,
-    // the far edge — which is also the corner where the corridor's side wall
-    // meets this wall.
+    // DOORWAY JAMBS — a wall's only real verticals, and only:
+    //  - up to the opening's height, since above the head the wall is continuous
+    //  - on the ROOM side. The corridor's side wall is flush with the reveal it
+    //    continues, so the passage's side is one unbroken surface from room face
+    //    to room face; a vertical on that side would score a line down it. The
+    //    room-side one is real — it frames the doorway against the room's wall.
     const off = d.thickness / 2 + lift;
     this.jambs.forEach((j) => {
       const y1 = j.height - lift;
       if (y1 - lift < MIN_SEGMENT) return;
-      if (j.axis === "z") {
-        seg(j.fixed - off, lift, j.at, j.fixed - off, y1, j.at);
-        seg(j.fixed + off, lift, j.at, j.fixed + off, y1, j.at);
-      } else {
-        seg(j.at, lift, j.fixed - off, j.at, y1, j.fixed - off);
-        seg(j.at, lift, j.fixed + off, j.at, y1, j.fixed + off);
-      }
+      const f = j.fixed + j.innerSign * off;
+      if (j.axis === "z") seg(f, lift, j.at, f, y1, j.at);
+      else seg(j.at, lift, f, j.at, y1, f);
     });
 
     // Room corners need drawing EXPLICITLY. Perimeter walls span their room's
