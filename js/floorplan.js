@@ -18,10 +18,11 @@
 //    doorway into open sky, and the lintel would read as a floating slab.
 //
 // Design rules:
-//  - VISUAL ONLY. No collision this pass: the player walks through walls, and
-//    the hallways are the *intended* path rather than the only one. A
-//    lightweight rig constraint can be added later without touching this file's
-//    geometry — the room/hallway config here is the natural source for it.
+//  - VISUAL ONLY. This component builds no collision itself. The `rig-collision`
+//    component (js/rig-collision.js) enforces walkability by reading THIS
+//    component's live room/hallway config as its single source of truth — so
+//    the walls you see and the walls you can't cross come from the same numbers,
+//    and retuning the plan retunes the collider for free.
 //  - shader: flat (unlit) throughout, for Quest cheapness. Walls therefore do
 //    not depend on the active environment preset's lighting at all. Nothing
 //    shades a corner either, which is what the edge lines are for — see

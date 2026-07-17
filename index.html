@@ -54,6 +54,12 @@
          Independent of the environment layer (it is architecture, not
          atmosphere) and of the zones — it reads nothing from either. -->
     <script src="js/floorplan.js"></script>
+    <!-- Rig collision: constrains smooth locomotion to the walkable floor
+         (rooms + corridors), reading the floorplan's OWN config as the single
+         source of truth. AFTER floorplan.js so the config is defined; it also
+         re-reads on the floorplan's `floorplanbuilt` event. See
+         js/rig-collision.js. -->
+    <script src="js/rig-collision.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -209,8 +215,9 @@
            so they must PERSIST across environment switches (env teardown only
            touches #environment) — same reasoning as the zones' contact cues.
 
-           Visual only — no collision this pass; you can walk through a wall,
-           and the hallways are the intended path rather than the enforced one.
+           Visual only here — this entity builds no collision. Walkability is
+           enforced by #rig's rig-collision component, which reads THIS
+           floorplan's own room/hallway config (js/rig-collision.js).
 
            Tunables (no code edits — setAttribute on #floorplan): height /
            thickness / color / shader, plus the full `rooms` and `hallways`
@@ -496,7 +503,7 @@
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
            while the headset head-tracks the camera within it. -->
-      <a-entity id="rig" position="0 0 0">
+      <a-entity id="rig" position="0 0 0" rig-collision>
         <!-- Camera at standing eye height; desktop controls unchanged.
              near:0.1 (up from the 0.005 default) tightens the depth range so
              far-off surfaces — the floor, skyline plane edges — stop shimmering
