@@ -334,6 +334,10 @@ AFRAME.registerComponent("floorplan", {
       `[floorplan] ${Object.keys(rooms).length} rooms, ${hallways.length} hallways, ` +
         `${count} wall segments, ${this.capCount} ceilings/roofs, ${lines} edge lines`
     );
+    // Broadcast so anything derived from the rooms can re-derive. The
+    // environment's room-fixtures needs this: #environment is parsed before
+    // #floorplan, so on load its lamps cannot read this config yet.
+    this.el.emit("floorplanbuilt");
   },
 
   // One room side: the full run minus each opening, plus a lintel over each

@@ -115,8 +115,12 @@ const SKYLINE_CROP = 0.25; // fraction of the image height (from the BOTTOM) to
 //   wall facing the key ~#f9  |  lit only by fill ~#e5  |  edge-on ~#d8
 //   ceiling ~#d4 (no directional reaches it — it faces down)  |  floor ~#e7
 // That spread across a room's four walls IS the thing that makes corners read.
-const GALLERY_AMBIENT = { color: "#ffffff", intensity: 1.6 };
-const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.6 };
+// Ambient and hemisphere are FILL, deliberately lower than they were: they are
+// flat (no falloff, no direction), so every unit of them is a unit that makes
+// the corridors look exactly like the rooms. The room fixtures below now carry
+// the room brightness instead, and that is what lets a passage read as dimmer.
+const GALLERY_AMBIENT = { color: "#ffffff", intensity: 0.75 };
+const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.35 };
 // `dir` is the light's POSITION: it shines from there toward the origin. Both
 // have x AND z so that all four wall facings differ — a key aligned to an axis
 // would leave two of them matched, and those corners would vanish again.
@@ -126,6 +130,35 @@ const GALLERY_FILL = { color: "#ffffff", intensity: 0.5, dir: "-5 4 -6" };
 // it blows out to pure white and flattens. This lands it ~#e7 — below the lit
 // walls, so they stay the brightest surface, as in a real gallery.
 const GALLERY_FLOOR = "#dcdcdc";
+
+// --- room fixtures ------------------------------------------------------
+// A lamp in each room, so rooms are lit by something that has a POSITION and
+// therefore falls off with distance. This is what makes a corridor read as a
+// corridor: it has no fixture of its own, so it sits far from every room's lamp
+// and goes dim — exactly why a real passage is dimmer than the room it serves.
+//
+// THE LAMPS SIT INSIDE THE ROOM VOLUME, NOT AT THE CEILING, and that is not a
+// mistake. A light AT the ceiling contributes precisely nothing to it: the
+// ceiling faces down, so N·L is negative and clamps to zero. That is the whole
+// reason a corridor roof and a room ceiling render identically today — every
+// light in the rig is above both, so both receive zero direct light and are
+// left on flat ambient. A lamp below the ceiling is the only way a ceiling gets
+// lit at all; distance falloff then does the rest. (A real gallery ceiling is
+// lit by BOUNCE off the floor and walls, which we cannot afford to compute — a
+// lamp in the room volume is the cheap stand-in for that bounce.)
+//
+// Nothing casts shadows, so light passes through walls. That is fine and even
+// useful here: a corridor still catches some spill from the rooms at both ends,
+// attenuated by distance, which is roughly what it should get.
+const FIXTURE_SPACING = 14; // metres: one lamp per ~this much room, per axis
+const FIXTURE_HEIGHT = 0.45; // fraction of the room's height
+const FIXTURE_INTENSITY = 9;
+// Falloff exponent. 2 is physical inverse-square, but it makes a 28.8 m room
+// wildly uneven from a handful of lamps; 1 is nearly flat and barely dims the
+// corridors. ~1.4 keeps galleries reasonably even while still dropping the
+// passages. Tune this first if corridors read too dark or too similar.
+const FIXTURE_DECAY = 1.4;
+const FIXTURE_DISTANCE = 0; // 0 = no hard cutoff
 
 // --- floor finish -------------------------------------------------------
 // The floor is the one surface always in view and the ONLY one you move
@@ -251,6 +284,91 @@ AFRAME.registerComponent("particle-field", {
       this.points.material.dispose();
       this.points = null;
     }
+  },
+});
+
+// ----------------------------------------------------------------
+// room-fixtures: one lamp per ~FIXTURE_SPACING of each room, derived LIVE from
+// the floorplan's room config — never a copied number, the same rule the zone
+// components follow (zone-b-map reads zone-b-root's offset rather than
+// restating it). Move a wall and the lamps follow.
+//
+// Lives under #environment because lighting belongs to the preset (index.html
+// sets defaultLightsEnabled:false precisely so presets own it), and it tears
+// down with the preset like three-grid and particle-field do.
+//
+// See the FIXTURE_* notes above for why the lamps hang BELOW the ceiling.
+// ----------------------------------------------------------------
+AFRAME.registerComponent("room-fixtures", {
+  schema: {
+    spacing: { type: "number", default: FIXTURE_SPACING },
+    height: { type: "number", default: FIXTURE_HEIGHT },
+    intensity: { type: "number", default: FIXTURE_INTENSITY },
+    decay: { type: "number", default: FIXTURE_DECAY },
+    distance: { type: "number", default: FIXTURE_DISTANCE },
+    color: { type: "color", default: "#ffffff" },
+  },
+
+  init: function () {
+    this.fpEl = document.getElementById("floorplan");
+    // #environment is parsed BEFORE #floorplan, so on load the floorplan's
+    // component has not initialised yet and its config is not readable. It
+    // emits `floorplanbuilt` whenever it (re)builds; the first one resolves
+    // that race, and later ones keep the lamps on the rooms if the plan
+    // changes. (Same shape as the zone-b-map-root fix.)
+    this.onBuilt = () => this.build();
+    if (this.fpEl) this.fpEl.addEventListener("floorplanbuilt", this.onBuilt);
+  },
+
+  update: function () {
+    this.build();
+  },
+
+  remove: function () {
+    if (this.fpEl) this.fpEl.removeEventListener("floorplanbuilt", this.onBuilt);
+    this.teardown();
+  },
+
+  teardown: function () {
+    while (this.el.firstChild) this.el.removeChild(this.el.firstChild);
+  },
+
+  build: function () {
+    this.teardown();
+    const attr = this.fpEl && this.fpEl.getAttribute("floorplan");
+    const rooms = attr && attr.rooms;
+    if (!rooms) return; // floorplan not up yet — `floorplanbuilt` calls us back
+
+    const d = this.data;
+    let n = 0;
+    Object.keys(rooms).forEach((name) => {
+      const r = rooms[name];
+      const h = r.height != null ? r.height : attr.height;
+      // Spread lamps evenly, one per ~spacing on each axis, so a long room gets
+      // a row rather than one hot spot in the middle.
+      const nx = Math.max(1, Math.round(r.w / d.spacing));
+      const nz = Math.max(1, Math.round(r.d / d.spacing));
+      for (let i = 0; i < nx; i++) {
+        for (let j = 0; j < nz; j++) {
+          this.el.appendChild(
+            envEl("a-entity", {
+              light:
+                "type: point; castShadow: false" +
+                "; color: " + d.color +
+                "; intensity: " + d.intensity +
+                "; decay: " + d.decay +
+                "; distance: " + d.distance,
+              position:
+                r.cx + r.w * ((i + 0.5) / nx - 0.5) + " " +
+                h * d.height + " " +
+                (r.cz + r.d * ((j + 0.5) / nz - 0.5)),
+            })
+          );
+          n++;
+        }
+      }
+    });
+    console.log("[environment] room fixtures:", n, "lamps");
   },
 });
 
@@ -439,7 +557,14 @@ const ENV_PRESETS = {
           "; intensity: " + GALLERY_HEMI.intensity,
       })
     );
-    // Key + fill. These are what make the walls read as walls.
+    // A lamp in each room. These carry the room brightness and, because they
+    // have a position, are the only thing that can make a corridor dimmer than
+    // the room it joins. See room-fixtures.
+    env.appendChild(envEl("a-entity", { "room-fixtures": "" }));
+    // Key + fill. Still needed even with the lamps: a lamp near a room's centre
+    // faces all four walls about equally, so it does NOT differentiate them —
+    // only a directional varies with a wall's facing, which is what reads a
+    // corner. The lamps do distance; the directionals do orientation.
     [GALLERY_KEY, GALLERY_FILL].forEach(function (l) {
       env.appendChild(
         envEl("a-entity", {
