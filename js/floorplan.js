@@ -41,10 +41,40 @@
 // Any change rebuilds the whole plan.
 // ================================================================
 
+// ---------- surface styles ----------
+// Every room and hallway can carry its own materials. Anything omitted falls
+// back to the component's color/shader/roughness/metalness, so an item that
+// says nothing looks like the rest of the gallery.
+//   style        — that item's WALLS
+//   ceilingStyle — its ceiling, or a hallway's roof; falls back to `style`
+// A style is any subset of:
+//   { color, src, repeat, opacity, shader, roughness, metalness }
+// `src` is the wallpaper hook — a URL or an <a-assets> selector — and `repeat`
+// tiles it ('4 2' = 4 across, 2 up). So, for example:
+//   zoneC: { ..., style: { color: '#e8e3d9' } }
+//   zoneB: { ..., style: { src: '#wallpaper', repeat: '6 2' },
+//                 ceilingStyle: { color: '#ffffff' } }
+// Live, without a reload (the whole plan rebuilds):
+//   const fp = document.getElementById('floorplan');
+//   const rooms = AFRAME.utils.clone(fp.getAttribute('floorplan').rooms);
+//   rooms.zoneC.style = { color: '#d9e3e8' };
+//   fp.setAttribute('floorplan', 'rooms', rooms);
+//
+// A NOTE ON SEAMS, worth knowing before you paint anything. A room's wall
+// surfaces continue INTO its doorways: the jamb reveals and the door head are
+// faces of the room's own wall, and they are coplanar with the corridor's side
+// walls and roof beyond them. So a room's colour stops at the far edge of its
+// reveal, which is exactly where you would expect paint to change — fine. But
+// it also means you cannot tint a CORRIDOR separately without putting a hard
+// tonal seam across those continuous surfaces. If you want passages to read
+// dimmer than rooms (they currently do not — see the note in environment.js),
+// that has to come from light, not paint.
+
 // ---------- room config ----------
 // cx/cz = centre, w = size along x, d = size along z (metres). Keys are the
 // names the hallway config refers to. `height` and `ceiling` are per-room and
-// both fall back to the component's `height` / `ceiling` defaults when omitted.
+// both fall back to the component's `height` / `ceiling` defaults when omitted;
+// `style` / `ceilingStyle` are the material hooks described above.
 const DEFAULT_ROOMS = {
   // Foyer — the spawn room (the rig is at the origin).
   central: { cx: 0, cz: 0, w: 10, d: 10, height: 5, ceiling: true },
@@ -191,14 +221,34 @@ AFRAME.registerComponent("floorplan", {
     },
   },
 
-  // Surface material. roughness/metalness only exist on lit shaders, so they
-  // are left off a `flat` one rather than warned about.
-  surfaceMaterial: function (extra) {
+  // Resolve the style for one surface: the component-wide defaults, overridden
+  // by the room's/hallway's own `style`, overridden (for a ceiling or a
+  // corridor roof) by its `ceilingStyle`. An item that declares nothing looks
+  // exactly like the rest of the gallery, so adding this changed no surface.
+  styleFor: function (owner, kind) {
     const d = this.data;
-    let m = "color: " + d.color + "; shader: " + d.shader;
-    if (d.shader !== "flat") {
-      m += "; roughness: " + d.roughness + "; metalness: " + d.metalness;
+    const s = {
+      color: d.color,
+      shader: d.shader,
+      roughness: d.roughness,
+      metalness: d.metalness,
+    };
+    Object.assign(s, (owner && owner.style) || {});
+    if (kind === "ceiling") Object.assign(s, (owner && owner.ceilingStyle) || {});
+    return s;
+  },
+
+  // Turn a resolved style into an A-Frame material string. roughness/metalness
+  // only exist on lit shaders, so they are left off a `flat` one rather than
+  // warned about; src/repeat are only emitted when a wallpaper is set.
+  materialString: function (s, extra) {
+    let m = "color: " + s.color + "; shader: " + s.shader;
+    if (s.shader !== "flat") {
+      m += "; roughness: " + s.roughness + "; metalness: " + s.metalness;
     }
+    if (s.src) m += "; src: " + s.src;
+    if (s.repeat) m += "; repeat: " + s.repeat;
+    if (s.opacity != null) m += "; opacity: " + s.opacity + "; transparent: true";
     return m + (extra || "");
   },
 
@@ -311,7 +361,8 @@ AFRAME.registerComponent("floorplan", {
     // the room is on the other side. The edge pass needs it because the two
     // faces of a wall are not equivalent — see buildEdges.
     const innerSign = side.charAt(0) === "+" ? -1 : 1;
-    const solid = { capped: capped, bottomLong: "both", bottomShorts: true };
+    const style = this.styleFor(room, "wall");
+    const solid = { capped: capped, bottomLong: "both", bottomShorts: true, style: style };
 
     let cursor = g.min;
     let built = 0;
@@ -322,8 +373,14 @@ AFRAME.registerComponent("floorplan", {
       built += this.wall(
         g.axis, g.fixed, c.start, c.end, `${roomName}${side}-lintel`, c.height, roomH,
         // Its underside is flush with the corridor roof beyond, so only the
-        // ROOM-side edge of that underside is a real one: the door head.
-        { capped: capped, bottomLong: "inner", bottomShorts: false, innerSign: innerSign }
+        // ROOM-side edge of that underside is a real one: the door head. It
+        // takes the ROOM's style: it is part of the room's wall, and its
+        // underside is continuous with the corridor roof, so it cannot be
+        // styled with the passage without seaming one or the other.
+        {
+          capped: capped, bottomLong: "inner", bottomShorts: false,
+          innerSign: innerSign, style: style,
+        }
       );
       // The doorway's two reveals.
       this.jambs.push({ axis: g.axis, fixed: g.fixed, at: c.start, height: c.height, innerSign: innerSign });
@@ -362,12 +419,13 @@ AFRAME.registerComponent("floorplan", {
     const lo = Math.min(h.corridor.from, h.corridor.to) - half;
     const hi = Math.max(h.corridor.from, h.corridor.to) + half;
     let built = 0;
+    const style = this.styleFor(h, "wall");
     [-1, 1].forEach((s) => {
       built += this.wall(
         runAxis, h.center + s * offset, lo, hi, `hall-${h.id}`, 0, hallH,
         // Roofed. No end shorts: those ends are buried in the room walls, and
         // the floor and ceiling run straight through the doorway unbroken.
-        { capped: true, bottomLong: "both", bottomShorts: false }
+        { capped: true, bottomLong: "both", bottomShorts: false, style: style }
       );
     });
 
@@ -382,8 +440,9 @@ AFRAME.registerComponent("floorplan", {
     if (c1 - c0 > MIN_SEGMENT) {
       const mid = (c0 + c1) / 2;
       const span = c1 - c0;
-      if (runAxis === "x") this.cap(mid, hallH, h.center, span, h.width);
-      else this.cap(h.center, hallH, mid, h.width, span);
+      const roof = this.styleFor(h, "ceiling");
+      if (runAxis === "x") this.cap(mid, hallH, h.center, span, h.width, roof);
+      else this.cap(h.center, hallH, mid, h.width, span, roof);
     }
     return built;
   },
@@ -400,13 +459,13 @@ AFRAME.registerComponent("floorplan", {
       this.roomHeight(room),
       room.cz,
       room.w - d.thickness,
-      room.d - d.thickness
+      room.d - d.thickness,
+      this.styleFor(room, "ceiling")
     );
   },
 
   // One horizontal lid — a room ceiling or a corridor roof.
-  cap: function (x, y, z, spanX, spanZ) {
-    const d = this.data;
+  cap: function (x, y, z, spanX, spanZ, style) {
     const el = document.createElement("a-plane");
     el.setAttribute("position", `${x} ${y} ${z}`);
     el.setAttribute("rotation", "90 0 0"); // faces down (-y), into the space
@@ -414,7 +473,7 @@ AFRAME.registerComponent("floorplan", {
     el.setAttribute("height", spanZ);
     // side: double so the lid also reads from above — locomotion is free-fly,
     // so you can get up there and a one-sided lid would vanish.
-    el.setAttribute("material", this.surfaceMaterial("; side: double"));
+    el.setAttribute("material", this.materialString(style, "; side: double"));
     this.el.appendChild(el);
     this.capCount++;
   },
@@ -469,7 +528,7 @@ AFRAME.registerComponent("floorplan", {
       );
     }
     el.setAttribute("height", tall);
-    el.setAttribute("material", this.surfaceMaterial());
+    el.setAttribute("material", this.materialString(opts.style || this.styleFor(null, "wall")));
     el.setAttribute("data-wall", label); // dev handle; nothing reads it
     this.el.appendChild(el);
     return 1;
