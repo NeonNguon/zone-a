@@ -148,11 +148,22 @@ AFRAME.registerComponent("floorplan", {
     hallwayHeight: { type: "number", default: 3 },
     thickness: { type: "number", default: 0.15 }, // metres
     color: { type: "color", default: "#ffffff" },
-    shader: { type: "string", default: "flat" }, // unlit: cheap on Quest
-    // Edge lines — see buildEdges(). Flat white walls under flat white light
-    // have NO shading, so without these every corner and floor junction reads
-    // as one continuous white field and you cannot see where a wall runs.
-    edges: { type: "boolean", default: true },
+    // LIT (was `flat`, i.e. unlit). Unlit was chosen for Quest cheapness, but
+    // it is what made every corner vanish — nothing shades a surface, so two
+    // walls meeting at a corner rendered the identical value, and the black
+    // edge lines existed only to put that corner back. The environment's key
+    // and fill now do it properly. Set to `flat` to go back to the graphic
+    // white look (turn `edges` on with it, or corners disappear again).
+    shader: { type: "string", default: "standard" },
+    // Matte plaster. Only used by lit shaders; `flat` ignores both.
+    roughness: { type: "number", default: 1 },
+    metalness: { type: "number", default: 0 },
+    // Edge lines — see buildEdges(). OFF now that the walls are lit: shading
+    // reads the corners, and these 1px lines shimmer in a headset (hairline
+    // GL_LINES alias as your head micro-moves, which no depth tweak fixes).
+    // Turn on to compare:
+    //   document.getElementById('floorplan').setAttribute('floorplan','edges',true)
+    edges: { type: "boolean", default: false },
     edgeColor: { type: "color", default: "#000000" },
     // How far the lines sit proud of the surfaces they trace (metres). Small
     // but non-zero: at 0 they are coplanar with the walls and the floor and
@@ -178,6 +189,17 @@ AFRAME.registerComponent("floorplan", {
         return typeof v === "string" ? v : JSON.stringify(v);
       },
     },
+  },
+
+  // Surface material. roughness/metalness only exist on lit shaders, so they
+  // are left off a `flat` one rather than warned about.
+  surfaceMaterial: function (extra) {
+    const d = this.data;
+    let m = "color: " + d.color + "; shader: " + d.shader;
+    if (d.shader !== "flat") {
+      m += "; roughness: " + d.roughness + "; metalness: " + d.metalness;
+    }
+    return m + (extra || "");
   },
 
   // ---- per-item config, falling back to the component-wide defaults ----
@@ -392,7 +414,7 @@ AFRAME.registerComponent("floorplan", {
     el.setAttribute("height", spanZ);
     // side: double so the lid also reads from above — locomotion is free-fly,
     // so you can get up there and a one-sided lid would vanish.
-    el.setAttribute("material", `color: ${d.color}; shader: ${d.shader}; side: double`);
+    el.setAttribute("material", this.surfaceMaterial("; side: double"));
     this.el.appendChild(el);
     this.capCount++;
   },
@@ -447,7 +469,7 @@ AFRAME.registerComponent("floorplan", {
       );
     }
     el.setAttribute("height", tall);
-    el.setAttribute("material", `color: ${d.color}; shader: ${d.shader}`);
+    el.setAttribute("material", this.surfaceMaterial());
     el.setAttribute("data-wall", label); // dev handle; nothing reads it
     this.el.appendChild(el);
     return 1;

@@ -84,6 +84,49 @@ const SKYLINE_CROP = 0.25; // fraction of the image height (from the BOTTOM) to
 //                            same fraction so buildings keep their apparent height
 //                            (no vertical squash). Tune 0..~0.4.
 
+// --- `void` preset: the gallery light rig -------------------------------
+// The floorplan enclosed the exhibition in ceilinged rooms, so this preset's
+// job has changed. Its sky is never seen from inside any more; what it actually
+// supplies now is the gallery's FLOOR and LIGHT RIG.
+//
+// The rig exists to do one specific thing: make a corner read. Note that the
+// obvious lights cannot do it —
+//   - AMBIENT lights every surface identically whichever way it faces. Two
+//     walls meeting at a corner come out the same value. This is exactly the
+//     flat white field we had, and why the black edge lines were needed at all.
+//   - HEMISPHERE shades by the normal's Y, so it separates floor from ceiling
+//     but leaves all four vertical walls on the same tone. Corners still vanish.
+//   - Only a DIRECTIONAL varies with a wall's FACING. But one alone leaves the
+//     two walls facing away from it equally dark, so a corner between those two
+//     still vanishes.
+// Hence: a KEY plus a weaker FILL from a different angle, so all four of a
+// room's walls land on four different values, and every corner reads by itself.
+// The ambient/hemisphere are just there to keep the unlit faces off black.
+//
+// Tune these four by eye — they are the whole look.
+//
+// The intensities look high because three r155+ uses PHYSICALLY CORRECT lights:
+// diffuse reflection divides by PI, so an intensity of 1 returns only ~0.32 of
+// the surface albedo. Values that read "normal" (0.3 - 1) come out as grey
+// concrete. Everything here is therefore scaled by roughly PI. If you retune,
+// keep that factor in mind rather than assuming the numbers are wrong.
+//
+// Where these land (white #ffffff wall, after the sRGB output transform):
+//   wall facing the key ~#f9  |  lit only by fill ~#e5  |  edge-on ~#d8
+//   ceiling ~#d4 (no directional reaches it — it faces down)  |  floor ~#e7
+// That spread across a room's four walls IS the thing that makes corners read.
+const GALLERY_AMBIENT = { color: "#ffffff", intensity: 1.6 };
+const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.6 };
+// `dir` is the light's POSITION: it shines from there toward the origin. Both
+// have x AND z so that all four wall facings differ — a key aligned to an axis
+// would leave two of them matched, and those corners would vanish again.
+const GALLERY_KEY = { color: "#ffffff", intensity: 1.2, dir: "6 8 3" };
+const GALLERY_FILL = { color: "#ffffff", intensity: 0.5, dir: "-5 4 -6" };
+// Floor albedo, well off white: it faces the key almost head-on, so at #ffffff
+// it blows out to pure white and flattens. This lands it ~#e7 — below the lit
+// walls, so they stay the brightest surface, as in a real gallery.
+const GALLERY_FLOOR = "#dcdcdc";
+
 // `cityroom` preset (flat panels on a white box room) -------------------
 const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the ring; tune)
 const CITYROOM_HEIGHT = 20; // metres, box height (>= panel height below)
@@ -316,27 +359,47 @@ function stubLabel(text) {
 // ambient light.
 // ----------------------------------------------------------------
 const ENV_PRESETS = {
-  // VOID — the migrated original look: a flat white space.
+  // VOID — the gallery interior. Was "a flat white space"; now that the
+  // floorplan encloses everything in ceilinged rooms, it is the gallery's floor
+  // and light rig. See the GALLERY_* tunables above for why the rig is shaped
+  // the way it is.
   void: function (env, scene) {
-    setBackground(scene, "#eeeeee");
+    setBackground(scene, "#eeeeee"); // only seen from outside the rooms
     setFog(scene, null); // no fog
-    buildAmbient(env, "#bbbbbb", 1);
+    buildAmbient(env, GALLERY_AMBIENT.color, GALLERY_AMBIENT.intensity);
     env.appendChild(
       envEl("a-entity", {
         light:
-          "type: hemisphere; color: #ffffff; groundColor: #cccccc; intensity: 1",
+          "type: hemisphere" +
+          "; color: " + GALLERY_HEMI.sky +
+          "; groundColor: " + GALLERY_HEMI.ground +
+          "; intensity: " + GALLERY_HEMI.intensity,
       })
     );
-    // Floor: pure white and UNLIT (shader: flat), like the cityroom floor, so
-    // it reads bright white rather than a light-dimmed grey. Still a ground
-    // plane (dependency rule).
+    // Key + fill. These are what make the walls read as walls.
+    [GALLERY_KEY, GALLERY_FILL].forEach(function (l) {
+      env.appendChild(
+        envEl("a-entity", {
+          light:
+            "type: directional; castShadow: false" +
+            "; color: " + l.color +
+            "; intensity: " + l.intensity,
+          position: l.dir, // shines from here toward the origin
+        })
+      );
+    });
+    // Floor: LIT now, so it shades with the rest of the gallery instead of
+    // being a flat white slab brighter than every wall. (It was deliberately
+    // unlit before, back when nothing else in the scene was lit.)
     env.appendChild(
       envEl("a-plane", {
         position: "0 0 0",
         rotation: "-90 0 0",
         width: GROUND_SIZE,
         height: GROUND_SIZE,
-        material: "color: #ffffff; shader: flat; side: double",
+        material:
+          "color: " + GALLERY_FLOOR +
+          "; shader: standard; roughness: 1; metalness: 0; side: double",
       })
     );
   },
