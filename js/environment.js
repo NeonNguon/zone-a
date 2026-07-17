@@ -25,10 +25,17 @@
 
 // ---------- tunables ----------
 
+// Runtime preset switching (desktop `e` key / right-hand `B` button) is
+// DISABLED: the exhibition is fixed on the default `void` preset. The cycle
+// machinery below is kept intact — flip this to true to restore the e/B cycle
+// for development. The ?env=<name> URL selector stays live either way, so every
+// preset remains loadable for dev/debug without the keys doing anything.
+const ENV_CYCLE_ENABLED = false;
+
 // Presets stepped through by the cycle control (desktop `e` key / right-hand
-// `b` button), in order. EVERY preset stays defined in ENV_PRESETS below and
-// loadable via ?env=<name> — this list only controls what the e/b cycle visits.
-// Add/remove names here to change the active cycle set.
+// `b` button), in order — only when ENV_CYCLE_ENABLED is true. EVERY preset
+// stays defined in ENV_PRESETS below and loadable via ?env=<name>; this list
+// only controls what the e/b cycle visits.
 const CYCLE_ORDER = ["void", "dataspace", "cityroom"];
 
 const GROUND_SIZE = 30; // metres square; matches the original plane
@@ -544,20 +551,21 @@ AFRAME.registerComponent("environment-manager", {
     const initial =
       fromUrl && ENV_PRESETS[fromUrl] ? fromUrl : this.data.preset;
 
-    // Desktop: `e` cycles to the next preset; `h` toggles the dev HUD.
+    // Desktop keys: `e` cycles to the next preset (only while
+    // ENV_CYCLE_ENABLED); `h` toggles the dev HUD (always available).
     this.onKey = (e) => {
-      if (e.key === "e" || e.key === "E") this.cycle();
+      if (ENV_CYCLE_ENABLED && (e.key === "e" || e.key === "E")) this.cycle();
       else if (e.key === "h" || e.key === "H") this.toggleHud();
     };
     window.addEventListener("keydown", this.onKey);
 
     // Quest 3 / WebXR: the right controller's `B` button cycles. laser-controls
     // (oculus-touch-controls under the hood) emits `bbuttondown` on the right
-    // hand. The element exists once the DOM is parsed; its events fire once its
-    // controller components init.
+    // hand. Bound ONLY while ENV_CYCLE_ENABLED — with switching off the button
+    // is left free for other uses.
     this.cycleFromController = () => this.cycle();
     this.rightHand = document.getElementById("rightHand");
-    if (this.rightHand) {
+    if (ENV_CYCLE_ENABLED && this.rightHand) {
       this.rightHand.addEventListener("bbuttondown", this.cycleFromController);
     }
 
@@ -627,7 +635,7 @@ AFRAME.registerComponent("environment-manager", {
 
   remove: function () {
     window.removeEventListener("keydown", this.onKey);
-    if (this.rightHand) {
+    if (ENV_CYCLE_ENABLED && this.rightHand) {
       this.rightHand.removeEventListener("bbuttondown", this.cycleFromController);
     }
     this.teardown();

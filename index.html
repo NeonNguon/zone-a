@@ -178,9 +178,10 @@
            fog, lights, ground, grid, particles), swappable as one unit.
            The ring NEVER sets any of these. environment-manager builds the
            active preset's children in here and tears them down on switch.
-           Starts on "void" (the migrated white look); ?env=<preset>
-           overrides on load; the `e` key (desktop) or right-hand `B` button
-           (VR) cycles the active set. See js/environment.js.
+           FIXED on "void" (the migrated white look): runtime preset switching
+           via the `e` key / right-hand `B` button is DISABLED
+           (ENV_CYCLE_ENABLED in js/environment.js). ?env=<preset> still
+           overrides on load for dev/debug. See js/environment.js.
            ============================================================ -->
       <a-entity id="environment" environment-manager="preset: void"></a-entity>
 
@@ -551,8 +552,9 @@
       </div>
     </div>
 
-    <!-- Dev-only HUD: shows the active environment preset while cycling with
-         `n`. Starts hidden; environment-manager reveals it on ?debug / `h`. -->
+    <!-- Dev-only HUD: shows the active environment preset (fixed on `void`;
+         ?env= can override for dev). Starts hidden; environment-manager
+         reveals it on ?debug or the `h` key. -->
     <div id="env-hud" hidden>env: <span id="env-hud-name">—</span></div>
 
     <!-- Focus-view controllers, at END of <body> so the DOM/scene exist.
