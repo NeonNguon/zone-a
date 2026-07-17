@@ -116,7 +116,10 @@ function throughAxis(side) {
 
 AFRAME.registerComponent("floorplan", {
   schema: {
-    height: { type: "number", default: 3 }, // metres, floor -> open top
+    // Metres, floor -> open top. 10 clears the tallest thing in any room
+    // (Zone C's screen tops out ~7.1 m, Zone B's image wall ~4.9 m), so the
+    // rooms actually enclose their zone rather than being overtopped by it.
+    height: { type: "number", default: 10 },
     thickness: { type: "number", default: 0.15 }, // metres
     color: { type: "color", default: "#ffffff" },
     shader: { type: "string", default: "flat" }, // unlit: cheap on Quest
