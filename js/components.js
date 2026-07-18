@@ -501,6 +501,16 @@ AFRAME.registerComponent("spot-contact-cue", {
     yoffset: { type: "number", default: 0.02 }, // metres above the local floor
     color: { type: "color", default: "#000000" },
     mode: { type: "string", default: "shadow" }, // "shadow" | "glow"
+    // FORCE-GLOW local override. On a dark floor (Zone C's dark terrazzo) the
+    // active `void` profile resolves to a near-black shadow pool, which is
+    // invisible. Setting forceGlow makes THIS cue ignore the env profile and
+    // render as an additive glow with a light tint instead — surviving every
+    // `environmentchanged` because the override is re-derived on each tune. Off
+    // by default, so Zone A/B cues are unaffected; only the Zone C instances
+    // (set in index.html) opt in.
+    forceGlow: { type: "boolean", default: false },
+    glowColor: { type: "color", default: "#9fb2cc" }, // light tint for the glow
+    glowOpacity: { type: "number", default: 0.5 },
   },
 
   init: function () {
@@ -516,11 +526,25 @@ AFRAME.registerComponent("spot-contact-cue", {
     // Retune with the environment (same contract as every other cue).
     this.onEnvChange = (e) => {
       this.curProfile = (e.detail && e.detail.profile) || null;
-      ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+      ContactCue.tuneMaterial(this.material, this.data, this.effectiveProfile());
     };
     this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
     this.curProfile = ContactCue.currentProfile();
-    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    ContactCue.tuneMaterial(this.material, this.data, this.effectiveProfile());
+  },
+
+  // The profile actually applied: the forceGlow local override when set, else
+  // the active environment profile. Re-read on every tune, so the override
+  // persists across environment switches.
+  effectiveProfile: function () {
+    if (this.data.forceGlow) {
+      return {
+        mode: "glow",
+        color: this.data.glowColor,
+        opacity: this.data.glowOpacity,
+      };
+    }
+    return this.curProfile;
   },
 
   update: function (oldData) {
@@ -534,7 +558,7 @@ AFRAME.registerComponent("spot-contact-cue", {
       if (old) old.dispose();
     }
     this.layout();
-    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    ContactCue.tuneMaterial(this.material, this.data, this.effectiveProfile());
   },
 
   layout: function () {

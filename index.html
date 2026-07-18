@@ -479,8 +479,11 @@
              ground profile, exactly like Zone A's ring cues and Zone B's
              wall cues — with an `intensity` boost on the profile opacity so
              this one big pool doesn't read faint. Tunables: cueWidth /
-             cueDepth / intensity / opacity / softness / yoffset. -->
-        <a-entity screen-contact-cue></a-entity>
+             cueDepth / intensity / opacity / softness / yoffset.
+             forceGlow: the Zone C floor is dark, so the void preset's shadow
+             pool would be invisible on it — force this cue to an additive light
+             glow instead (survives environment switches). -->
+        <a-entity screen-contact-cue="forceGlow: true"></a-entity>
 
         <!-- Đá mài terrazzo bench at the seated viewing spot, ~6 m in front
              of the screen, facing it (backrest toward spawn). Rides the
@@ -497,7 +500,7 @@
           terrazzo-bench
           position="6 -3 0"
           rotation="0 -90 0"
-          spot-contact-cue="width: 2.0; depth: 1.0; yoffset: 0.02"
+          spot-contact-cue="width: 2.0; depth: 1.0; yoffset: 0.02; forceGlow: true"
         ></a-entity>
 
         <!-- Zone C info terminal: beside the bench at the seated viewing
@@ -509,7 +512,7 @@
           info-terminal="key: c"
           position="6.5 -3 3.2"
           rotation="0 90 0"
-          spot-contact-cue
+          spot-contact-cue="forceGlow: true"
         ></a-entity>
       </a-entity>
 

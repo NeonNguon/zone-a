@@ -694,6 +694,13 @@ AFRAME.registerComponent("screen-contact-cue", {
     yoffset: { type: "number", default: 0.02 }, // metres above the floor (world y)
     color: { type: "color", default: "#000000" }, // tint; profile may override
     mode: { type: "string", default: "shadow" }, // "shadow" | "glow"
+    // FORCE-GLOW local override (see spot-contact-cue). Zone C's floor is dark,
+    // so the active `void` profile's shadow pool is invisible on it; forceGlow
+    // makes this cue render as an additive light glow instead, re-derived on
+    // every tune so it survives `environmentchanged`. Off by default.
+    forceGlow: { type: "boolean", default: false },
+    glowColor: { type: "color", default: "#9fb2cc" }, // light tint for the glow
+    glowOpacity: { type: "number", default: 0.5 },
   },
 
   init: function () {
@@ -736,9 +743,24 @@ AFRAME.registerComponent("screen-contact-cue", {
     this.layout();
   },
 
-  // Shared retune + this cue's own intensity boost on the resolved opacity.
+  // The profile actually applied: the forceGlow local override when set, else
+  // the active environment profile. Re-read on every tune so the override
+  // persists across environment switches.
+  effectiveProfile: function () {
+    if (this.data.forceGlow) {
+      return {
+        mode: "glow",
+        color: this.data.glowColor,
+        opacity: this.data.glowOpacity,
+      };
+    }
+    return this.curProfile;
+  },
+
+  // Shared retune (forceGlow override or the active profile) + this cue's own
+  // intensity boost on the resolved opacity.
   tune: function () {
-    ContactCue.tuneMaterial(this.material, this.data, this.curProfile);
+    ContactCue.tuneMaterial(this.material, this.data, this.effectiveProfile());
     this.material.opacity = Math.min(
       1,
       this.material.opacity * this.data.intensity
