@@ -36,9 +36,8 @@ const POSTER_URL = "video/thumbnail.jpg";
 //                            edge. Pinned to the world floor regardless of the
 //                            root's y (same intent as Zone B's floor cues
 //                            staying pinned under a raised wall).
-//   controlsFrontOffset    — how far IN FRONT of the screen the control strip
-//                            floats (metres toward the viewer).
-//   controlsHeight         — the strip's height above the WORLD floor (metres).
+//   controlsScale          — uniform size of the control strip (1 = as authored)
+//                            — the strip sits just below the screen's bottom edge.
 //   controlsFadeDelay      — idle ms before the control strip fades out.
 //   audioRefDistance       — full-volume radius of the screen audio (m).
 //   audioRolloff           — exponential falloff beyond that radius.
@@ -54,10 +53,12 @@ AFRAME.registerComponent("zone-c-root", {
     // and its width derives from 16:9, so it can be sized to fill the wall.
     screenHeight: { type: "number", default: 0 },
     screenHeightAboveFloor: { type: "number", default: 1.675 },
-    // The control strip floats IN FRONT of the screen (toward the viewer =
-    // container-local +z), at a fixed height above the world floor.
-    controlsFrontOffset: { type: "number", default: 1.6 }, // m in front of screen
-    controlsHeight: { type: "number", default: 1.3 }, // m above the world floor
+    // The control strip sits just BELOW the screen's bottom edge (flush against
+    // the screen plane, over the dark wall — NOT floating in front of the video,
+    // which stacked its transparent quads over the bright screen and flickered
+    // badly on the Quest). controlsScale shrinks the whole strip uniformly (1 =
+    // as authored); leave room below the screen for it via screenHeightAboveFloor.
+    controlsScale: { type: "number", default: 1 },
     controlsFadeDelay: { type: "number", default: 4000 }, // ms
     audioRefDistance: { type: "number", default: 8 },
     audioRolloff: { type: "number", default: 5 },
@@ -194,8 +195,8 @@ AFRAME.registerComponent("zone-c-root", {
   },
 
   // ================================================================
-  // CONTROL STRIP — a minimal floating row IN FRONT of the screen (toward the
-  // viewer), at roughly waist height (controlsFrontOffset / controlsHeight):
+  // CONTROL STRIP — a minimal row just BELOW the screen's bottom edge, flush
+  // against the screen plane (controlsScale sizes it):
   //   [play/pause] [restart] [------- seek track -------] [fs slot]
   // Flat quads only, no fonts (icons are triangles/bars, so nothing depends
   // on a glyph existing in a text font). Each button's dark backing plane IS
@@ -326,21 +327,25 @@ AFRAME.registerComponent("zone-c-root", {
 
   layoutControls: function () {
     const d = this.data;
-    // Width the panel off the ACTUAL screen width (screenW, published by
-    // layout()) so it stays proportionate in either sizing mode.
+    const scale = d.controlsScale > 0 ? d.controlsScale : 1;
+    // Uniform shrink of the whole strip (panel + buttons + track together), so
+    // it reads compact under the big screen without re-tuning every child.
+    this.stripEl.object3D.scale.set(scale, scale, scale);
+
+    // Panel width is capped so it does NOT track the wall-filling screen width
+    // (that made it huge); a compact fixed-ish strip, then controlsScale tunes it.
     const screenW = this.screenW || d.screenWidth;
-    const panelW = Math.max(4.5, screenW * 0.6);
+    const panelW = Math.min(5.5, Math.max(4.5, screenW * 0.6));
     const panelH = 0.7;
 
-    // The strip floats IN FRONT of the screen (toward the viewer = container-
-    // local +z, since the container's `0 90 0` yaw maps local +z to world +x),
-    // at controlsHeight above the WORLD floor. controlsHeight is measured from
-    // y=0, so subtract the root's y to reach this entity's local space (same
-    // convention as the screen's centreY).
-    this.stripEl.setAttribute(
-      "position",
-      `0 ${d.controlsHeight - d.offset.y} ${d.controlsFrontOffset}`
-    );
+    // The strip sits just BELOW the screen's bottom edge, flush against the
+    // screen plane (local z 0.02) — over the dark wall, not over the bright
+    // video. Pinned to the WORLD floor like the screen: the clearance below the
+    // bottom edge is in the strip's own units, so it scales with controlsScale.
+    const gap = 0.2; // strip-local metres between screen bottom and strip top
+    const centerWorldY =
+      d.screenHeightAboveFloor - (gap + panelH / 2) * scale;
+    this.stripEl.setAttribute("position", `0 ${centerWorldY - d.offset.y} 0.02`);
 
     this.panelEl.setAttribute("width", panelW);
     this.panelEl.setAttribute("height", panelH);
@@ -888,9 +893,9 @@ AFRAME.registerComponent("screen-contact-cue", {
 //     near-nothing (~1/3 volume — the zone moved in); raise audioRolloff if
 //     spawn should be quieter.
 //   • Hover/move the mouse over screen or strip → the control strip fades in
-//     floating IN FRONT of the screen at ~waist height (controlsFrontOffset /
-//     controlsHeight); leave everything idle ~4 s → strip fades out and no
-//     longer blocks clicks behind it.
+//     just below the screen's bottom edge (controlsScale sizes it); leave
+//     everything idle ~4 s → strip fades out and no longer blocks clicks behind
+//     it.
 //   • Play/pause toggles (icon follows real video state), restart jumps to
 //     0 and plays, click/drag on the seek track scrubs (dev server serves
 //     range requests, so seeking into unbuffered video works).
