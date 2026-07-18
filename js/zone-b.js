@@ -53,7 +53,25 @@ AFRAME.registerComponent("zone-b-root", {
 //            in x and y, so spacing reads evenly). Start small.
 //   rows / cols — grid dimensions, default 10 / 10.
 //   aspect — tile width:height, default 1.333 (4:3).
+//   shuffle — randomize the wall's image order per load (default false = today's
+//            manifest order). The floor map is unaffected: it picks images BY
+//            FILE ID (dataset.file), not by wall grid index.
+//   shuffleSeed — 0 = fresh random each load; >0 = seeded, reproducible order
+//            (a small deterministic PRNG, not Math.random). Debug aid; optional.
 // ----------------------------------------------------------------
+
+// Small deterministic PRNG (mulberry32) for seeded, reproducible shuffles.
+// Only used when shuffleSeed > 0; the default (seed 0) path uses Math.random.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 AFRAME.registerComponent("image-wall", {
   schema: {
     width: { type: "number", default: 0 }, // 0 = auto (4 × Zone A ring radius)
@@ -63,11 +81,14 @@ AFRAME.registerComponent("image-wall", {
     aspect: { type: "number", default: 1.333 }, // tile w:h (4:3)
     manifest: { type: "string", default: "web4map-512/manifest.json" },
     basePath: { type: "string", default: "web4map-512/" }, // prefix for tile URLs
+    shuffle: { type: "boolean", default: false }, // randomize order per load
+    shuffleSeed: { type: "number", default: 0 }, // 0 = fresh random; >0 = seeded
   },
 
   init: function () {
     this.tiles = []; // a-image elements this component created
-    this.entries = null; // manifest entries { file, title }, once fetched
+    this.entries = null; // manifest entries { file, title }, in MANIFEST order
+    this.displayEntries = null; // the order build() lays out from (maybe shuffled)
 
     // Fetch the manifest once, then build. update() re-lays-out on later prop
     // tweaks (it no-ops until this resolves). The manifest is an array of
@@ -82,6 +103,11 @@ AFRAME.registerComponent("image-wall", {
         this.entries = (Array.isArray(list) ? list : []).map((e) =>
           typeof e === "string" ? { file: e, title: "" } : e
         );
+        // Decide the display order ONCE, right after the fetch resolves (before
+        // the first build). build() never re-shuffles, so live tunable tweaks
+        // (width/gap/…) keep the same order — only a `shuffle`/`shuffleSeed`
+        // change via setAttribute re-rolls it (see update()).
+        this.applyOrder();
         this.build();
       })
       .catch((err) => {
@@ -93,10 +119,46 @@ AFRAME.registerComponent("image-wall", {
       });
   },
 
+  // Set this.displayEntries — the order build() lays out from. shuffle:false
+  // keeps the manifest order verbatim; shuffle:true Fisher–Yates-shuffles a COPY
+  // so this.entries (the by-index truth) is left intact. shuffleSeed 0 = fresh
+  // random each load; >0 = a seeded, reproducible order (deterministic PRNG).
+  applyOrder: function () {
+    if (!this.entries) return;
+    const order = this.entries.slice();
+    if (this.data.shuffle) {
+      const rng =
+        this.data.shuffleSeed > 0 ? mulberry32(this.data.shuffleSeed) : Math.random;
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        const tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+      }
+      console.log(
+        `image-wall: shuffled ${order.length} tile(s)` +
+          (this.data.shuffleSeed > 0
+            ? ` (seed ${this.data.shuffleSeed}, reproducible).`
+            : " (fresh random this load).")
+      );
+    }
+    this.displayEntries = order;
+  },
+
   // Re-layout on any live tunable change (width/gap/rows/cols/aspect). No-op
   // until the manifest has arrived (the first update() runs before the fetch).
-  update: function () {
-    if (this.entries) this.build();
+  // A `shuffle`/`shuffleSeed` change re-rolls the display order; other tweaks
+  // keep it, so eyeballing the grid never reorders the wall.
+  update: function (oldData) {
+    if (!this.entries) return;
+    if (
+      oldData &&
+      (oldData.shuffle !== this.data.shuffle ||
+        oldData.shuffleSeed !== this.data.shuffleSeed)
+    ) {
+      this.applyOrder();
+    }
+    this.build();
   },
 
   // width=0 means AUTO: read Zone A's ring radius from its own source of truth
@@ -150,7 +212,10 @@ AFRAME.registerComponent("image-wall", {
     this.tileH = tileH;
     this.wallHeight = height;
 
-    const have = this.entries.length;
+    // Lay out from the display order (shuffled or not), decided once in
+    // applyOrder(); falls back to manifest order if applyOrder never ran.
+    const entries = this.displayEntries || this.entries;
+    const have = entries.length;
     const n = Math.min(have, slots);
     if (have < slots) {
       console.warn(
@@ -176,7 +241,7 @@ AFRAME.registerComponent("image-wall", {
       // Each manifest entry is { file, title }. Use `file` for the texture URL
       // (encoded so any special chars are valid) and CARRY `title` on the tile
       // (data-title) so focus mode can read it later — not used for display now.
-      const entry = this.entries[i];
+      const entry = entries[i];
       const url = d.basePath + encodeURIComponent(entry.file);
       const img = document.createElement("a-image");
       img.setAttribute("src", url); // plain URL, not an asset id
