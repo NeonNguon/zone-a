@@ -806,6 +806,134 @@ AFRAME.registerComponent("screen-contact-cue", {
 });
 
 // ================================================================
+// zone-c-floor — a LOCAL dark inverted-terrazzo floor over the Zone C footprint.
+//
+// The exhibition floor is a SINGLE 64 m global ground plane (environment.js),
+// shared by every room, so it cannot be recoloured without darkening Zones A/B
+// too. Instead this lays a second, small terrazzo plane covering ONLY Zone C's
+// inner footprint — a near-black đá mài with faintly-lighter charcoal flecks, the
+// inverse of the gallery's pale terrazzo. It reuses the SAME makeTerrazzoTexture
+// generator (js/bench.js) as the bench and the global floor — runtime canvas, no
+// asset file — so it reads as the same building, just unlit for the dark room...
+// actually LIT (MeshStandardMaterial), so it shades under the (dimmed) Zone C
+// lamp exactly like the walls.
+//
+// Placement is read LIVE from #floorplan's config (cx/cz/w/d/thickness), the same
+// contract room-fixtures follows — never a copied number — and it re-derives on
+// `floorplanbuilt`, so it tracks any room change. It sits a hair (ylift) above the
+// global floor to avoid z-fighting, and BELOW the contact cues (which sit at
+// y≈0.02) so the glow pools render on top of it.
+//
+// It is mounted as a FIXED sibling of #floorplan (see index.html), NOT under
+// #environment — so it persists across environment switches, like the cues and
+// the walls.
+//
+// TUNABLES (schema props — adjust live, no code edits):
+//   room                 — which floorplan room to cover (default "zoneC").
+//   base                 — near-black terrazzo body colour.
+//   fleck1 / fleck2      — the two faintly-lighter charcoal fleck colours.
+//   density / seed       — fleck count per tile / deterministic seed.
+//   tile                 — metres per texture tile (fleck scale).
+//   ylift                — metres above the global floor (keep < the cues' 0.02).
+// ================================================================
+AFRAME.registerComponent("zone-c-floor", {
+  schema: {
+    room: { type: "string", default: "zoneC" },
+    base: { type: "color", default: "#141416" }, // near-black body
+    fleck1: { type: "color", default: "#1e1e20" }, // faintly lighter charcoal
+    fleck2: { type: "color", default: "#242426" },
+    density: { type: "number", default: 300 }, // flecks per tile
+    seed: { type: "number", default: 11 },
+    tile: { type: "number", default: 1.8 }, // metres per texture tile
+    ylift: { type: "number", default: 0.008 }, // above global floor, below cues
+  },
+
+  init: function () {
+    this.fpEl = document.getElementById("floorplan");
+    this.mesh = null;
+    this.geometry = null;
+    this.material = null;
+    this.texture = null;
+    // #floorplan may not have built yet on load (parse order), and it rebuilds
+    // on any config change — `floorplanbuilt` covers both, same as room-fixtures.
+    this.onBuilt = () => this.build();
+    if (this.fpEl) this.fpEl.addEventListener("floorplanbuilt", this.onBuilt);
+    this.build();
+  },
+
+  // Any tunable change rebuilds — one plane, so a full rebuild is cheap.
+  update: function (oldData) {
+    if (Object.keys(oldData).length === 0) return; // first update: init built it
+    this.build();
+  },
+
+  build: function () {
+    const attr = this.fpEl && this.fpEl.getAttribute("floorplan");
+    const rooms = attr && attr.rooms;
+    const r = rooms && rooms[this.data.room];
+    if (!r) return; // floorplan not up yet — `floorplanbuilt` calls us back
+
+    const d = this.data;
+    const t = attr.thickness != null ? attr.thickness : 0.15;
+    // Inner footprint (minus wall thickness) so the plane meets the wall faces.
+    const w = r.w - t;
+    const dep = r.d - t;
+
+    this.teardownGpu();
+
+    // Inverted terrazzo palette. CLONE the cached texture (makeTerrazzoTexture
+    // shares by parameter key) so our per-instance tiling doesn't retile any
+    // other surface built from the same palette — same guard finishGround uses.
+    const tex = makeTerrazzoTexture(
+      d.base,
+      [d.fleck1, d.fleck2],
+      d.density,
+      d.seed
+    ).clone();
+    tex.needsUpdate = true;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(w / d.tile, dep / d.tile);
+    const renderer = this.el.sceneEl && this.el.sceneEl.renderer;
+    tex.anisotropy = renderer
+      ? Math.min(8, renderer.capabilities.getMaxAnisotropy())
+      : 8;
+    this.texture = tex;
+
+    // LIT, so it shades under the dimmed Zone C lamp like the charcoal walls.
+    this.material = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 1,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
+    this.geometry = new THREE.PlaneGeometry(w, dep);
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.mesh.rotation.x = -Math.PI / 2; // lie flat, facing up
+    // This entity sits at the world origin (sibling of #floorplan), so the
+    // room's own cx/cz are world coordinates: place the plane directly on them,
+    // lifted a hair above the global floor.
+    this.mesh.position.set(r.cx, d.ylift, r.cz);
+    this.el.setObject3D("floor", this.mesh);
+  },
+
+  teardownGpu: function () {
+    if (this.mesh) this.el.removeObject3D("floor");
+    this.mesh = null;
+    if (this.geometry) this.geometry.dispose();
+    this.geometry = null;
+    if (this.material) this.material.dispose();
+    this.material = null;
+    if (this.texture) this.texture.dispose();
+    this.texture = null;
+  },
+
+  remove: function () {
+    if (this.fpEl) this.fpEl.removeEventListener("floorplanbuilt", this.onBuilt);
+    this.teardownGpu();
+  },
+});
+
+// ================================================================
 // TESTING NOTES — Zone C Pass 1
 //
 // Desktop:

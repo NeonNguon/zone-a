@@ -226,6 +226,23 @@
       <a-entity id="floorplan" floorplan></a-entity>
 
       <!-- ============================================================
+           ZONE C DARK FLOOR — a LOCAL dark inverted-terrazzo plane over just
+           the Zone C footprint. The exhibition floor is ONE global 64 m ground
+           plane shared by every room (js/environment.js), so it cannot be
+           darkened without darkening Zones A/B too; this lays a second, small
+           near-black terrazzo plane covering only Zone C, sized LIVE from the
+           floorplan's zoneC room config and re-derived on `floorplanbuilt`.
+
+           A SIBLING of #floorplan, not a child of #environment: like the walls
+           and the contact cues it must PERSIST across environment switches. It
+           sits a hair above the global floor and below the contact cues, so the
+           cue glow pools render on top of it. Tunables (setAttribute on this
+           entity): base / fleck1 / fleck2 / density / seed / tile / ylift.
+           See js/zone-c.js (zone-c-floor).
+           ============================================================ -->
+      <a-entity id="zone-c-floor" zone-c-floor></a-entity>
+
+      <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
            the same three lines floating ~3.5 m in front of spawn at eye
            height, facing spawn, WORLD-FIXED (clear of Zone A's ring, whose
