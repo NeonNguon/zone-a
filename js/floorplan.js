@@ -96,6 +96,9 @@ const DEFAULT_ROOMS = {
     cx: -14.7, cz: 0.2, w: 15.2, d: 24.4, height: 10, ceiling: true,
     style: { color: "#2b2b2c" },
     ceilingStyle: { color: "#242426" },
+    // Dim THIS room's lamp only (read by room-fixtures) so the screening room
+    // reads dusky with the screen dominant, but still navigable. 1 = untouched.
+    fixtureScale: 0.4,
   },
 };
 

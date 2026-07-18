@@ -394,7 +394,13 @@ AFRAME.registerComponent("room-fixtures", {
       // enough to clear the clip while keeping the corridor contrast. Rooms at
       // the reference height are never touched (ratio = 1).
       const refY = d.refHeight * d.height;
-      const intensity = d.intensity * Math.pow(lampY / refY, d.decay * comp) * vr;
+      // PER-ROOM multiplier: a room may dim (or brighten) its own lamp via a
+      // `fixtureScale` field on its floorplan config (default 1 = untouched).
+      // Zone C sets ~0.4 to read as a dusky screening room; every other room
+      // omits it and is unaffected.
+      const roomScale = r.fixtureScale != null ? r.fixtureScale : 1;
+      const intensity =
+        d.intensity * Math.pow(lampY / refY, d.decay * comp) * vr * roomScale;
       // Spread lamps evenly, one per ~spacing on each axis, so a long room gets
       // a row rather than one hot spot in the middle.
       const nx = Math.max(1, Math.round(r.w / d.spacing));
