@@ -823,12 +823,17 @@ AFRAME.registerComponent("zone-c-root", {
 
   // Strip the video off the WebGL screen so it does no decode/upload work while
   // the compositor layer owns the film (that WebGL video work IS the contention).
-  // The plane stays (black) so it remains the click target behind the quad.
+  // The plane shows the POSTER STILL (a static image — no per-frame decode/upload,
+  // so no contention): the live video quad covers it while you're inside Zone C,
+  // and from OUTSIDE (through the doorway, properly wall-occluded since the WebGL
+  // screen has real depth) it reads as a still frame instead of a black hole. It
+  // also stays the click target behind the quad. Falls back to black if the
+  // poster hasn't loaded yet.
   detachWebglVideo: function () {
     const mesh = this.screenEl.getObject3D("mesh");
     if (mesh && mesh.material) {
-      mesh.material.map = null;
-      mesh.material.color.set("#000000");
+      mesh.material.map = this.posterTexture || null;
+      mesh.material.color.set(this.posterTexture ? "#ffffff" : "#000000");
       mesh.material.needsUpdate = true;
     }
     this._hasFrame = undefined;
