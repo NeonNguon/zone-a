@@ -519,9 +519,12 @@ AFRAME.registerComponent("zone-c-root", {
     if (this.stripShown) {
       this.updateProgress();
 
-      // Idle timeout — never while scrubbing or while a pointer rests on it.
+      // Idle timeout — never while scrubbing, while a pointer rests on it, or
+      // while the film is on the XR layer (the strip is the only way to reach
+      // pause/restart/seek there, so it must stay put).
       if (
         this.fadeTarget === 1 &&
+        !this.usingLayer &&
         !this.scrubbing &&
         this.stripHover <= 0 &&
         time - this.lastActive > this.data.controlsFadeDelay
@@ -710,8 +713,11 @@ AFRAME.registerComponent("zone-c-root", {
         space: refSpace,
         layout: "mono",
         transform: new XRRigidTransform(),
-        width: w, // full metres; if the film reads 2x off, try w/2 & h/2
-        height: h,
+        // XRQuadLayer width/height are HALF-extents (distance from centre to
+        // edge), so halve the screen size — passing full dims made the layer 2×,
+        // which loomed toward the viewer and clipped through the floor.
+        width: w / 2,
+        height: h / 2,
       });
       this.updateXRLayerTransform();
       // Add our quad ON TOP of three's projection layer (later in the array is
@@ -719,6 +725,10 @@ AFRAME.registerComponent("zone-c-root", {
       session.updateRenderState({ layers: [existing[0], this.xrLayer] });
       this.usingLayer = true;
       this.detachWebglVideo(); // stop the WebGL screen doing ANY video work
+      // The video quad hides the screen, so bring the control strip up and keep
+      // it up (tick won't auto-fade it while usingLayer) — otherwise the film
+      // plays with no reachable pause/restart/seek.
+      this.showControls();
       console.log("zone-c: film on a WebXR compositor quad layer");
     } catch (e) {
       console.warn("zone-c: XR video layer failed — WebGL screen fallback", e);
