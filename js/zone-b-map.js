@@ -119,6 +119,13 @@ AFRAME.registerComponent("map-board", {
     sidecar: { type: "string", default: "assets/zone-b-map-saigon.json" },
     manifest: { type: "string", default: "web4map-512/manifest.json" }, // titles
     yLift: { type: "number", default: 0.02 }, // plane above floor (anti z-fight)
+    // Anisotropic filtering for the baked map texture. Like the terrazzo floor
+    // (js/environment.js), the map is seen almost edge-on across most of its
+    // area, so without anisotropy the distant part blurs and shimmers at
+    // grazing angles. 0 = AUTO: the renderer's real ceiling, capped at 16 (the
+    // map is read closer than the floor, so the higher ceiling is warranted).
+    // A value > 0 is used directly, still capped at the renderer's max.
+    anisotropy: { type: "number", default: 0 },
   },
 
   // Deterministic per-index palette (locations.json carries no colors):
@@ -233,7 +240,19 @@ AFRAME.registerComponent("map-board", {
         const mesh = plane.getObject3D("mesh");
         const renderer = this.el.sceneEl.renderer;
         if (mesh && mesh.material && mesh.material.map && renderer) {
-          renderer.initTexture(mesh.material.map);
+          const map = mesh.material.map;
+          // Anisotropic filtering, mirroring the terrazzo floor's treatment.
+          // 0 = AUTO: the renderer's real ceiling capped at 16; a set value is
+          // used directly, still capped at that ceiling. LinearMipmapLinear is
+          // explicit so mipmaps + anisotropy actually engage (mipmaps stay on).
+          const maxAniso = renderer.capabilities.getMaxAnisotropy();
+          map.anisotropy =
+            d.anisotropy > 0
+              ? Math.min(d.anisotropy, maxAniso)
+              : Math.min(16, maxAniso);
+          map.minFilter = THREE.LinearMipmapLinearFilter;
+          map.needsUpdate = true;
+          renderer.initTexture(map); // upload with the new filtering baked in
         }
       },
       { once: true }
