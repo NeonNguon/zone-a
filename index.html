@@ -495,19 +495,19 @@
            -x you see the cinema. The screen is rotated inside the component to
            face back toward spawn.
 
-           screenHeight 8.0 nearly fills the 10 m wall (width derives 16:9 →
-           ~14.2 m, within the room's z extent), bottom edge 1.5 m off the floor
-           — the raised bottom leaves room BELOW the screen for the control strip,
-           which sits just under the screen's bottom edge (over the dark wall, not
-           over the bright video: floating it in front flickered on the Quest).
-           controlsScale 0.7 shrinks that strip. All other tunables (screenWidth /
-           screenHeight / screenHeightAboveFloor / controlsScale / controlsFadeDelay
-           / audioRefDistance / audioRolloff) live on the zone-c-root schema —
-           see js/zone-c.js.
+           screenHeight 8.8 nearly fills the 10 m wall (width derives 16:9 →
+           ~15.6 m, within the room's z extent), bottom edge 0.8 m off the floor
+           — low enough that the control strip just below it almost touches the
+           floor. The strip sits under the screen's bottom edge (over the dark
+           wall, not over the bright video: floating it in front flickered on the
+           Quest). controlsScale 0.7 shrinks that strip. All other tunables
+           (screenWidth / screenHeight / screenHeightAboveFloor / controlsScale /
+           controlsFadeDelay / audioRefDistance / audioRolloff) live on the
+           zone-c-root schema — see js/zone-c.js.
            ============================================================ -->
       <a-entity
         id="zone-c"
-        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.0; screenHeightAboveFloor: 1.5; controlsScale: 0.7"
+        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
       >
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
