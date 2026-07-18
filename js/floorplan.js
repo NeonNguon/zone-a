@@ -77,8 +77,15 @@
 // both fall back to the component's `height` / `ceiling` defaults when omitted;
 // `style` / `ceilingStyle` are the material hooks described above.
 const DEFAULT_ROOMS = {
-  // Foyer — the spawn room (the rig is at the origin).
-  central: { cx: 0, cz: 0, w: 10, d: 10, height: 5, ceiling: true },
+  // Foyer — the spawn room (the rig is at the origin). Its -x wall (the one
+  // carrying the central-zoneC doorway) goes charcoal to match Zone C: a dark
+  // threshold seen from the bright foyer, reading continuously with the dark
+  // passage and screening room beyond it. Per-SIDE override — the foyer's other
+  // three walls and its ceiling stay white.
+  central: {
+    cx: 0, cz: 0, w: 10, d: 10, height: 5, ceiling: true,
+    sideStyles: { "-x": { color: "#2b2b2c" } },
+  },
   // The ring, forward (-z). Its images top out ~2.3 m, so 5 m is ample.
   zoneA: { cx: 0, cz: -11.85, w: 11.2, d: 11.1, height: 5, ceiling: true },
   // Image wall + triptych, right (+x). The wall tops out ~4.9 m.
@@ -136,6 +143,13 @@ const DEFAULT_HALLWAYS = [
     center: -0.2,
     width: 2.4,
     corridor: { from: -7.1, to: -5 },
+    // Dark passage into the cinema: charcoal side-walls + a fractionally darker
+    // roof, matching Zone C AND the foyer's now-charcoal -x wall at both ends.
+    // The corridor side-walls are coplanar with the doorway reveals at each end
+    // (see the seam note up top), so matching all three makes the dark seamless
+    // from the foyer doorway through to the screening room.
+    style: { color: "#2b2b2c" },
+    ceilingStyle: { color: "#242426" },
   },
   {
     id: "central-zoneA",
@@ -250,6 +264,18 @@ AFRAME.registerComponent("floorplan", {
     };
     Object.assign(s, (owner && owner.style) || {});
     if (kind === "ceiling") Object.assign(s, (owner && owner.ceilingStyle) || {});
+    return s;
+  },
+
+  // A room WALL's style, with an optional PER-SIDE override on top. A room may
+  // carry `sideStyles: { '-x': {color}, ... }` to paint one wall differently
+  // from the rest — e.g. the foyer's -x wall (the threshold to the cinema) goes
+  // charcoal while its other three stay white. Falls straight through to
+  // styleFor when a room declares no sideStyles, so it changes no existing wall.
+  styleForSide: function (room, side) {
+    const s = this.styleFor(room, "wall");
+    const over = room && room.sideStyles && room.sideStyles[side];
+    if (over) Object.assign(s, over);
     return s;
   },
 
@@ -380,7 +406,7 @@ AFRAME.registerComponent("floorplan", {
     // the room is on the other side. The edge pass needs it because the two
     // faces of a wall are not equivalent — see buildEdges.
     const innerSign = side.charAt(0) === "+" ? -1 : 1;
-    const style = this.styleFor(room, "wall");
+    const style = this.styleForSide(room, side);
     const solid = { capped: capped, bottomLong: "both", bottomShorts: true, style: style };
 
     let cursor = g.min;
