@@ -52,8 +52,11 @@
   letter-spacing: 0.03em;
   color: #777;
 }
-/* "12 / 100" step counter (wall-focus FEATURE 2) — subtle, below the year. */
+/* "12 / 100" step counter (wall-focus FEATURE 2) — subtle, below the year.
+   Hidden by default; shown only with .nav-on (wall/triptych paging), so the
+   map-focus reveal — which reuses this overlay — never shows a stray counter. */
 #zoneb-focus-count {
+  display: none;
   margin-top: 6px;
   font-size: 12px;
   font-weight: 400;
@@ -102,4 +105,7 @@
 #zoneb-focus.nav-on #zoneb-focus-prev,
 #zoneb-focus.nav-on #zoneb-focus-next {
   display: flex;
+}
+#zoneb-focus.nav-on #zoneb-focus-count {
+  display: block;
 }
