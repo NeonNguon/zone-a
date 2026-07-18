@@ -602,7 +602,12 @@ const ENV_PRESETS = {
   // and light rig. See the GALLERY_* tunables above for why the rig is shaped
   // the way it is.
   void: function (env, scene) {
-    setBackground(scene, "#eeeeee"); // only seen from outside the rooms
+    // BLACK, was #eeeeee (near-white). The rooms are enclosed, so the background
+    // is normally only seen from outside/above — BUT on a Quest render hitch the
+    // clear colour bleeds through as a full-view flash, and a near-white one read
+    // as the "big white flashes" during Zone C video playback. Black makes any
+    // such bleed-through invisible (and suits the dark screening room).
+    setBackground(scene, "#000000");
     setFog(scene, null); // no fog
     buildAmbient(env, GALLERY_AMBIENT.color, GALLERY_AMBIENT.intensity);
     env.appendChild(
