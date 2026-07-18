@@ -26,11 +26,19 @@ const POSTER_URL = "video/thumbnail.jpg";
 //
 // TUNABLES (all schema properties — adjustable by eye, no code edits):
 //   offset                 — assembly position (vec3), the placement handle.
-//   screenWidth            — screen width in metres; height derives from 16:9.
+//   screenWidth            — screen width in metres; height derives from 16:9
+//                            (used only when screenHeight is 0).
+//   screenHeight           — screen height in metres. When > 0 it DRIVES the
+//                            size (width = height × 16/9) so the screen can fill
+//                            the wall; when 0, the legacy width-driven path runs
+//                            (backward compatible).
 //   screenHeightAboveFloor — WORLD-floor clearance of the screen's bottom
 //                            edge. Pinned to the world floor regardless of the
 //                            root's y (same intent as Zone B's floor cues
 //                            staying pinned under a raised wall).
+//   controlsFrontOffset    — how far IN FRONT of the screen the control strip
+//                            floats (metres toward the viewer).
+//   controlsHeight         — the strip's height above the WORLD floor (metres).
 //   controlsFadeDelay      — idle ms before the control strip fades out.
 //   audioRefDistance       — full-volume radius of the screen audio (m).
 //   audioRolloff           — exponential falloff beyond that radius.
@@ -40,9 +48,16 @@ AFRAME.registerComponent("zone-c-root", {
     offset: { type: "vec3", default: { x: -10, y: 3, z: 0 } },
     // 9.6 = 80% of the original 12 m screen; the raised bottom edge (1.675 m)
     // keeps the ORIGINAL screen centre (4.375 m) — it shrank in place rather
-    // than sinking with its bottom edge.
+    // than sinking with its bottom edge. Used only when screenHeight is 0.
     screenWidth: { type: "number", default: 9.6 },
+    // 0 = width-driven (legacy). > 0 = height-driven: the screen is this tall
+    // and its width derives from 16:9, so it can be sized to fill the wall.
+    screenHeight: { type: "number", default: 0 },
     screenHeightAboveFloor: { type: "number", default: 1.675 },
+    // The control strip floats IN FRONT of the screen (toward the viewer =
+    // container-local +z), at a fixed height above the world floor.
+    controlsFrontOffset: { type: "number", default: 1.6 }, // m in front of screen
+    controlsHeight: { type: "number", default: 1.3 }, // m above the world floor
     controlsFadeDelay: { type: "number", default: 4000 }, // ms
     audioRefDistance: { type: "number", default: 8 },
     audioRolloff: { type: "number", default: 5 },
@@ -152,8 +167,19 @@ AFRAME.registerComponent("zone-c-root", {
   // --- sizes/positions from the live schema (re-run on any tunable change) --
   layout: function () {
     const d = this.data;
-    const w = d.screenWidth;
-    const h = (w * 9) / 16;
+    // Two sizing modes: screenHeight > 0 DRIVES the size (width from 16:9) so
+    // the screen can fill the wall; screenHeight 0 keeps the legacy width-driven
+    // behaviour. `screenW` is published for the contact cue's AUTO width, which
+    // must follow the ACTUAL screen width in either mode.
+    let w, h;
+    if (d.screenHeight > 0) {
+      h = d.screenHeight;
+      w = (h * 16) / 9;
+    } else {
+      w = d.screenWidth;
+      h = (w * 9) / 16;
+    }
+    this.screenW = w;
 
     // screenHeightAboveFloor is measured from the WORLD floor (y=0), so the
     // screen's bottom edge stays put even if the root's y offset changes —
@@ -168,7 +194,8 @@ AFRAME.registerComponent("zone-c-root", {
   },
 
   // ================================================================
-  // CONTROL STRIP — a minimal floating row below the screen:
+  // CONTROL STRIP — a minimal floating row IN FRONT of the screen (toward the
+  // viewer), at roughly waist height (controlsFrontOffset / controlsHeight):
   //   [play/pause] [restart] [------- seek track -------] [fs slot]
   // Flat quads only, no fonts (icons are triangles/bars, so nothing depends
   // on a glyph existing in a text font). Each button's dark backing plane IS
@@ -299,13 +326,21 @@ AFRAME.registerComponent("zone-c-root", {
 
   layoutControls: function () {
     const d = this.data;
-    const panelW = Math.max(4.5, d.screenWidth * 0.6);
+    // Width the panel off the ACTUAL screen width (screenW, published by
+    // layout()) so it stays proportionate in either sizing mode.
+    const screenW = this.screenW || d.screenWidth;
+    const panelW = Math.max(4.5, screenW * 0.6);
     const panelH = 0.7;
 
-    // Pinned relative to the WORLD floor like the screen: strip top sits a
-    // little below the screen's bottom edge.
-    const centerWorldY = d.screenHeightAboveFloor - 0.15 - panelH / 2;
-    this.stripEl.setAttribute("position", `0 ${centerWorldY - d.offset.y} 0.02`);
+    // The strip floats IN FRONT of the screen (toward the viewer = container-
+    // local +z, since the container's `0 90 0` yaw maps local +z to world +x),
+    // at controlsHeight above the WORLD floor. controlsHeight is measured from
+    // y=0, so subtract the root's y to reach this entity's local space (same
+    // convention as the screen's centreY).
+    this.stripEl.setAttribute(
+      "position",
+      `0 ${d.controlsHeight - d.offset.y} ${d.controlsFrontOffset}`
+    );
 
     this.panelEl.setAttribute("width", panelW);
     this.panelEl.setAttribute("height", panelH);
@@ -784,15 +819,21 @@ AFRAME.registerComponent("screen-contact-cue", {
     this.tune();
   },
 
-  // cueWidth=0 means AUTO: 1.35 × the screen's width, read live from the
-  // parent zone-c-root (so tuning screenWidth re-sizes the cue with it).
+  // cueWidth=0 means AUTO: 1.35 × the screen's ACTUAL width, read live from the
+  // parent zone-c-root (so tuning screenWidth OR screenHeight re-sizes the cue
+  // with it). Prefer the published effective width `screenW` (set by layout(),
+  // correct in both the width- and height-driven modes); fall back to the
+  // screenWidth prop if layout() hasn't run yet.
   resolveWidth: function () {
     if (this.data.cueWidth > 0) return this.data.cueWidth;
     const root =
       this.el.parentNode &&
       this.el.parentNode.components &&
       this.el.parentNode.components["zone-c-root"];
-    if (root) return root.data.screenWidth * 1.35;
+    if (root) {
+      const sw = root.screenW != null ? root.screenW : root.data.screenWidth;
+      return sw * 1.35;
+    }
     console.warn("screen-contact-cue: no zone-c-root parent; FALLBACK 16.2 m");
     return 16.2;
   },
@@ -959,16 +1000,19 @@ AFRAME.registerComponent("zone-c-floor", {
 // TESTING NOTES — Zone C Pass 1
 //
 // Desktop:
-//   • Load, turn to face -x (opposite the wall): 16:9 screen showing the
-//     film's thumbnail (dark plane only until it loads), bottom edge
-//     ~1.7 m off the floor. No play glyph — hover brings up the strip.
+//   • Load, turn to face -x (opposite the wall): a large 16:9 screen filling
+//     the dark room's back wall (screenHeight-driven; bottom edge ~0.35 m off
+//     the floor, seated ~0.30 m off the wall), showing the film's thumbnail
+//     (dark plane only until it loads). No play glyph — hover brings up the
+//     strip.
 //   • Click the screen → video plays, sound clearly localised AT the screen.
-//   • Walk back to spawn (now 10 m) → audio drops off clearly but no longer
-//     to near-nothing (~1/3 volume — the zone moved in); raise audioRolloff
-//     if spawn should be quieter.
-//   • Hover/move the mouse over screen or strip → strip fades in below the
-//     screen; leave everything idle ~4 s → strip fades out and no longer
-//     blocks clicks behind it.
+//   • Walk back to spawn → audio drops off clearly but no longer to
+//     near-nothing (~1/3 volume — the zone moved in); raise audioRolloff if
+//     spawn should be quieter.
+//   • Hover/move the mouse over screen or strip → the control strip fades in
+//     floating IN FRONT of the screen at ~waist height (controlsFrontOffset /
+//     controlsHeight); leave everything idle ~4 s → strip fades out and no
+//     longer blocks clicks behind it.
 //   • Play/pause toggles (icon follows real video state), restart jumps to
 //     0 and plays, click/drag on the seek track scrubs (dev server serves
 //     range requests, so seeking into unbuffered video works).
