@@ -82,6 +82,8 @@ AFRAME.registerComponent("zone-c-root", {
     this._hasFrame = undefined; // screen white/black state (video frame ready?)
     this._preloadStarted = false; // full-file preload kicked off yet?
     this._blobUrl = null; // object URL of the fully-downloaded film (if any)
+    this.xrLayer = null; // active WebXR compositor video layer (Quest), if any
+    this.usingLayer = false; // film is on the XR layer (WebGL screen detached)
 
     this.buildVideo();
     this.build();
@@ -477,13 +479,17 @@ AFRAME.registerComponent("zone-c-root", {
   tick: function (time, dt) {
     this.now = time;
 
-    // Screen fails to BLACK, not white. The flat material's colour multiplies
-    // the video map, so white shows the video and black shows black. Whenever
-    // the video has no current frame to display (readyState < HAVE_CURRENT_DATA
-    // — a decoder stall/hitch), drive the colour black so the screen goes dark
-    // instead of flashing a bright white plane; back to white the moment a
-    // frame is available. Change-guarded so it's one colour set per transition.
-    if (this.started && this.videoTexture) {
+    if (this.usingLayer) {
+      // The film is on the WebXR compositor layer — keep it pinned to the screen
+      // as the rig moves (see updateXRLayerTransform). No WebGL video work here.
+      this.updateXRLayerTransform();
+    } else if (this.started && this.videoTexture) {
+      // Screen fails to BLACK, not white. The flat material's colour multiplies
+      // the video map, so white shows the video and black shows black. Whenever
+      // the video has no current frame to display (readyState < HAVE_CURRENT_DATA
+      // — a decoder stall/hitch), drive the colour black so the screen goes dark
+      // instead of flashing a bright white plane; back to white the moment a
+      // frame is available. Change-guarded so it's one colour set per transition.
       const hasFrame = this.videoEl.readyState >= 2; // HAVE_CURRENT_DATA
       if (hasFrame !== this._hasFrame) {
         this._hasFrame = hasFrame;
@@ -592,17 +598,26 @@ AFRAME.registerComponent("zone-c-root", {
     this.videoTexture = null;
 
     // FULLY preload the film in the background so playback + seeking never stall
-    // on the network. Streaming a 57 MB file over the Quest's WiFi lets the
-    // buffer run dry mid-play: a starved decoder drops frames (which read as the
-    // cleared background flashing through the room) and a seek into an
-    // un-buffered spot hangs. preloadVideo() downloads the whole file to a blob
-    // and plays it from memory. Kick off as soon as the scene is ready — well
-    // before the visitor walks to Zone C — and again on enter-vr as a backstop;
-    // guarded to run once.
-    this.onEnterVrPreload = () => this.preloadVideo();
+    // on the network, and it's also ready for the WebXR layer. Kick off as soon
+    // as the scene is ready — well before the visitor walks to Zone C.
+    this.startPreload = () => this.preloadVideo();
     if (this.el.sceneEl.hasLoaded) this.preloadVideo();
-    else this.el.sceneEl.addEventListener("loaded", this.onEnterVrPreload, { once: true });
-    this.el.sceneEl.addEventListener("enter-vr", this.onEnterVrPreload);
+    else this.el.sceneEl.addEventListener("loaded", this.startPreload, { once: true });
+
+    // Entering VR: preload backstop + move the film onto a WebXR compositor layer
+    // (tryCreateXRLayer). Leaving VR: tear the layer down. `loadeddata` retries
+    // the layer if the video's metadata wasn't ready yet at first play.
+    this.onEnterVR = () => {
+      this.preloadVideo();
+      this.tryCreateXRLayer();
+    };
+    this.onExitVR = () => this.destroyXRLayer();
+    this.onVideoReady = () => {
+      if (this.el.sceneEl.is("vr-mode")) this.tryCreateXRLayer();
+    };
+    this.el.sceneEl.addEventListener("enter-vr", this.onEnterVR);
+    this.el.sceneEl.addEventListener("exit-vr", this.onExitVR);
+    v.addEventListener("loadeddata", this.onVideoReady);
 
     // The video element is the single source of truth for play state — the
     // icons follow its events rather than our click handlers, so external
@@ -651,6 +666,127 @@ AFRAME.registerComponent("zone-c-root", {
       .catch((err) => console.warn("zone-c: film preload failed", err));
   },
 
+  // ================================================================
+  // WebXR COMPOSITOR VIDEO LAYER (Quest). Show the film on a native WebXR quad
+  // layer instead of a WebGL texture on the screen plane. On the Quest, actively
+  // decoding a video INTO a WebGL texture contends with the app's own rendering
+  // and drops whole frames — the cleared background flashes through the screen
+  // and the room edges (this is the playback flicker; it stops the instant you
+  // pause, because the decoder stops). A media quad layer hands the video to the
+  // headset's COMPOSITOR, which pulls decoded frames on its own path — no
+  // contention — and composites at full resolution (sharper than a resampled
+  // texture, too).
+  //
+  // Defensive: engages only when an immersive session is in LAYERS mode,
+  // XRMediaBinding exists, and the video's metadata is ready; anything missing
+  // falls back to the WebGL video texture (so desktop + unsupported headsets are
+  // unchanged). The quad is re-posed every frame to the screen's world transform
+  // relative to the locomotion rig, so it stays fixed in the room as you move.
+  // ================================================================
+  tryCreateXRLayer: function () {
+    if (this.xrLayer || !this.started) return;
+    const sceneEl = this.el.sceneEl;
+    if (!sceneEl.is("vr-mode")) return;
+    if (typeof XRMediaBinding === "undefined") {
+      console.warn("zone-c: XRMediaBinding unavailable — WebGL screen fallback");
+      return;
+    }
+    const renderer = sceneEl.renderer;
+    const session = renderer.xr.getSession();
+    const refSpace = renderer.xr.getReferenceSpace();
+    if (!session || !refSpace) return;
+    const existing = session.renderState.layers;
+    if (!existing || !existing.length) {
+      console.warn("zone-c: XR session not in layers mode — WebGL screen fallback");
+      return;
+    }
+    const v = this.videoEl;
+    if (!v.videoWidth || !v.videoHeight) return; // metadata not ready; retry later
+    try {
+      const binding = new XRMediaBinding(session);
+      const w = this.screenW || this.data.screenWidth;
+      const h = this.data.screenHeight > 0 ? this.data.screenHeight : (w * 9) / 16;
+      this.xrLayer = binding.createQuadLayer(v, {
+        space: refSpace,
+        layout: "mono",
+        transform: new XRRigidTransform(),
+        width: w, // full metres; if the film reads 2x off, try w/2 & h/2
+        height: h,
+      });
+      this.updateXRLayerTransform();
+      // Add our quad ON TOP of three's projection layer (later in the array is
+      // composited last / nearest); keep three's layer so the scene still draws.
+      session.updateRenderState({ layers: [existing[0], this.xrLayer] });
+      this.usingLayer = true;
+      this.detachWebglVideo(); // stop the WebGL screen doing ANY video work
+      console.log("zone-c: film on a WebXR compositor quad layer");
+    } catch (e) {
+      console.warn("zone-c: XR video layer failed — WebGL screen fallback", e);
+      this.xrLayer = null;
+      this.usingLayer = false;
+    }
+  },
+
+  // Re-pose the quad each frame. Its transform lives in the XR REFERENCE space,
+  // but the screen lives in WORLD space and the rig slides the world under the
+  // refspace during locomotion, so: refspacePose = inverse(rigWorld) · screenWorld.
+  updateXRLayerTransform: function () {
+    if (!this.xrLayer) return;
+    const rig = this._rigEl || (this._rigEl = document.getElementById("rig"));
+    if (!rig) return;
+    const s = this.screenEl.object3D;
+    s.updateWorldMatrix(true, false);
+    rig.object3D.updateWorldMatrix(true, false);
+    const m = (this._xrMat || (this._xrMat = new THREE.Matrix4()))
+      .copy(rig.object3D.matrixWorld)
+      .invert()
+      .multiply(s.matrixWorld);
+    const p = this._xrPos || (this._xrPos = new THREE.Vector3());
+    const q = this._xrQuat || (this._xrQuat = new THREE.Quaternion());
+    const sc = this._xrScl || (this._xrScl = new THREE.Vector3());
+    m.decompose(p, q, sc);
+    this.xrLayer.transform = new XRRigidTransform(
+      { x: p.x, y: p.y, z: p.z },
+      { x: q.x, y: q.y, z: q.z, w: q.w }
+    );
+  },
+
+  // Strip the video off the WebGL screen so it does no decode/upload work while
+  // the compositor layer owns the film (that WebGL video work IS the contention).
+  // The plane stays (black) so it remains the click target behind the quad.
+  detachWebglVideo: function () {
+    const mesh = this.screenEl.getObject3D("mesh");
+    if (mesh && mesh.material) {
+      mesh.material.map = null;
+      mesh.material.color.set("#000000");
+      mesh.material.needsUpdate = true;
+    }
+    this._hasFrame = undefined;
+  },
+
+  destroyXRLayer: function (restore) {
+    if (!this.xrLayer) return;
+    const session = this.el.sceneEl.renderer.xr.getSession();
+    try {
+      if (session && session.renderState.layers) {
+        session.updateRenderState({
+          layers: session.renderState.layers.filter((l) => l !== this.xrLayer),
+        });
+      }
+      if (this.xrLayer.destroy) this.xrLayer.destroy();
+    } catch (e) {
+      /* session may already be ending */
+    }
+    this.xrLayer = null;
+    this.usingLayer = false;
+    // Put the film back on the WebGL screen (desktop mirror / a re-entered
+    // session) — skipped on teardown (restore === false).
+    if (restore !== false && this.started) {
+      this.videoTexture = null;
+      this.applyVideoTexture();
+    }
+  },
+
   // First-gesture entry point: build the video texture, swap it onto the
   // screen, and start playback — all inside the user's click so mobile/Quest
   // gesture requirements are satisfied. (Positional audio hooks in here too,
@@ -659,8 +795,12 @@ AFRAME.registerComponent("zone-c-root", {
     const v = this.videoEl;
     if (!this.started) {
       this.started = true;
-      this.applyVideoTexture();
       this.initAudio(); // AudioContext creation ALSO needs the user gesture
+      // In VR, prefer the WebXR compositor layer (no decoder↔render contention).
+      // It no-ops if the session/metadata aren't ready; we then use the WebGL
+      // texture and upgrade later (enter-vr / loadeddata retry the layer).
+      if (this.el.sceneEl.is("vr-mode")) this.tryCreateXRLayer();
+      if (!this.usingLayer) this.applyVideoTexture();
     }
     if (v.ended) v.currentTime = 0; // replay from the top after a run-through
     const p = v.play();
@@ -747,14 +887,20 @@ AFRAME.registerComponent("zone-c-root", {
       el.removeEventListener("mouseenter", this.onStripEnter);
       el.removeEventListener("mouseleave", this.onStripLeave);
     });
-    if (this.el.sceneEl && this.onEnterVrPreload) {
-      this.el.sceneEl.removeEventListener("enter-vr", this.onEnterVrPreload);
+    this.destroyXRLayer(false); // false = don't re-attach the WebGL video on teardown
+    if (this.el.sceneEl) {
+      if (this.startPreload) {
+        this.el.sceneEl.removeEventListener("loaded", this.startPreload);
+      }
+      this.el.sceneEl.removeEventListener("enter-vr", this.onEnterVR);
+      this.el.sceneEl.removeEventListener("exit-vr", this.onExitVR);
     }
     const v = this.videoEl;
     if (v) {
       v.removeEventListener("play", this.onVideoState);
       v.removeEventListener("pause", this.onVideoState);
       v.removeEventListener("ended", this.onVideoEnded);
+      v.removeEventListener("loadeddata", this.onVideoReady);
       v.pause();
       v.removeAttribute("src");
       v.load();

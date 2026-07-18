@@ -172,7 +172,7 @@
     <!-- <a-scene> is a NEUTRAL host: it sets no background, fog, or lighting
          itself. defaultLightsEnabled:false stops A-Frame injecting its default
          light rig, so the environment presets fully own lighting. -->
-    <a-scene light="defaultLightsEnabled: false">
+    <a-scene light="defaultLightsEnabled: false" webxr="optionalFeatures: layers">
       <!-- Preload the nine images; entities reference them by id (#atpihl-N)
            so each file is fetched and decoded once, then shared. -->
       <a-assets>
