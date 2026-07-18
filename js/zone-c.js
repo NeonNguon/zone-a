@@ -79,6 +79,7 @@ AFRAME.registerComponent("zone-c-root", {
     this.scrubbing = false;
     this.scrubCursor = null; // the cursor/controller entity dragging the seek
     this.rayLast = {}; // per-raycaster last hit point on the screen (motion)
+    this._hasFrame = undefined; // screen white/black state (video frame ready?)
 
     this.buildVideo();
     this.build();
@@ -128,9 +129,14 @@ AFRAME.registerComponent("zone-c-root", {
     // revive the control strip.
     const screen = document.createElement("a-plane");
     screen.setAttribute("class", "clickable");
+    // Pure-black base. shader: flat is MeshBasicMaterial, whose color MULTIPLIES
+    // the video map (white = show the video, black = show black), so the base
+    // colour is what the screen falls back to when there is no frame to show —
+    // black keeps a Quest decoder hitch from flashing a bright white plane in
+    // the dark room. tick() drives it white/black off the video's readyState.
     screen.setAttribute(
       "material",
-      "shader: flat; color: #0d0d0d; fog: false"
+      "shader: flat; color: #000000; fog: false"
     );
     container.appendChild(screen);
     this.screenEl = screen;
@@ -468,6 +474,23 @@ AFRAME.registerComponent("zone-c-root", {
   // --- per-frame: fade animation, idle timeout, scrub follow, progress ----
   tick: function (time, dt) {
     this.now = time;
+
+    // Screen fails to BLACK, not white. The flat material's colour multiplies
+    // the video map, so white shows the video and black shows black. Whenever
+    // the video has no current frame to display (readyState < HAVE_CURRENT_DATA
+    // — a decoder stall/hitch), drive the colour black so the screen goes dark
+    // instead of flashing a bright white plane; back to white the moment a
+    // frame is available. Change-guarded so it's one colour set per transition.
+    if (this.started && this.videoTexture) {
+      const hasFrame = this.videoEl.readyState >= 2; // HAVE_CURRENT_DATA
+      if (hasFrame !== this._hasFrame) {
+        this._hasFrame = hasFrame;
+        const mesh = this.screenEl.getObject3D("mesh");
+        if (mesh && mesh.material) {
+          mesh.material.color.set(hasFrame ? "#ffffff" : "#000000");
+        }
+      }
+    }
 
     // Pointer MOTION on the big screen counts as activity (mouseenter only
     // fires once, so a moving pointer inside the screen would otherwise read

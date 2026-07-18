@@ -488,13 +488,12 @@
            dark screening room (charcoal walls/ceiling + dark terrazzo floor).
            zone-c-root offsets the WHOLE assembly (screen + controls + audio +
            bench + terminal + cues) as a unit (same pattern as zone-a-root /
-           zone-b-root). The offset x seats the screen 1.0 m off the Zone C
+           zone-b-root). The offset x seats the screen 0.30 m off the Zone C
            back-wall inner face: that inner face is cx - w/2 + thickness/2 =
-           -14.7 - 7.6 + 0.075 = -22.225, so +1.0 lands the screen (whose world
-           x equals this offset x) at -21.225. (Was 0.30 m / -21.9; pulled forward
-           to test whether proximity to the back wall drives the Quest playback
-           flicker.) Facing +x you see the wall; facing -x you see the cinema.
-           The screen is rotated inside the component to face back toward spawn.
+           -14.7 - 7.6 + 0.075 = -22.225, so +0.30 lands the screen (whose world
+           x equals this offset x) at ~-21.9. Facing +x you see the wall; facing
+           -x you see the cinema. The screen is rotated inside the component to
+           face back toward spawn.
 
            screenHeight 8.0 nearly fills the 10 m wall (width derives 16:9 →
            ~14.2 m, within the room's z extent), bottom edge 1.5 m off the floor
@@ -508,7 +507,7 @@
            ============================================================ -->
       <a-entity
         id="zone-c"
-        zone-c-root="offset: -21.225 3 -0.5; screenHeight: 8.0; screenHeightAboveFloor: 1.5; controlsScale: 0.7"
+        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.0; screenHeightAboveFloor: 1.5; controlsScale: 0.7"
       >
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
