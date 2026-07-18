@@ -241,6 +241,12 @@
            See js/zone-c.js (zone-c-floor).
            ============================================================ -->
       <a-entity id="zone-c-floor" zone-c-floor></a-entity>
+      <!-- ...and a matching dark strip over the central-zoneC hallway floor, so
+           the dark approach into the cinema is dark underfoot too. Same
+           component, driven from the hallway's corridor config; the strip spans
+           inner-face to inner-face, abutting the Zone C room floor at one end and
+           stopping at the foyer doorway threshold at the other. -->
+      <a-entity id="zone-c-hall-floor" zone-c-floor="hallway: central-zoneC"></a-entity>
 
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:

@@ -891,8 +891,16 @@ AFRAME.registerComponent("screen-contact-cue", {
 // #environment — so it persists across environment switches, like the cues and
 // the walls.
 //
+// It covers EITHER a floorplan room (the `room` prop, default "zoneC") OR a
+// hallway (the `hallway` prop, e.g. "central-zoneC" for the dark approach into
+// the cinema) — a hallway patch is derived from the corridor's from/to span and
+// clear width, spanning inner-face to inner-face along the passage so it abuts
+// the room floor at one end (the Zone C dark floor) and stops at the doorway
+// threshold at the other (the bright foyer). `hallway` takes precedence when set.
+//
 // TUNABLES (schema props — adjust live, no code edits):
 //   room                 — which floorplan room to cover (default "zoneC").
+//   hallway              — which floorplan hallway to cover (overrides room).
 //   base                 — near-black terrazzo body colour.
 //   fleck1 / fleck2      — the two faintly-lighter charcoal fleck colours.
 //   density / seed       — fleck count per tile / deterministic seed.
@@ -902,6 +910,7 @@ AFRAME.registerComponent("screen-contact-cue", {
 AFRAME.registerComponent("zone-c-floor", {
   schema: {
     room: { type: "string", default: "zoneC" },
+    hallway: { type: "string", default: "" }, // set to cover a hallway instead
     base: { type: "color", default: "#141416" }, // near-black body
     fleck1: { type: "color", default: "#1e1e20" }, // faintly lighter charcoal
     fleck2: { type: "color", default: "#242426" },
@@ -930,17 +939,50 @@ AFRAME.registerComponent("zone-c-floor", {
     this.build();
   },
 
+  // The rectangle to cover, in WORLD coordinates: { cx, cz, w, dep }. Either a
+  // room's inner footprint, or a hallway's corridor strip. Returns null until
+  // the floorplan config is readable (`floorplanbuilt` then calls back).
+  footprint: function (attr) {
+    const t = attr.thickness != null ? attr.thickness : 0.15;
+
+    if (this.data.hallway) {
+      const h = (attr.hallways || []).find((hh) => hh.id === this.data.hallway);
+      if (!h || !h.corridor || !h.openings || !h.openings[0]) return null;
+      // The corridor runs along the through axis (the side's axis letter); its
+      // from/to are the two rooms' wall CENTRES. Extending each end by half a
+      // thickness lands exactly on the two rooms' inner faces (the same lo/hi
+      // the floorplan uses to place the corridor side-walls), so the strip abuts
+      // the Zone C dark floor at one end and the foyer threshold at the other.
+      const half = t / 2;
+      const lo = Math.min(h.corridor.from, h.corridor.to) - half;
+      const hi = Math.max(h.corridor.from, h.corridor.to) + half;
+      const runAxis = h.openings[0].side.charAt(1); // 'x' or 'z'
+      const mid = (lo + hi) / 2;
+      const span = hi - lo;
+      // Clear width + a thickness so the cross-axis edges tuck UNDER the side
+      // walls rather than leaving a hairline of pale floor at their base.
+      const clear = h.width + t;
+      return runAxis === "x"
+        ? { cx: mid, cz: h.center, w: span, dep: clear }
+        : { cx: h.center, cz: mid, w: clear, dep: span };
+    }
+
+    const r = attr.rooms && attr.rooms[this.data.room];
+    if (!r) return null;
+    // Inner footprint (minus wall thickness) so the plane meets the wall faces.
+    return { cx: r.cx, cz: r.cz, w: r.w - t, dep: r.d - t };
+  },
+
   build: function () {
     const attr = this.fpEl && this.fpEl.getAttribute("floorplan");
-    const rooms = attr && attr.rooms;
-    const r = rooms && rooms[this.data.room];
-    if (!r) return; // floorplan not up yet — `floorplanbuilt` calls us back
+    if (!attr) return; // floorplan not up yet — `floorplanbuilt` calls us back
+
+    const fp = this.footprint(attr);
+    if (!fp) return; // config not readable yet — `floorplanbuilt` calls back
 
     const d = this.data;
-    const t = attr.thickness != null ? attr.thickness : 0.15;
-    // Inner footprint (minus wall thickness) so the plane meets the wall faces.
-    const w = r.w - t;
-    const dep = r.d - t;
+    const w = fp.w;
+    const dep = fp.dep;
 
     this.teardownGpu();
 
@@ -973,9 +1015,9 @@ AFRAME.registerComponent("zone-c-floor", {
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.rotation.x = -Math.PI / 2; // lie flat, facing up
     // This entity sits at the world origin (sibling of #floorplan), so the
-    // room's own cx/cz are world coordinates: place the plane directly on them,
+    // footprint's cx/cz are world coordinates: place the plane directly on them,
     // lifted a hair above the global floor.
-    this.mesh.position.set(r.cx, d.ylift, r.cz);
+    this.mesh.position.set(fp.cx, d.ylift, fp.cz);
     this.el.setObject3D("floor", this.mesh);
   },
 
