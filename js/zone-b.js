@@ -513,8 +513,9 @@ AFRAME.registerComponent("wall-contact-cue", {
 //               DISPLAY order (so it follows FEATURE 1's shuffle); wraps at both
 //               ends. Derived from the focused tile's `.clickable` siblings, so
 //               the triptych's own wall-focus cycles only its three images.
-//   navBtnSize / navBtnOffset — VR arrow buttons' size (m) and their gap from
-//               the focused picture's edge (m).
+//   navBtnOffset — gap (m) between the focused picture's edge and the VR
+//               "press A / press X" instruction labels beside it.
+//   navTextWidth — those labels' text size (a-text width, m).
 // ----------------------------------------------------------------
 AFRAME.registerComponent("wall-focus", {
   schema: {
@@ -524,8 +525,8 @@ AFRAME.registerComponent("wall-focus", {
     dimOpacity: { type: "number", default: 0.6 },
     dur: { type: "number", default: 450 }, // ms
     nav: { type: "boolean", default: true }, // step through the set in-focus
-    navBtnSize: { type: "number", default: 0.5 }, // VR arrow hit-target size (m)
     navBtnOffset: { type: "number", default: 0.55 }, // gap from picture edge (m)
+    navTextWidth: { type: "number", default: 1.8 }, // "press A/X" label text size (m)
   },
 
   init: function () {
@@ -915,11 +916,14 @@ AFRAME.registerComponent("wall-focus", {
     this.titleTextEl = null;
   },
 
-  // --- world-anchored VR arrow buttons (prev / next) ------------------------
-  // Two generous `.clickable` quads flanking the focused picture, each carrying
-  // a white chevron triangle. They live in scene space at the focus spot (same
-  // facing as the label), so they stay put as the head moves. Torn down with the
-  // focus; refreshRaycasters() lets the lasers pick them up (like the dim sphere).
+  // --- world-anchored VR instruction labels (prev / next) -------------------
+  // Two INSTRUCTIONAL text labels flanking the focused picture — "Press A /
+  // Next image" (right) and "Press X / Previous image" (left). They are NOT
+  // clickable: in VR the triangle clicks never fired, so paging is driven purely
+  // by the Quest controller buttons (A = next on the RIGHT controller, X = prev
+  // on the LEFT), bound in focusVR and matching the sides these labels sit on.
+  // World-anchored at the focus spot with the same facing as the title label,
+  // and torn down with the focus.
   buildNavButtons: function (focusPos, faceQuat, picHalfW) {
     if (!this.data.nav || !this.navTiles || this.navTiles.length < 2) return;
     const cont = document.createElement("a-entity");
@@ -932,46 +936,36 @@ AFRAME.registerComponent("wall-focus", {
       )} ${THREE.MathUtils.radToDeg(eu.z)}`
     );
 
-    const size = this.data.navBtnSize;
-    const dx = picHalfW + this.data.navBtnOffset + size / 2;
-    cont.appendChild(this.makeArrowButton(-dx, size, -1, this.onCtrlPrev));
-    cont.appendChild(this.makeArrowButton(dx, size, 1, this.onCtrlNext));
+    // Same placement the arrow buttons used: picture half-width + the tunable
+    // gap. A is on the RIGHT controller -> "next" on the RIGHT of the picture;
+    // X is on the LEFT controller -> "previous" on the LEFT.
+    const off = picHalfW + this.data.navBtnOffset;
+    cont.appendChild(this.makeNavLabel(off, "Press A", "Next image"));
+    cont.appendChild(this.makeNavLabel(-off, "Press X", "Previous image"));
 
     this.el.sceneEl.appendChild(cont);
     this.navEl = cont;
-    requestAnimationFrame(() => this.refreshRaycasters());
   },
 
-  // One arrow button: a translucent dark hit-plane + a white chevron triangle
-  // pointing `dir` (-1 left / +1 right). `handler` is the same guard used by the
-  // controller buttons (fires prev/next only while a VR focus is open).
-  makeArrowButton: function (x, size, dir, handler) {
-    const btn = document.createElement("a-plane");
-    btn.setAttribute("width", size);
-    btn.setAttribute("height", size);
-    btn.setAttribute("position", `${x} 0 0.02`);
-    btn.setAttribute(
+  // One instruction label: two centred white text lines on a small dark backing
+  // card (the same legible-over-any-background pattern as the title label). NOT
+  // clickable — it only tells the visitor which controller button to press.
+  makeNavLabel: function (x, line1, line2) {
+    const w = this.data.navTextWidth;
+    const card = document.createElement("a-entity");
+    card.setAttribute("position", `${x} 0 0.02`);
+    const back = document.createElement("a-plane");
+    back.setAttribute("width", w * 0.62);
+    back.setAttribute("height", w * 0.4);
+    back.setAttribute(
       "material",
-      "color: #000000; opacity: 0.5; shader: flat; transparent: true; fog: false; side: double"
+      "color: #000000; opacity: 0.55; shader: flat; transparent: true; fog: false; side: double"
     );
-    btn.setAttribute("class", "clickable");
-    const tri = document.createElement("a-triangle");
-    const s = size * 0.28;
-    // Point right by default; mirror for left. Vertices centred on the plane.
-    if (dir > 0) {
-      tri.setAttribute("vertex-a", `${s} 0 0`);
-      tri.setAttribute("vertex-b", `${-s} ${s} 0`);
-      tri.setAttribute("vertex-c", `${-s} ${-s} 0`);
-    } else {
-      tri.setAttribute("vertex-a", `${-s} 0 0`);
-      tri.setAttribute("vertex-b", `${s} ${-s} 0`);
-      tri.setAttribute("vertex-c", `${s} ${s} 0`);
-    }
-    tri.setAttribute("position", "0 0 0.01");
-    tri.setAttribute("material", "color: #ffffff; shader: flat; side: double; fog: false");
-    btn.appendChild(tri);
-    btn.addEventListener("click", handler);
-    return btn;
+    card.appendChild(back);
+    const txt = this.makeText(line1 + "\n" + line2, { width: w });
+    txt.setAttribute("position", "0 0 0.01");
+    card.appendChild(txt);
+    return card;
   },
 
   teardownNavButtons: function () {
