@@ -84,6 +84,8 @@ AFRAME.registerComponent("zone-c-root", {
     this._blobUrl = null; // object URL of the fully-downloaded film (if any)
     this.xrLayer = null; // active WebXR compositor video layer (Quest), if any
     this.usingLayer = false; // film is on the XR layer (WebGL screen detached)
+    this.layerComposited = false; // quad currently in the session's render state?
+    this._threeLayer = null; // three's projection layer (the scene) to keep alongside
 
     this.buildVideo();
     this.build();
@@ -480,9 +482,11 @@ AFRAME.registerComponent("zone-c-root", {
     this.now = time;
 
     if (this.usingLayer) {
-      // The film is on the WebXR compositor layer — keep it pinned to the screen
-      // as the rig moves (see updateXRLayerTransform). No WebGL video work here.
-      this.updateXRLayerTransform();
+      // Film on the WebXR compositor layer: composite it only while the viewer
+      // is inside Zone C (else it shows through walls), and keep it pinned to the
+      // screen as the rig moves.
+      this.updateLayerVisibility();
+      if (this.layerComposited) this.updateXRLayerTransform();
     } else if (this.started && this.videoTexture) {
       // Screen fails to BLACK, not white. The flat material's colour multiplies
       // the video map, so white shows the video and black shows black. Whenever
@@ -719,16 +723,20 @@ AFRAME.registerComponent("zone-c-root", {
         width: w / 2,
         height: h / 2,
       });
+      this._threeLayer = existing[0]; // three's projection layer (the scene)
       this.updateXRLayerTransform();
-      // Add our quad ON TOP of three's projection layer (later in the array is
-      // composited last / nearest); keep three's layer so the scene still draws.
-      session.updateRenderState({ layers: [existing[0], this.xrLayer] });
       this.usingLayer = true;
+      this.layerComposited = false;
       this.detachWebglVideo(); // stop the WebGL screen doing ANY video work
       // The video quad hides the screen, so bring the control strip up and keep
       // it up (tick won't auto-fade it while usingLayer) — otherwise the film
       // plays with no reachable pause/restart/seek.
       this.showControls();
+      // Composite the quad ONLY while the viewer is inside Zone C. Quad layers
+      // have no depth occlusion against the scene, so a permanently-on quad shows
+      // through the walls from every other room; gating it on location keeps the
+      // film out of sight until you're in the cinema (where it reads correctly).
+      this.updateLayerVisibility();
       console.log("zone-c: film on a WebXR compositor quad layer");
     } catch (e) {
       console.warn("zone-c: XR video layer failed — WebGL screen fallback", e);
@@ -761,6 +769,58 @@ AFRAME.registerComponent("zone-c-root", {
     );
   },
 
+  // Zone C's footprint in WORLD coords (read live from the floorplan, cached).
+  zoneCBounds: function () {
+    if (this._zcBounds) return this._zcBounds;
+    const fp = document.getElementById("floorplan");
+    const attr = fp && fp.getAttribute("floorplan");
+    const r = attr && attr.rooms && attr.rooms.zoneC;
+    if (!r) return null;
+    this._zcBounds = {
+      xmin: r.cx - r.w / 2,
+      xmax: r.cx + r.w / 2,
+      zmin: r.cz - r.d / 2,
+      zmax: r.cz + r.d / 2,
+    };
+    return this._zcBounds;
+  },
+
+  // Composite the quad only while the camera is inside Zone C's footprint. The
+  // boundary sits at the walls, so the film pops in as you cross the doorway and
+  // is never seen through a wall from another room. (No occlusion is needed
+  // INSIDE the room — nothing stands between the viewer and the back-wall screen.)
+  updateLayerVisibility: function () {
+    const b = this.zoneCBounds();
+    if (!b) return;
+    const cam = this._cameraEl || (this._cameraEl = document.getElementById("camera"));
+    if (!cam) return;
+    const p = cam.object3D.getWorldPosition(
+      this._camPos || (this._camPos = new THREE.Vector3())
+    );
+    const inside =
+      p.x >= b.xmin && p.x <= b.xmax && p.z >= b.zmin && p.z <= b.zmax;
+    if (inside) this.addLayer();
+    else this.removeLayer();
+  },
+
+  addLayer: function () {
+    if (this.layerComposited || !this.xrLayer || !this._threeLayer) return;
+    const session = this.el.sceneEl.renderer.xr.getSession();
+    if (!session) return;
+    // Quad AFTER the projection layer = composited on top of the scene.
+    session.updateRenderState({ layers: [this._threeLayer, this.xrLayer] });
+    this.layerComposited = true;
+  },
+
+  removeLayer: function () {
+    if (!this.layerComposited) return;
+    const session = this.el.sceneEl.renderer.xr.getSession();
+    if (session && this._threeLayer) {
+      session.updateRenderState({ layers: [this._threeLayer] });
+    }
+    this.layerComposited = false;
+  },
+
   // Strip the video off the WebGL screen so it does no decode/upload work while
   // the compositor layer owns the film (that WebGL video work IS the contention).
   // The plane stays (black) so it remains the click target behind the quad.
@@ -778,10 +838,8 @@ AFRAME.registerComponent("zone-c-root", {
     if (!this.xrLayer) return;
     const session = this.el.sceneEl.renderer.xr.getSession();
     try {
-      if (session && session.renderState.layers) {
-        session.updateRenderState({
-          layers: session.renderState.layers.filter((l) => l !== this.xrLayer),
-        });
+      if (session && this._threeLayer) {
+        session.updateRenderState({ layers: [this._threeLayer] });
       }
       if (this.xrLayer.destroy) this.xrLayer.destroy();
     } catch (e) {
@@ -789,6 +847,8 @@ AFRAME.registerComponent("zone-c-root", {
     }
     this.xrLayer = null;
     this.usingLayer = false;
+    this.layerComposited = false;
+    this._threeLayer = null;
     // Put the film back on the WebGL screen (desktop mirror / a re-entered
     // session) — skipped on teardown (restore === false).
     if (restore !== false && this.started) {
