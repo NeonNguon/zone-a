@@ -270,6 +270,23 @@ AFRAME.registerComponent("zone-b-teleport", {
       if (this.mapRootEl) {
         this.mapRootEl.setAttribute("zone-b-map-root", "shown", showMap);
       }
+      // Keep the rig-collision clamp from fighting this jump. The map is ~400 m
+      // out, far outside the walkable region, so the clamp would drag the rig
+      // straight back. Disable it on arrival at the map; re-enable it + resync
+      // last-valid on the return jump (the rig has just landed at the return
+      // spot, which IS inside the walkable region). Guarded so the teleport
+      // still works if the collider isn't present.
+      const rigEl = document.getElementById("rig");
+      const collider =
+        rigEl && rigEl.components && rigEl.components["rig-collision"];
+      if (collider) {
+        if (showMap) {
+          collider.setActive(false); // going to the map — stop clamping
+        } else {
+          collider.setActive(true); // back in the exhibition — clamp again
+          collider.resync(); // seed last-valid to the return spot (no snap-back)
+        }
+      }
     };
     if (!glitch) {
       console.warn("zone-b-teleport: no transition-glitch on camera; hard cut");
