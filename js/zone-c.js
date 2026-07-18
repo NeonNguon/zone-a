@@ -80,7 +80,8 @@ AFRAME.registerComponent("zone-c-root", {
     this.scrubCursor = null; // the cursor/controller entity dragging the seek
     this.rayLast = {}; // per-raycaster last hit point on the screen (motion)
     this._hasFrame = undefined; // screen white/black state (video frame ready?)
-    this._rvfcHandle = null; // requestVideoFrameCallback handle (upload throttle)
+    this._preloadStarted = false; // full-file preload kicked off yet?
+    this._blobUrl = null; // object URL of the fully-downloaded film (if any)
 
     this.buildVideo();
     this.build();
@@ -582,13 +583,26 @@ AFRAME.registerComponent("zone-c-root", {
     // crossorigin BEFORE src so the fetch itself carries it. Same-origin
     // today (no CORS in play), but this keeps the element CDN-ready.
     v.crossOrigin = "anonymous";
-    v.preload = "metadata"; // duration/dimensions early; no eager full fetch
+    v.preload = "auto"; // hint the browser to buffer ahead (see preloadVideo)
     v.playsInline = true;
     v.setAttribute("playsinline", ""); // attribute form for older mobile WebKit
     v.loop = false;
     v.src = VIDEO_URL;
     this.videoEl = v;
     this.videoTexture = null;
+
+    // FULLY preload the film in the background so playback + seeking never stall
+    // on the network. Streaming a 57 MB file over the Quest's WiFi lets the
+    // buffer run dry mid-play: a starved decoder drops frames (which read as the
+    // cleared background flashing through the room) and a seek into an
+    // un-buffered spot hangs. preloadVideo() downloads the whole file to a blob
+    // and plays it from memory. Kick off as soon as the scene is ready — well
+    // before the visitor walks to Zone C — and again on enter-vr as a backstop;
+    // guarded to run once.
+    this.onEnterVrPreload = () => this.preloadVideo();
+    if (this.el.sceneEl.hasLoaded) this.preloadVideo();
+    else this.el.sceneEl.addEventListener("loaded", this.onEnterVrPreload, { once: true });
+    this.el.sceneEl.addEventListener("enter-vr", this.onEnterVrPreload);
 
     // The video element is the single source of truth for play state — the
     // icons follow its events rather than our click handlers, so external
@@ -608,6 +622,33 @@ AFRAME.registerComponent("zone-c-root", {
     const showPlay = !this.started || v.paused || v.ended;
     this.playIcon.setAttribute("visible", showPlay);
     this.pauseIcon.setAttribute("visible", !showPlay);
+  },
+
+  // Download the ENTIRE film once, in the background, and play it from memory —
+  // so neither playback nor seeking ever waits on the network. Fetches the file
+  // to a Blob and points the <video> at an object URL. We only swap the source
+  // if playback hasn't begun (swapping resets currentTime); if the visitor
+  // starts the film before the download finishes they stay on the streaming
+  // source (the pre-existing behaviour) — but the download starts at scene load,
+  // so it is almost always ready first. Guarded to run once; safe to call from
+  // several triggers.
+  preloadVideo: function () {
+    if (this._preloadStarted) return;
+    this._preloadStarted = true;
+    fetch(VIDEO_URL)
+      .then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.blob();
+      })
+      .then((blob) => {
+        this._blobUrl = URL.createObjectURL(blob);
+        // Only adopt the fully-buffered source before the first play — otherwise
+        // it would reset an in-progress viewing.
+        if (!this.started) this.videoEl.src = this._blobUrl;
+        console.log("zone-c: film fully preloaded (" +
+          Math.round(blob.size / 1e6) + " MB, playing from memory)");
+      })
+      .catch((err) => console.warn("zone-c: film preload failed", err));
   },
 
   // First-gesture entry point: build the video texture, swap it onto the
@@ -639,27 +680,9 @@ AFRAME.registerComponent("zone-c-root", {
     tex.generateMipmaps = false;
     this.videoTexture = tex;
 
-    // THROTTLE the GPU upload to actual NEW video frames. By default a
-    // THREE.VideoTexture re-uploads the whole frame to the GPU on EVERY render
-    // (72 Hz on the Quest) even though the film is 30 fps — 2–3× redundant
-    // texImage2D calls per displayed frame. On the Quest that per-render upload
-    // hitches frame completion, so the cleared buffer (background) flashes
-    // through the geometry during playback. requestVideoFrameCallback fires once
-    // per DECODED frame; we neuter three's per-render auto-update and set
-    // needsUpdate only then, halving the upload rate and the hitching. Falls back
-    // to the default per-render upload where rVFC is unavailable.
-    if (typeof this.videoEl.requestVideoFrameCallback === "function") {
-      tex.update = function () {}; // stop three's per-render needsUpdate=true
-      const pump = () => {
-        tex.needsUpdate = true;
-        this._rvfcHandle = this.videoEl.requestVideoFrameCallback(pump);
-      };
-      this._rvfcHandle = this.videoEl.requestVideoFrameCallback(pump);
-    }
-
     // Swap the map directly on the existing flat material (set once in
     // build()); nothing else re-sets the material attribute, so the map
-    // survives.
+    // survives. VideoTexture re-uploads every frame on its own.
     const mesh = this.screenEl.getObject3D("mesh");
     if (!mesh) return;
     mesh.material.map = tex;
@@ -724,11 +747,11 @@ AFRAME.registerComponent("zone-c-root", {
       el.removeEventListener("mouseenter", this.onStripEnter);
       el.removeEventListener("mouseleave", this.onStripLeave);
     });
+    if (this.el.sceneEl && this.onEnterVrPreload) {
+      this.el.sceneEl.removeEventListener("enter-vr", this.onEnterVrPreload);
+    }
     const v = this.videoEl;
     if (v) {
-      if (this._rvfcHandle != null && v.cancelVideoFrameCallback) {
-        v.cancelVideoFrameCallback(this._rvfcHandle);
-      }
       v.removeEventListener("play", this.onVideoState);
       v.removeEventListener("pause", this.onVideoState);
       v.removeEventListener("ended", this.onVideoEnded);
@@ -738,6 +761,7 @@ AFRAME.registerComponent("zone-c-root", {
     }
     if (this.videoTexture) this.videoTexture.dispose();
     if (this.posterTexture) this.posterTexture.dispose();
+    if (this._blobUrl) URL.revokeObjectURL(this._blobUrl);
   },
 });
 
