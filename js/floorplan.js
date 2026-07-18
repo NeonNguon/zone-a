@@ -77,19 +77,33 @@
 // both fall back to the component's `height` / `ceiling` defaults when omitted;
 // `style` / `ceilingStyle` are the material hooks described above.
 const DEFAULT_ROOMS = {
-  // Foyer — the spawn room (the rig is at the origin). Its -x wall (the one
-  // carrying the central-zoneC doorway) goes charcoal to match Zone C: a dark
-  // threshold seen from the bright foyer, reading continuously with the dark
-  // passage and screening room beyond it. Per-SIDE override — the foyer's other
-  // three walls and its ceiling stay white.
+  // Foyer — the spawn room (the rig is at the origin). Each threshold wall is
+  // tinted to the room it leads to, so the doorway previews the zone beyond it
+  // and the tint reads continuously through the passage into the room:
+  //   -x wall (to Zone C, the cinema)  -> charcoal
+  //   +x wall (to Zone B, the lottery) -> mustard
+  // Per-SIDE overrides — the foyer's other two walls (-z to Zone A, +z solid)
+  // and its ceiling stay white.
   central: {
     cx: 0, cz: 0, w: 10, d: 10, height: 5, ceiling: true,
-    sideStyles: { "-x": { color: "#2b2b2c" } },
+    sideStyles: {
+      "-x": { color: "#2b2b2c" },
+      "+x": { color: "#c9a227" },
+    },
   },
   // The ring, forward (-z). Its images top out ~2.3 m, so 5 m is ample.
   zoneA: { cx: 0, cz: -11.85, w: 11.2, d: 11.1, height: 5, ceiling: true },
   // Image wall + triptych, right (+x). The wall tops out ~4.9 m.
-  zoneB: { cx: 19.2, cz: -3, w: 18, d: 28.8, height: 10, ceiling: true },
+  //
+  // A MUSTARD room (the lottery): walls + a fractionally deeper ceiling, with a
+  // matching mustard terrazzo floor (see tinted-floor in index.html). shader
+  // stays standard so the walls still shade under the light rig — lighting is
+  // unchanged here (no fixtureScale, unlike Zone C). Tune the two colours by eye.
+  zoneB: {
+    cx: 19.2, cz: -3, w: 18, d: 28.8, height: 10, ceiling: true,
+    style: { color: "#c9a227" },
+    ceilingStyle: { color: "#b8931f" },
+  },
   // Cinema, left (-x). The screen tops out ~7.1 m — the tallest thing in the
   // exhibition, and why these two rooms are 10 m rather than 5.
   //
@@ -133,6 +147,12 @@ const DEFAULT_HALLWAYS = [
     center: 0,
     width: 2.4,
     corridor: { from: 5, to: 10.2 },
+    // Mustard passage into the lottery room: mustard side-walls + a fractionally
+    // deeper roof, matching Zone B AND the foyer's mustard +x wall at both ends,
+    // so the mustard is seamless from the foyer doorway through to Zone B (the
+    // corridor is coplanar with the doorway reveals at each end).
+    style: { color: "#c9a227" },
+    ceilingStyle: { color: "#b8931f" },
   },
   {
     id: "central-zoneC",
