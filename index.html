@@ -251,6 +251,20 @@
            inner-face to inner-face, abutting the Zone C room floor at one end and
            stopping at the foyer doorway threshold at the other. -->
       <a-entity id="zone-c-hall-floor" tinted-floor="hallway: central-zoneC"></a-entity>
+      <!-- Zone B (the lottery): mustard terrazzo over the room footprint AND its
+           approach hallway, matching the mustard walls/ceiling. Same tinted-floor
+           component with a mustard palette (body a touch deeper than the walls,
+           lighter + darker flecks for speckle). Lighting is unchanged in Zone B,
+           so the floor reads as bright mustard. The hall strip abuts the Zone B
+           room floor at one end and stops at the foyer threshold at the other. -->
+      <a-entity
+        id="zone-b-floor"
+        tinted-floor="room: zoneB; base: #b8941f; fleck1: #d8bd5a; fleck2: #9c7d1a"
+      ></a-entity>
+      <a-entity
+        id="zone-b-hall-floor"
+        tinted-floor="hallway: central-zoneB; base: #b8941f; fleck1: #d8bd5a; fleck2: #9c7d1a"
+      ></a-entity>
 
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
