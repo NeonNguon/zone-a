@@ -13,7 +13,7 @@
 // it, exactly like the walls.
 //
 // Used for the Zone C dark screening-room floor (near-black default palette) and
-// the Zone B mustard floor (palette overridden per instance) — and their
+// the Zone B soft-coral floor (palette overridden per instance) — and their
 // approach hallways.
 //
 // Placement is read LIVE from #floorplan's config (cx/cz/w/d/thickness), the same

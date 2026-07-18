@@ -869,9 +869,9 @@ AFRAME.registerComponent("screen-contact-cue", {
 });
 
 // ================================================================
-// NOTE: the local dark/mustard terrazzo floor patches live in the shared
+// NOTE: the local tinted terrazzo floor patches live in the shared
 // `tinted-floor` component (js/tinted-floor.js) — Zone C's dark screening-room
-// floor was its first use; Zone B reuses it in mustard. See that file.
+// floor was its first use; Zone B reuses it in soft coral. See that file.
 // ================================================================
 
 // ================================================================

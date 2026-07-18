@@ -44,7 +44,7 @@
     <script src="js/bench.js"></script>
     <!-- Local tinted-terrazzo floor patches (per-room/-hallway colourways over
          the shared global floor). AFTER bench.js: reuses makeTerrazzoTexture.
-         Used by Zone C (dark) and Zone B (mustard). See js/tinted-floor.js. -->
+         Used by Zone C (dark) and Zone B (soft coral). See js/tinted-floor.js. -->
     <script src="js/tinted-floor.js"></script>
     <!-- Zone titles + wall texts (single source, UTF-8) and the info
          terminals that display them. AFTER terminal-kit.js (shared
@@ -251,19 +251,20 @@
            inner-face to inner-face, abutting the Zone C room floor at one end and
            stopping at the foyer doorway threshold at the other. -->
       <a-entity id="zone-c-hall-floor" tinted-floor="hallway: central-zoneC"></a-entity>
-      <!-- Zone B (the lottery): mustard terrazzo over the room footprint AND its
-           approach hallway, matching the mustard walls/ceiling. Same tinted-floor
-           component with a mustard palette (body a touch deeper than the walls,
-           lighter + darker flecks for speckle). Lighting is unchanged in Zone B,
-           so the floor reads as bright mustard. The hall strip abuts the Zone B
-           room floor at one end and stops at the foyer threshold at the other. -->
+      <!-- Zone B (the lottery): soft-coral terrazzo over the room footprint AND
+           its approach hallway, matching the coral walls/ceiling. Same
+           tinted-floor component with a coral palette (body a touch deeper than
+           the walls, lighter + darker flecks for speckle). Lighting is unchanged
+           in Zone B, so the floor reads as soft coral. The hall strip abuts the
+           Zone B room floor at one end and stops at the foyer threshold at the
+           other. -->
       <a-entity
         id="zone-b-floor"
-        tinted-floor="room: zoneB; base: #b8941f; fleck1: #d8bd5a; fleck2: #9c7d1a"
+        tinted-floor="room: zoneB; base: #eeaaa6; fleck1: #ffd0cc; fleck2: #db938e"
       ></a-entity>
       <a-entity
         id="zone-b-hall-floor"
-        tinted-floor="hallway: central-zoneB; base: #b8941f; fleck1: #d8bd5a; fleck2: #9c7d1a"
+        tinted-floor="hallway: central-zoneB; base: #eeaaa6; fleck1: #ffd0cc; fleck2: #db938e"
       ></a-entity>
 
       <!-- ============================================================
