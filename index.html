@@ -42,6 +42,10 @@
     <!-- Reusable đá mài terrazzo park bench (primitives + runtime canvas
          texture, zone-agnostic — instances are placed per zone). -->
     <script src="js/bench.js"></script>
+    <!-- Local tinted-terrazzo floor patches (per-room/-hallway colourways over
+         the shared global floor). AFTER bench.js: reuses makeTerrazzoTexture.
+         Used by Zone C (dark) and Zone B (mustard). See js/tinted-floor.js. -->
+    <script src="js/tinted-floor.js"></script>
     <!-- Zone titles + wall texts (single source, UTF-8) and the info
          terminals that display them. AFTER terminal-kit.js (shared
          furniture). -->
@@ -238,15 +242,15 @@
            sits a hair above the global floor and below the contact cues, so the
            cue glow pools render on top of it. Tunables (setAttribute on this
            entity): base / fleck1 / fleck2 / density / seed / tile / ylift.
-           See js/zone-c.js (zone-c-floor).
+           See js/tinted-floor.js.
            ============================================================ -->
-      <a-entity id="zone-c-floor" zone-c-floor></a-entity>
+      <a-entity id="zone-c-floor" tinted-floor></a-entity>
       <!-- ...and a matching dark strip over the central-zoneC hallway floor, so
            the dark approach into the cinema is dark underfoot too. Same
            component, driven from the hallway's corridor config; the strip spans
            inner-face to inner-face, abutting the Zone C room floor at one end and
            stopping at the foyer doorway threshold at the other. -->
-      <a-entity id="zone-c-hall-floor" zone-c-floor="hallway: central-zoneC"></a-entity>
+      <a-entity id="zone-c-hall-floor" tinted-floor="hallway: central-zoneC"></a-entity>
 
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
