@@ -80,6 +80,7 @@ AFRAME.registerComponent("zone-c-root", {
     this.scrubCursor = null; // the cursor/controller entity dragging the seek
     this.rayLast = {}; // per-raycaster last hit point on the screen (motion)
     this._hasFrame = undefined; // screen white/black state (video frame ready?)
+    this._rvfcHandle = null; // requestVideoFrameCallback handle (upload throttle)
 
     this.buildVideo();
     this.build();
@@ -638,9 +639,27 @@ AFRAME.registerComponent("zone-c-root", {
     tex.generateMipmaps = false;
     this.videoTexture = tex;
 
+    // THROTTLE the GPU upload to actual NEW video frames. By default a
+    // THREE.VideoTexture re-uploads the whole frame to the GPU on EVERY render
+    // (72 Hz on the Quest) even though the film is 30 fps — 2–3× redundant
+    // texImage2D calls per displayed frame. On the Quest that per-render upload
+    // hitches frame completion, so the cleared buffer (background) flashes
+    // through the geometry during playback. requestVideoFrameCallback fires once
+    // per DECODED frame; we neuter three's per-render auto-update and set
+    // needsUpdate only then, halving the upload rate and the hitching. Falls back
+    // to the default per-render upload where rVFC is unavailable.
+    if (typeof this.videoEl.requestVideoFrameCallback === "function") {
+      tex.update = function () {}; // stop three's per-render needsUpdate=true
+      const pump = () => {
+        tex.needsUpdate = true;
+        this._rvfcHandle = this.videoEl.requestVideoFrameCallback(pump);
+      };
+      this._rvfcHandle = this.videoEl.requestVideoFrameCallback(pump);
+    }
+
     // Swap the map directly on the existing flat material (set once in
     // build()); nothing else re-sets the material attribute, so the map
-    // survives. VideoTexture re-uploads every frame on its own.
+    // survives.
     const mesh = this.screenEl.getObject3D("mesh");
     if (!mesh) return;
     mesh.material.map = tex;
@@ -707,6 +726,9 @@ AFRAME.registerComponent("zone-c-root", {
     });
     const v = this.videoEl;
     if (v) {
+      if (this._rvfcHandle != null && v.cancelVideoFrameCallback) {
+        v.cancelVideoFrameCallback(this._rvfcHandle);
+      }
       v.removeEventListener("play", this.onVideoState);
       v.removeEventListener("pause", this.onVideoState);
       v.removeEventListener("ended", this.onVideoEnded);
