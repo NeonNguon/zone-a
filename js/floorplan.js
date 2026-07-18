@@ -85,7 +85,18 @@ const DEFAULT_ROOMS = {
   zoneB: { cx: 19.2, cz: -3, w: 18, d: 28.8, height: 10, ceiling: true },
   // Cinema, left (-x). The screen tops out ~7.1 m — the tallest thing in the
   // exhibition, and why these two rooms are 10 m rather than 5.
-  zoneC: { cx: -14.7, cz: 0.2, w: 15.2, d: 24.4, height: 10, ceiling: true },
+  //
+  // A DARK SCREENING ROOM: charcoal walls + a fractionally darker ceiling, so
+  // the lit screen dominates. shader stays `standard` (inherited), so the walls
+  // still shade under the gallery light rig and their corners still read — only
+  // the albedo drops. Tune the two colours by eye; the room-lamp dim that makes
+  // the room read dusky is `fixtureScale` below (read by room-fixtures). This is
+  // Zone C ONLY — every other room inherits the white default.
+  zoneC: {
+    cx: -14.7, cz: 0.2, w: 15.2, d: 24.4, height: 10, ceiling: true,
+    style: { color: "#2b2b2c" },
+    ceilingStyle: { color: "#242426" },
+  },
 };
 
 // ---------- hallway config ----------
