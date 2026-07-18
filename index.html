@@ -496,32 +496,45 @@
              glow instead (survives environment switches). -->
         <a-entity screen-contact-cue="forceGlow: true"></a-entity>
 
-        <!-- Đá mài terrazzo bench at the seated viewing spot, ~6 m in front
-             of the screen, facing it (backrest toward spawn). Rides the
-             zone-c-root offset; the local y -3 counteracts the root's raised
-             y so the bench sits on the world floor. NUDGE BY EYE via these
-             two attributes (the component itself is zone-agnostic):
-               position — local; +x is toward spawn, y -3 = floor.
+        <!-- TWO đá mài terrazzo benches, a symmetric seated viewing row pulled
+             well back from the (now wall-filling) screen for a comfortable
+             viewing distance. They FLANK the screen's centreline (local z 0 =
+             the screen's centre) at local z ±7.4, so they read as mirror-
+             symmetric about the screen; both sit at the same local x (distance
+             from the screen) and same yaw. Both ride the zone-c-root offset; the
+             local y -3 counteracts the root's raised y so they sit on the world
+             floor. NUDGE BY EYE (keep x and |z| equal to stay symmetric):
+               position — local; +x is toward spawn, y -3 = floor, ±z = the two
+                          sides of the screen's centreline.
                rotation — yaw -90 turns the sitter to face the screen (-x).
-             The contact cue reuses the shared spot-contact-cue with a
-             bench-sized elliptical footprint (width/depth), same env-switch
-             retune as every other cue. -->
+             Mid-grey terrazzo (bodyColor) — was đá mài green. Each carries the
+             shared spot-contact-cue (bench-sized elliptical footprint, forced to
+             glow on the dark floor like every other Zone C cue). -->
         <a-entity
-          id="zone-c-bench"
-          terrazzo-bench
-          position="6 -3 0"
+          id="zone-c-bench-left"
+          terrazzo-bench="bodyColor: #84878b"
+          position="10.5 -3 7.4"
+          rotation="0 -90 0"
+          spot-contact-cue="width: 2.0; depth: 1.0; yoffset: 0.02; forceGlow: true"
+        ></a-entity>
+        <a-entity
+          id="zone-c-bench-right"
+          terrazzo-bench="bodyColor: #84878b"
+          position="10.5 -3 -7.4"
           rotation="0 -90 0"
           spot-contact-cue="width: 2.0; depth: 1.0; yoffset: 0.02; forceGlow: true"
         ></a-entity>
 
-        <!-- Zone C info terminal: beside the bench at the seated viewing
-             spot, screen facing the visitor approach (+x, toward spawn).
-             Local to #zone-c: y -3 counteracts the root's raised y (floor).
-             NUDGE BY EYE via position/rotation. -->
+        <!-- Zone C info terminal: moved OFF the central viewing axis so it never
+             covers the screen — to the +z side and forward toward the back wall,
+             past the screen's z-edge (the screen spans z ≈ ±8 around its centre,
+             so z 10.5 sits beside it, not in front of it). Screen faces the
+             seating/approach (+x). Local to #zone-c: y -3 counteracts the root's
+             raised y (floor). NUDGE BY EYE via position/rotation. -->
         <a-entity
           id="info-terminal-c"
           info-terminal="key: c"
-          position="6.5 -3 3.2"
+          position="3 -3 10.5"
           rotation="0 90 0"
           spot-contact-cue="forceGlow: true"
         ></a-entity>
