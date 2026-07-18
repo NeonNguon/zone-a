@@ -38,7 +38,9 @@
 //   with `beacon:true`, raises a tall unlit pillar + floating `beaconLabel`
 //   billboard ABOVE the sphere field so the nearest exit is spottable from
 //   anywhere on the map. One accent colour across all four = one clear language.
-//   beaconHeight / beaconWidth size the pillar. All flat/unlit — Quest-cheap.
+//   beaconHeight / beaconWidth size the pillar; beaconOffset sets it BEHIND the
+//   screen (like a post behind a sign) so it never occludes the label. All
+//   flat/unlit — Quest-cheap.
 // ----------------------------------------------------------------
 AFRAME.registerComponent("teleport-terminal", {
   schema: {
@@ -57,6 +59,7 @@ AFRAME.registerComponent("teleport-terminal", {
     beaconHeight: { type: "number", default: 3.0 }, // pillar height above floor (m)
     beaconWidth: { type: "number", default: 0.12 }, // pillar cross-section (m)
     beaconLabel: { type: "string", default: "" }, // floating billboard text (e.g. EXIT)
+    beaconOffset: { type: "number", default: 0.45 }, // pillar set BEHIND the screen (m)
   },
 
   init: function () {
@@ -138,11 +141,16 @@ AFRAME.registerComponent("teleport-terminal", {
     const col = d.accent || "#ffc400";
     const cont = document.createElement("a-entity");
 
+    // Set the pillar BEHIND the screen (the screen faces +z toward the map
+    // centre, so behind = -z): it rises like a post behind the sign and never
+    // crosses the label. The billboard shares the same setback, high above.
+    const zBack = (-d.beaconOffset).toFixed(3);
+
     const pillar = document.createElement("a-box");
     pillar.setAttribute("width", d.beaconWidth);
     pillar.setAttribute("depth", d.beaconWidth);
     pillar.setAttribute("height", d.beaconHeight);
-    pillar.setAttribute("position", `0 ${(d.beaconHeight / 2).toFixed(3)} 0`);
+    pillar.setAttribute("position", `0 ${(d.beaconHeight / 2).toFixed(3)} ${zBack}`);
     pillar.setAttribute(
       "material",
       `color: ${col}; shader: flat; fog: false`
@@ -153,7 +161,7 @@ AFRAME.registerComponent("teleport-terminal", {
       const lbl = document.createElement("a-entity");
       lbl.setAttribute(
         "position",
-        `0 ${(d.beaconHeight + 0.35).toFixed(3)} 0.02`
+        `0 ${(d.beaconHeight + 0.35).toFixed(3)} ${zBack}`
       );
       lbl.setAttribute("text", {
         value: d.beaconLabel,
