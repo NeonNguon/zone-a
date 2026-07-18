@@ -51,7 +51,11 @@ AFRAME.registerComponent("tinted-floor", {
     density: { type: "number", default: 300 }, // flecks per tile
     seed: { type: "number", default: 11 },
     tile: { type: "number", default: 1.8 }, // metres per texture tile
-    ylift: { type: "number", default: 0.008 }, // above global floor, below cues
+    // Above the global floor (which it hides), below the cues (which sit at
+    // y≈0.02 and must render on top). 0.012 + the material's polygonOffset keeps
+    // it decisively in front of the global floor so the two don't z-fight on the
+    // Quest — a bare 8 mm gap shimmered at grazing angles across a big room.
+    ylift: { type: "number", default: 0.012 },
   },
 
   init: function () {
@@ -138,12 +142,19 @@ AFRAME.registerComponent("tinted-floor", {
       : 8;
     this.texture = tex;
 
-    // LIT, so it shades under the room's lamp like the walls do.
+    // LIT, so it shades under the room's lamp like the walls do. polygonOffset
+    // biases it toward the camera so it decisively beats the global ground plane
+    // it sits on — the two are near-coplanar (ylift is only ~1 cm) and would
+    // otherwise z-fight on the Quest. This patch is OPAQUE and hides the global
+    // floor under it, so winning the depth test is exactly what we want.
     this.material = new THREE.MeshStandardMaterial({
       map: tex,
       roughness: 1,
       metalness: 0,
       side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
     this.geometry = new THREE.PlaneGeometry(w, dep);
     this.mesh = new THREE.Mesh(this.geometry, this.material);
