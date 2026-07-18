@@ -11,21 +11,7 @@
 // Single swappable video source. The final video may move to a CDN later —
 // change ONLY this constant. Same-origin today, but the <video> element is
 // created with crossorigin="anonymous" so a CDN swap needs no code change.
-//
-// 720p derivative (1280×720, ~2.3 Mbit/s) of the 1080p master (GoEastV2.mp4,
-// 1920×1080 ~13.5 Mbit/s). A THREE.VideoTexture re-uploads the whole frame to
-// the GPU every render, so upload bandwidth scales with the video's pixel count
-// — at 1080p, on the Quest (tiled GPU, stereo), with the screen enlarged to fill
-// the wall, that upload overwhelmed the GPU and flashed white/undecoded frames
-// on the screen plus glitched the room edges. 720p cuts the per-frame upload to
-// ~44% and the bitrate to ~1/6, which the headset handles cleanly. The screen
-// stays full-size; only the texture got lighter. Regenerate from the master
-// with (ffmpeg):
-//   ffmpeg -i video/GoEastV2.mp4 -vf scale=1280:720:flags=lanczos \
-//     -c:v libx264 -profile:v high -pix_fmt yuv420p -preset slow -crf 23 \
-//     -maxrate 5M -bufsize 10M -c:a aac -b:a 160k -movflags +faststart \
-//     video/GoEastV2-720p.mp4
-const VIDEO_URL = "video/GoEastV2-720p.mp4";
+const VIDEO_URL = "video/GoEastV2.mp4";
 // Pre-play thumbnail shown on the screen until the first frame takes over.
 const POSTER_URL = "video/thumbnail.jpg";
 

@@ -518,8 +518,12 @@
              cueDepth / intensity / opacity / softness / yoffset.
              forceGlow: the Zone C floor is dark, so the void preset's shadow
              pool would be invisible on it — force this cue to an additive light
-             glow instead (survives environment switches). -->
-        <a-entity screen-contact-cue="forceGlow: true"></a-entity>
+             glow instead (survives environment switches).
+             TEMP TEST (Quest video flicker): visible=false hides this big
+             additive glow quad to test whether it — not the video — is the
+             source of the white flashes / edge flicker during playback. Remove
+             visible="false" to restore the grounding pool. -->
+        <a-entity screen-contact-cue="forceGlow: true" visible="false"></a-entity>
 
         <!-- TWO đá mài terrazzo benches, a symmetric seated viewing row pulled
              well back from the (now wall-filling) screen for a comfortable
@@ -574,26 +578,17 @@
            while the headset head-tracks the camera within it. -->
       <a-entity id="rig" position="0 0 0" rig-collision>
         <!-- Camera at standing eye height; desktop controls unchanged.
-             DEPTH RANGE tuned tight for depth-buffer precision — the wide
-             default range (near 0.1 / far 10000) leaves the Quest, which has
-             less depth precision and renders in stereo, too few depth bits, so
-             coplanar-ish surfaces (wall-corner box overlaps, wall/ceiling seams,
-             the local dark/coral floor over the global floor) z-fight and
-             shimmer at edges/corners — most visible once the bright video lifts
-             the room's contrast. near 0.2 / far 150 spends the depth buffer on
-             the range that matters: the whole exhibition fits inside ~63 m (the
-             64 m ground plane's far corner is the binding constraint), and
-             nothing is closer than the hands. NOTE: this is optimised for the
-             real exhibition (the fixed `void` preset has no sky); the dev-only
-             ?env=photo / ?env=room preset skies sit past 150 m and would clip —
-             raise `far` if you need those for debugging. -->
+             near:0.1 (up from the 0.005 default) tightens the depth range so
+             far-off surfaces — the floor, skyline plane edges — stop shimmering
+             at grazing angles. far left at default so distant a-sky preset
+             skies still render. -->
         <!-- transition-glitch: the reusable full-view glitch that masks
              teleports (and later, zone entries). Idle it renders nothing and
              ticks nothing; triggered by zone-b-teleport. Tunables: dur /
              intensity / color / style / sound (file replaces the synth blip). -->
         <a-entity
           id="camera"
-          camera="near: 0.2; far: 150"
+          camera="near: 0.1"
           look-controls
           wasd-controls
           position="0 1.6 0"
