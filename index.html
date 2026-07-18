@@ -463,16 +463,17 @@
            transition-glitch (rig moves at peak obscuration; see
            js/zone-b-teleport.js and js/transition.js).
 
-           Terminal A stands at the RIGHT edge of the image wall (derived
-           live from the wall's config — no copied numbers); its screen shows
-           a central-Saigon detail cropped from the baked map JPEG (reusing
-           the existing asset) as a preview of the destination.
+           Terminal A is a freestanding sign in the MIDDLE of the Zone B room
+           (its centre read live from the floorplan — no copied numbers); its
+           screen shows a central-Saigon detail cropped from the baked map JPEG
+           (reusing the existing asset) as a preview of the destination.
+           Teleporting back lands you at this same spot.
 
-           Tunables on zone-b-teleport: terminalAOffset (from the wall's
-           right edge) / terminalBOffset (from the map's near-edge centre) /
-           mapSpawnOffset / returnSpawnOffset. Terminal geometry + hit sizes
-           on each teleport-terminal; glitch dur / intensity / color / style /
-           sound on the camera's transition-glitch.
+           Tunables on zone-b-teleport: terminalAOffset (from the room centre) /
+           terminalBOffset (from the map's near-edge centre) / mapSpawnOffset /
+           returnSpawnOffset. Terminal geometry + hit sizes on each
+           teleport-terminal; glitch dur / intensity / color / style / sound on
+           the camera's transition-glitch.
            ============================================================ -->
       <a-entity id="zone-b-teleport" zone-b-teleport>
         <a-entity
@@ -507,7 +508,7 @@
            ============================================================ -->
       <a-entity
         id="zone-c"
-        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
+số đề        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
       >
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets

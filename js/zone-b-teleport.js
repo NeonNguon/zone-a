@@ -1,7 +1,8 @@
 // ================================================================
 // Zone B — teleport terminals: the floor map (relocated ~400 m out, hidden
-// while you're in the main exhibition) is reached through a terminal beside
-// the 100-image wall; a matching terminal on the map side brings you back.
+// while you're in the main exhibition) is reached through a freestanding sign
+// in the MIDDLE of the Zone B room; a matching terminal on the map side brings
+// you back to that same spot.
 // Each jump runs the reusable transition-glitch (js/transition.js) and
 // executes the actual rig relocation + map visibility flip at the glitch's
 // PEAK, so the cut is never visible.
@@ -137,15 +138,16 @@ AFRAME.registerComponent("teleport-terminal", {
 // retuning the map offset later can't break arrival points.
 //
 // Placements (all world-space, derived):
-//   Terminal A — at the wall's RIGHT edge (as seen from spawn: +z end),
-//     terminalAOffset from that corner, screen facing spawn (-x).
+//   Terminal A — a freestanding sign at the CENTRE of the Zone B room (read
+//     live from the floorplan), terminalAOffset from that centre, screen
+//     facing -x (the entrance / the return-spawn side).
 //   Terminal B — terminalBOffset from the map's near-edge CENTRE (the
 //     arrival area), child of the map root so it moves/hides with the map;
 //     screen auto-faces the arrival point.
 //   Map spawn — mapSpawnOffset from the near-edge centre, facing +x (across
 //     the map, the full sphere field ahead).
-//   Return spawn — returnSpawnOffset from Terminal A, facing +x (the
-//     terminal + wall area, NOT the exhibition's original spawn).
+//   Return spawn — returnSpawnOffset from Terminal A, facing +x (toward the
+//     sign in the middle of the room, NOT the exhibition's original spawn).
 //
 // Sequence per jump: glitch trigger -> AT PEAK move rig (visitor-compensated,
 // see TeleportRig) + flip map `shown` -> glitch resolves. `busy` +
@@ -153,7 +155,7 @@ AFRAME.registerComponent("teleport-terminal", {
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-b-teleport", {
   schema: {
-    terminalAOffset: { type: "vec3", default: { x: -1.2, y: 0, z: 1.0 } },
+    terminalAOffset: { type: "vec3", default: { x: 0, y: 0, z: 0 } }, // from room centre
     terminalBOffset: { type: "vec3", default: { x: 0.5, y: 0.02, z: 2.2 } },
     mapSpawnOffset: { type: "vec3", default: { x: -0.6, y: 0, z: 0 } },
     returnSpawnOffset: { type: "vec3", default: { x: -1.6, y: 0, z: 0 } },
@@ -192,35 +194,39 @@ AFRAME.registerComponent("zone-b-teleport", {
     this.layout();
   },
 
+  // Zone B's room centre in WORLD coords, read live from the floorplan (the room
+  // the freestanding teleport sign stands in). #floorplan parses before this
+  // component, so its config is readable here; falls back to the wall root's
+  // offset if not.
+  zoneBCenter: function () {
+    const fp = document.getElementById("floorplan");
+    const attr = fp && fp.getAttribute("floorplan");
+    const r = attr && attr.rooms && attr.rooms.zoneB;
+    if (r) return { x: r.cx, z: r.cz };
+    console.warn("zone-b-teleport: no floorplan zoneB; FALLBACK to wall root");
+    const wallRoot = document.getElementById("zone-b");
+    const rootAttr = wallRoot && wallRoot.getAttribute("zone-b-root");
+    const base = (rootAttr && rootAttr.offset) || { x: 19.2, y: 3, z: -3 };
+    return { x: base.x, z: base.z };
+  },
+
   layout: function () {
     const d = this.data;
 
-    // --- wall config, from its own sources of truth.
-    const wallRoot = document.getElementById("zone-b");
-    const wallEl = document.getElementById("zone-b-wall");
-    const rootAttr = wallRoot && wallRoot.getAttribute("zone-b-root");
-    const base = (rootAttr && rootAttr.offset) || { x: 13, y: 3, z: 0 };
-    let width = 15;
-    const wallAttr = wallEl && wallEl.getAttribute("image-wall");
-    if (wallAttr && wallAttr.width > 0) {
-      width = wallAttr.width;
-    } else if (wallEl && wallEl.components && wallEl.components["image-wall"]) {
-      width = wallEl.components["image-wall"].resolveWidth();
-    } else {
-      console.warn("zone-b-teleport: could not read wall width; FALLBACK 15 m");
-    }
-
-    // --- Terminal A: at the wall's right edge (+z end, as seen from spawn),
-    // at FLOOR level, offset by the tunable; screen faces spawn (-x).
-    const ax = base.x + d.terminalAOffset.x;
+    // --- Terminal A: a freestanding sign at the CENTRE of the Zone B room
+    // (read live from the floorplan — no copied numbers), at FLOOR level and
+    // offset by the tunable; screen faces -x (the entrance / return-spawn side).
+    const c = this.zoneBCenter();
+    const ax = c.x + d.terminalAOffset.x;
     const ay = 0 + d.terminalAOffset.y;
-    const az = base.z + width / 2 + d.terminalAOffset.z;
+    const az = c.z + d.terminalAOffset.z;
     if (this.termA) {
       this.termA.setAttribute("position", { x: ax, y: ay, z: az });
       this.termA.setAttribute("rotation", "0 -90 0"); // plane normal -> -x
     }
 
-    // --- return spawn: beside Terminal A, facing +x (terminal + wall ahead).
+    // --- return spawn: beside Terminal A (the sign in the middle), facing +x
+    // toward it — so a jump back lands you at the same spot the sign stands.
     this.returnSpawn.set(
       ax + d.returnSpawnOffset.x,
       0 + d.returnSpawnOffset.y,
