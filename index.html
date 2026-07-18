@@ -323,10 +323,14 @@
            rows / cols / aspect) live on the image-wall component.
            ============================================================ -->
       <a-entity id="zone-b" zone-b-root="offset: 25 3 -1.2">
+        <!-- `shuffle: true` randomizes the wall's image order per load (seed the
+             optional shuffleSeed>0 for a reproducible order). Off by default =
+             today's manifest order; the floor map is unaffected (it picks by
+             file ID, not wall index). -->
         <a-entity
           id="zone-b-wall"
           rotation="0 -90 0"
-          image-wall="rows: 5; cols: 20; width: 22.46; aspect: 1.5"
+          image-wall="rows: 5; cols: 20; width: 22.46; aspect: 1.5; shuffle: true"
           wall-focus
         ></a-entity>
 
@@ -650,11 +654,17 @@ số đề        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHe
          wall-focus in js/zone-b.js). Hidden until a wall tile is selected; the
          picture flies in from the tile's on-screen position. -->
     <div id="zoneb-focus">
+      <!-- Prev/next paging arrows (wall-focus FEATURE 2). Shown only when the
+           overlay carries .nav-on (added by wall-focus, never by map-focus, so
+           single-image map reveals stay clean). -->
+      <button id="zoneb-focus-prev" type="button" aria-label="Previous image">&#8249;</button>
       <div id="zoneb-focus-col">
         <img id="zoneb-focus-img" src="" alt="" />
         <div id="zoneb-focus-title"></div>
         <div id="zoneb-focus-year"></div>
+        <div id="zoneb-focus-count"></div>
       </div>
+      <button id="zoneb-focus-next" type="button" aria-label="Next image">&#8250;</button>
     </div>
 
     <!-- Info-terminal web focus overlay DOM. Outside <a-scene>: plain

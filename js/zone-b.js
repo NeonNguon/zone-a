@@ -53,7 +53,25 @@ AFRAME.registerComponent("zone-b-root", {
 //            in x and y, so spacing reads evenly). Start small.
 //   rows / cols — grid dimensions, default 10 / 10.
 //   aspect — tile width:height, default 1.333 (4:3).
+//   shuffle — randomize the wall's image order per load (default false = today's
+//            manifest order). The floor map is unaffected: it picks images BY
+//            FILE ID (dataset.file), not by wall grid index.
+//   shuffleSeed — 0 = fresh random each load; >0 = seeded, reproducible order
+//            (a small deterministic PRNG, not Math.random). Debug aid; optional.
 // ----------------------------------------------------------------
+
+// Small deterministic PRNG (mulberry32) for seeded, reproducible shuffles.
+// Only used when shuffleSeed > 0; the default (seed 0) path uses Math.random.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 AFRAME.registerComponent("image-wall", {
   schema: {
     width: { type: "number", default: 0 }, // 0 = auto (4 × Zone A ring radius)
@@ -63,11 +81,14 @@ AFRAME.registerComponent("image-wall", {
     aspect: { type: "number", default: 1.333 }, // tile w:h (4:3)
     manifest: { type: "string", default: "web4map-512/manifest.json" },
     basePath: { type: "string", default: "web4map-512/" }, // prefix for tile URLs
+    shuffle: { type: "boolean", default: false }, // randomize order per load
+    shuffleSeed: { type: "number", default: 0 }, // 0 = fresh random; >0 = seeded
   },
 
   init: function () {
     this.tiles = []; // a-image elements this component created
-    this.entries = null; // manifest entries { file, title }, once fetched
+    this.entries = null; // manifest entries { file, title }, in MANIFEST order
+    this.displayEntries = null; // the order build() lays out from (maybe shuffled)
 
     // Fetch the manifest once, then build. update() re-lays-out on later prop
     // tweaks (it no-ops until this resolves). The manifest is an array of
@@ -82,6 +103,11 @@ AFRAME.registerComponent("image-wall", {
         this.entries = (Array.isArray(list) ? list : []).map((e) =>
           typeof e === "string" ? { file: e, title: "" } : e
         );
+        // Decide the display order ONCE, right after the fetch resolves (before
+        // the first build). build() never re-shuffles, so live tunable tweaks
+        // (width/gap/…) keep the same order — only a `shuffle`/`shuffleSeed`
+        // change via setAttribute re-rolls it (see update()).
+        this.applyOrder();
         this.build();
       })
       .catch((err) => {
@@ -93,10 +119,46 @@ AFRAME.registerComponent("image-wall", {
       });
   },
 
+  // Set this.displayEntries — the order build() lays out from. shuffle:false
+  // keeps the manifest order verbatim; shuffle:true Fisher–Yates-shuffles a COPY
+  // so this.entries (the by-index truth) is left intact. shuffleSeed 0 = fresh
+  // random each load; >0 = a seeded, reproducible order (deterministic PRNG).
+  applyOrder: function () {
+    if (!this.entries) return;
+    const order = this.entries.slice();
+    if (this.data.shuffle) {
+      const rng =
+        this.data.shuffleSeed > 0 ? mulberry32(this.data.shuffleSeed) : Math.random;
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        const tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+      }
+      console.log(
+        `image-wall: shuffled ${order.length} tile(s)` +
+          (this.data.shuffleSeed > 0
+            ? ` (seed ${this.data.shuffleSeed}, reproducible).`
+            : " (fresh random this load).")
+      );
+    }
+    this.displayEntries = order;
+  },
+
   // Re-layout on any live tunable change (width/gap/rows/cols/aspect). No-op
   // until the manifest has arrived (the first update() runs before the fetch).
-  update: function () {
-    if (this.entries) this.build();
+  // A `shuffle`/`shuffleSeed` change re-rolls the display order; other tweaks
+  // keep it, so eyeballing the grid never reorders the wall.
+  update: function (oldData) {
+    if (!this.entries) return;
+    if (
+      oldData &&
+      (oldData.shuffle !== this.data.shuffle ||
+        oldData.shuffleSeed !== this.data.shuffleSeed)
+    ) {
+      this.applyOrder();
+    }
+    this.build();
   },
 
   // width=0 means AUTO: read Zone A's ring radius from its own source of truth
@@ -150,7 +212,10 @@ AFRAME.registerComponent("image-wall", {
     this.tileH = tileH;
     this.wallHeight = height;
 
-    const have = this.entries.length;
+    // Lay out from the display order (shuffled or not), decided once in
+    // applyOrder(); falls back to manifest order if applyOrder never ran.
+    const entries = this.displayEntries || this.entries;
+    const have = entries.length;
     const n = Math.min(have, slots);
     if (have < slots) {
       console.warn(
@@ -176,7 +241,7 @@ AFRAME.registerComponent("image-wall", {
       // Each manifest entry is { file, title }. Use `file` for the texture URL
       // (encoded so any special chars are valid) and CARRY `title` on the tile
       // (data-title) so focus mode can read it later — not used for display now.
-      const entry = this.entries[i];
+      const entry = entries[i];
       const url = d.basePath + encodeURIComponent(entry.file);
       const img = document.createElement("a-image");
       img.setAttribute("src", url); // plain URL, not an asset id
@@ -443,6 +508,13 @@ AFRAME.registerComponent("wall-contact-cue", {
 //   height    — focused tile's world height in metres (readable size).
 //   dimRadius / dimOpacity — the dark sphere.
 //   dur       — animation duration (ms).
+//   nav       — enable stepping through the whole set from within the focus
+//               view (default true). Navigation order = the wall's current
+//               DISPLAY order (so it follows FEATURE 1's shuffle); wraps at both
+//               ends. Derived from the focused tile's `.clickable` siblings, so
+//               the triptych's own wall-focus cycles only its three images.
+//   navBtnSize / navBtnOffset — VR arrow buttons' size (m) and their gap from
+//               the focused picture's edge (m).
 // ----------------------------------------------------------------
 AFRAME.registerComponent("wall-focus", {
   schema: {
@@ -451,6 +523,9 @@ AFRAME.registerComponent("wall-focus", {
     dimRadius: { type: "number", default: 4 },
     dimOpacity: { type: "number", default: 0.6 },
     dur: { type: "number", default: 450 }, // ms
+    nav: { type: "boolean", default: true }, // step through the set in-focus
+    navBtnSize: { type: "number", default: 0.5 }, // VR arrow hit-target size (m)
+    navBtnOffset: { type: "number", default: 0.55 }, // gap from picture edge (m)
   },
 
   init: function () {
@@ -462,6 +537,17 @@ AFRAME.registerComponent("wall-focus", {
     this.anim = null; // active VR tween, or null
     this.dimEl = null; // camera-child dark sphere (VR)
     this.uiEl = null; // world-anchored title/year label (VR)
+    this.titleTextEl = null; // the VR label's title a-text (updated on step)
+
+    // FEATURE 2 nav state. navTiles = the focusable `.clickable` siblings in DOM
+    // (display) order; navIndex = which one is currently shown. originTile and
+    // its captured src/title are what dismiss always returns to (deliberately
+    // NOT the last-viewed slot).
+    this.navTiles = null;
+    this.navIndex = -1;
+    this.originTile = null;
+    this.vrOriginSrc = null; // flown tile's home texture URL (VR restore)
+    this.navEl = null; // world-anchored VR arrow-button container
 
     // Web (desktop/mobile) focus reuses Zone A's blurred-overlay aesthetic:
     // a Helvetica HTML overlay whose image FLIES in from the tile's screen
@@ -470,6 +556,11 @@ AFRAME.registerComponent("wall-focus", {
     this.imgEl = document.getElementById("zoneb-focus-img");
     this.titleEl = document.getElementById("zoneb-focus-title");
     this.yearEl = document.getElementById("zoneb-focus-year");
+    this.countEl = document.getElementById("zoneb-focus-count"); // "12 / 100"
+    this.webPrevBtn = document.getElementById("zoneb-focus-prev");
+    this.webNextBtn = document.getElementById("zoneb-focus-next");
+    this.webOriginSrc = null; // overlay img's home src (web restore)
+    this.webOriginTitle = null; // overlay title's home text (web restore)
 
     // Tiles are DOM children of this entity, so their bubbled `click` lands
     // here — one delegated listener for every platform's raycaster.
@@ -489,11 +580,91 @@ AFRAME.registerComponent("wall-focus", {
       this.overlay.addEventListener("click", this.onOverlayClick);
     }
     this.onKey = (e) => {
-      if (e.key === "Escape" && this.focused && this.mode === "web" && !this.busy) {
+      if (!this.focused || this.mode !== "web") return;
+      if (e.key === "Escape" && !this.busy) {
         this.dismissWeb();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        this.prev(); // busy-guarded inside step()
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        this.next();
       }
     };
     window.addEventListener("keydown", this.onKey);
+
+    // Web arrow buttons live in the shared #zoneb-focus overlay (index.html).
+    // Both wall-focus instances (wall + triptych) bind these, but the guard
+    // (focused && web) means only the active one acts; map-focus never turns the
+    // arrows on (they are gated by the .nav-on class), so its reveals stay clean.
+    this.onWebPrev = (e) => {
+      e.stopPropagation(); // don't bubble to the overlay's dismiss handler
+      this.prev();
+    };
+    this.onWebNext = (e) => {
+      e.stopPropagation();
+      this.next();
+    };
+    if (this.webPrevBtn) this.webPrevBtn.addEventListener("click", this.onWebPrev);
+    if (this.webNextBtn) this.webNextBtn.addEventListener("click", this.onWebNext);
+
+    // Quest convenience bindings (the on-screen VR arrows are the primary,
+    // discoverable control): left controller X = prev, right controller A = next
+    // (B is taken by env-cycle). Bound only while a VR focus is open.
+    this.leftHand = document.getElementById("leftHand");
+    this.rightHand = document.getElementById("rightHand");
+    this.onCtrlPrev = () => {
+      if (this.focused && this.mode === "vr") this.prev();
+    };
+    this.onCtrlNext = () => {
+      if (this.focused && this.mode === "vr") this.next();
+    };
+  },
+
+  // ================= FEATURE 2: step through the set in-focus =================
+  // Snapshot the focusable siblings (this entity's `.clickable` children, in DOM
+  // = display order) and set navIndex to the clicked tile. For the wall these are
+  // the 100 shuffled tiles; for the triptych's own wall-focus, only its 3 images.
+  captureNav: function (tile) {
+    if (this.data.nav) {
+      this.navTiles = Array.prototype.slice
+        .call(this.el.children)
+        .filter((c) => c.classList && c.classList.contains("clickable"));
+    } else {
+      this.navTiles = [tile];
+    }
+    this.navIndex = this.navTiles.indexOf(tile);
+    if (this.navIndex < 0) {
+      this.navTiles = [tile];
+      this.navIndex = 0;
+    }
+    this.originTile = tile;
+  },
+
+  next: function () {
+    this.step(1);
+  },
+  prev: function () {
+    this.step(-1);
+  },
+
+  // Advance navIndex (wrapping) and swap the DISPLAYED image/title IN PLACE — no
+  // physical re-fly. Guarded against mid-transition (VR anim or web busy).
+  step: function (dir) {
+    if (!this.data.nav || this.anim || this.busy) return;
+    if (!this.navTiles || this.navTiles.length < 2) return;
+    const n = this.navTiles.length;
+    this.navIndex = (this.navIndex + dir + n) % n;
+    const target = this.navTiles[this.navIndex];
+    if (this.mode === "vr") this.showVR(target);
+    else this.showWeb(target);
+  },
+
+  // Human-readable "12 / 100" for the current step (1-based).
+  updateCount: function () {
+    if (this.countEl && this.navTiles) {
+      this.countEl.textContent = `${this.navIndex + 1} / ${this.navTiles.length}`;
+    }
   },
 
   onClick: function (e) {
@@ -509,6 +680,7 @@ AFRAME.registerComponent("wall-focus", {
     }
     tile.emit("mouseleave"); // clear its hover frame + pop before it moves/lifts
     tile.dataset.focused = "1"; // hover now yields the tile's scale to focus
+    this.captureNav(tile); // snapshot the paging list + origin before focusing
     if (this.el.sceneEl.is("vr-mode")) {
       this.mode = "vr";
       this.focusVR(tile);
@@ -553,14 +725,51 @@ AFRAME.registerComponent("wall-focus", {
     const toQuat = pQuat.clone().invert().multiply(faceQuat);
     const pScale = parent.getWorldScale(new THREE.Vector3());
     const hAttr = parseFloat(tile.getAttribute("height")) || 0.7;
+    const tileWAttr = parseFloat(tile.getAttribute("width")) || 1; // for arrow placement
     const k = this.data.height / hAttr / (pScale.y || 1); // world height -> local scale
     const toScale = new THREE.Vector3(k, k, k);
 
+    // Remember the flown tile's home texture so dismiss restores it (paging may
+    // have swapped it to another image on the SAME mesh).
+    this.vrOriginSrc = tile.getAttribute("src");
+
     this.buildDim();
     this.buildLabel(tile.getAttribute("data-title") || "", focusPos, faceQuat);
+    // World-anchored arrow buttons beside the picture; picture half-width in
+    // world metres = focused height × the tile's aspect / 2.
+    const picHalfW = (this.data.height * (hAttr ? tileWAttr / hAttr : 1)) / 2;
+    this.buildNavButtons(focusPos, faceQuat, picHalfW);
+    // Quest convenience: X (prev) / A (next) while this VR focus is open.
+    if (this.leftHand) this.leftHand.addEventListener("xbuttondown", this.onCtrlPrev);
+    if (this.rightHand) this.rightHand.addEventListener("abuttondown", this.onCtrlNext);
 
     this.focused = tile;
     this.startAnim(obj, toPos, toQuat, toScale, null);
+  },
+
+  // Swap the flown tile's texture + label to `target` IN PLACE (no re-fly).
+  showVR: function (target) {
+    const tile = this.focused;
+    if (!tile) return;
+    tile.setAttribute("src", target.getAttribute("src"));
+    if (this.titleTextEl) {
+      this.titleTextEl.setAttribute("text", "value", target.getAttribute("data-title") || "");
+    }
+    this.preloadNeighbours(); // warm the next/prev textures to hide the load pop
+  },
+
+  // Best-effort decode of the neighbouring tiles' textures so a step doesn't pop.
+  preloadNeighbours: function () {
+    if (!this.navTiles || this.navTiles.length < 2) return;
+    const n = this.navTiles.length;
+    [this.navIndex + 1, this.navIndex - 1].forEach((k) => {
+      const t = this.navTiles[((k % n) + n) % n];
+      const src = t && t.getAttribute("src");
+      if (src) {
+        const im = new Image();
+        im.src = src;
+      }
+    });
   },
 
   dismissVR: function () {
@@ -569,9 +778,16 @@ AFRAME.registerComponent("wall-focus", {
     const obj = tile.object3D;
     const home = this.home;
 
+    // Restore the flown tile's HOME texture before it flies back, so paging
+    // never leaves a wrong image on the grid slot.
+    if (this.vrOriginSrc != null) tile.setAttribute("src", this.vrOriginSrc);
+
     // Un-dim immediately; the tile flies back into the lit grid.
     this.teardownDim();
     this.teardownLabel();
+    this.teardownNavButtons();
+    if (this.leftHand) this.leftHand.removeEventListener("xbuttondown", this.onCtrlPrev);
+    if (this.rightHand) this.rightHand.removeEventListener("abuttondown", this.onCtrlNext);
     if (this.cameraEl) {
       this.cameraEl.setAttribute("look-controls", "enabled", true);
     }
@@ -584,6 +800,10 @@ AFRAME.registerComponent("wall-focus", {
       delete tile.dataset.focused; // hover may own the tile's scale again
       this.focused = null;
       this.home = null;
+      this.navTiles = null;
+      this.navIndex = -1;
+      this.originTile = null;
+      this.vrOriginSrc = null;
       this.refreshRaycasters();
     });
   },
@@ -677,6 +897,7 @@ AFRAME.registerComponent("wall-focus", {
     const titleEl = this.makeText(title, { width: 2.2, color: "#ffffff" });
     titleEl.setAttribute("position", `0 ${-(halfH + 0.26)} 0.02`);
     ui.appendChild(titleEl);
+    this.titleTextEl = titleEl; // updated in place when paging (showVR)
 
     const yearEl = this.makeText("2026", { width: 1.6, color: "#c8c8c8" });
     yearEl.setAttribute("position", `0 ${-(halfH + 0.5)} 0.02`);
@@ -691,6 +912,73 @@ AFRAME.registerComponent("wall-focus", {
       this.uiEl.parentNode.removeChild(this.uiEl);
     }
     this.uiEl = null;
+    this.titleTextEl = null;
+  },
+
+  // --- world-anchored VR arrow buttons (prev / next) ------------------------
+  // Two generous `.clickable` quads flanking the focused picture, each carrying
+  // a white chevron triangle. They live in scene space at the focus spot (same
+  // facing as the label), so they stay put as the head moves. Torn down with the
+  // focus; refreshRaycasters() lets the lasers pick them up (like the dim sphere).
+  buildNavButtons: function (focusPos, faceQuat, picHalfW) {
+    if (!this.data.nav || !this.navTiles || this.navTiles.length < 2) return;
+    const cont = document.createElement("a-entity");
+    cont.setAttribute("position", `${focusPos.x} ${focusPos.y} ${focusPos.z}`);
+    const eu = new THREE.Euler().setFromQuaternion(faceQuat, "YXZ");
+    cont.setAttribute(
+      "rotation",
+      `${THREE.MathUtils.radToDeg(eu.x)} ${THREE.MathUtils.radToDeg(
+        eu.y
+      )} ${THREE.MathUtils.radToDeg(eu.z)}`
+    );
+
+    const size = this.data.navBtnSize;
+    const dx = picHalfW + this.data.navBtnOffset + size / 2;
+    cont.appendChild(this.makeArrowButton(-dx, size, -1, this.onCtrlPrev));
+    cont.appendChild(this.makeArrowButton(dx, size, 1, this.onCtrlNext));
+
+    this.el.sceneEl.appendChild(cont);
+    this.navEl = cont;
+    requestAnimationFrame(() => this.refreshRaycasters());
+  },
+
+  // One arrow button: a translucent dark hit-plane + a white chevron triangle
+  // pointing `dir` (-1 left / +1 right). `handler` is the same guard used by the
+  // controller buttons (fires prev/next only while a VR focus is open).
+  makeArrowButton: function (x, size, dir, handler) {
+    const btn = document.createElement("a-plane");
+    btn.setAttribute("width", size);
+    btn.setAttribute("height", size);
+    btn.setAttribute("position", `${x} 0 0.02`);
+    btn.setAttribute(
+      "material",
+      "color: #000000; opacity: 0.5; shader: flat; transparent: true; fog: false; side: double"
+    );
+    btn.setAttribute("class", "clickable");
+    const tri = document.createElement("a-triangle");
+    const s = size * 0.28;
+    // Point right by default; mirror for left. Vertices centred on the plane.
+    if (dir > 0) {
+      tri.setAttribute("vertex-a", `${s} 0 0`);
+      tri.setAttribute("vertex-b", `${-s} ${s} 0`);
+      tri.setAttribute("vertex-c", `${-s} ${-s} 0`);
+    } else {
+      tri.setAttribute("vertex-a", `${-s} 0 0`);
+      tri.setAttribute("vertex-b", `${s} ${-s} 0`);
+      tri.setAttribute("vertex-c", `${s} ${s} 0`);
+    }
+    tri.setAttribute("position", "0 0 0.01");
+    tri.setAttribute("material", "color: #ffffff; shader: flat; side: double; fog: false");
+    btn.appendChild(tri);
+    btn.addEventListener("click", handler);
+    return btn;
+  },
+
+  teardownNavButtons: function () {
+    if (this.navEl && this.navEl.parentNode) {
+      this.navEl.parentNode.removeChild(this.navEl);
+    }
+    this.navEl = null;
   },
 
   makeText: function (value, opts) {
@@ -738,11 +1026,21 @@ AFRAME.registerComponent("wall-focus", {
     // A tile may carry its own complete URL (dataset.fullsrc — used by the
     // triptych, whose sources don't live in web4map/); the wall's tiles keep
     // the manifest-file convention.
-    this.imgEl.src =
-      tile.dataset.fullsrc ||
-      (file ? "web4map/" + encodeURIComponent(file) : "");
+    this.imgEl.style.opacity = "1"; // clear any residue from a prior cross-fade
+    this.imgEl.src = this.tileWebSrc(tile);
     this.titleEl.textContent = tile.getAttribute("data-title") || "";
     this.yearEl.textContent = "2026"; // literal constant, not read from data
+    // Remember the home image/title so dismiss restores them (paging swaps them).
+    this.webOriginSrc = this.imgEl.src;
+    this.webOriginTitle = this.titleEl.textContent;
+    // Show the paging arrows + counter ONLY for wall-focus (map-focus reuses the
+    // same overlay but never adds .nav-on, so its single-image reveals stay clean).
+    if (this.data.nav && this.navTiles && this.navTiles.length > 1) {
+      this.overlay.classList.add("nav-on");
+      this.updateCount();
+    } else {
+      this.overlay.classList.remove("nav-on");
+    }
 
     // Centred target size, keeping the tile's aspect, leaving room for the text.
     const ww = parseFloat(tile.getAttribute("width")) || 1.5;
@@ -781,10 +1079,54 @@ AFRAME.registerComponent("wall-focus", {
     });
   },
 
+  // A tile's full-res web URL: its own complete URL if it carries one (the
+  // triptych's dataset.fullsrc), else the manifest-file convention under web4map/.
+  tileWebSrc: function (tile) {
+    const file = tile.dataset.file || "";
+    return tile.dataset.fullsrc || (file ? "web4map/" + encodeURIComponent(file) : "");
+  },
+
+  // Swap the overlay image + title to `target` IN PLACE with a short cross-fade
+  // (no fly between steps). Reuses `busy` so a step can't fire mid-transition.
+  showWeb: function (target) {
+    if (!this.imgEl) return;
+    this.busy = true;
+    this.updateCount();
+    this.titleEl.textContent = target.getAttribute("data-title") || "";
+    const src = this.tileWebSrc(target);
+    this.imgEl.style.transition = "opacity 0.15s ease";
+    this.imgEl.style.opacity = "0";
+    const swap = () => {
+      this.imgEl.src = src;
+      // Fade back in once the new image is ready (or immediately if cached).
+      const fadeIn = () => {
+        this.imgEl.style.opacity = "1";
+        this.busy = false;
+      };
+      if (this.imgEl.complete) fadeIn();
+      else this.imgEl.addEventListener("load", fadeIn, { once: true });
+      // Safety: never get stuck busy if load/transition never fires.
+      setTimeout(() => {
+        if (this.busy) {
+          this.imgEl.style.opacity = "1";
+          this.busy = false;
+        }
+      }, 500);
+    };
+    setTimeout(swap, 150); // let the fade-out play before the source swaps
+  },
+
   dismissWeb: function () {
     const tile = this.focused;
     if (!tile) return;
     this.busy = true;
+    // Restore the ORIGINALLY clicked image/title so the picture that flies back
+    // matches the tile it lands on (paging may have swapped the displayed image).
+    this.imgEl.style.transition = "none";
+    this.imgEl.style.opacity = "1";
+    if (this.webOriginSrc != null) this.imgEl.src = this.webOriginSrc;
+    if (this.webOriginTitle != null) this.titleEl.textContent = this.webOriginTitle;
+    this.overlay.classList.remove("nav-on");
     // Fly the picture back to the tile's on-screen rect, then hide the overlay.
     const rect = this.tileScreenRect(tile);
     const fin = this.imgEl.getBoundingClientRect();
@@ -806,6 +1148,11 @@ AFRAME.registerComponent("wall-focus", {
       this.focused = null;
       this.mode = null;
       this.busy = false;
+      this.navTiles = null;
+      this.navIndex = -1;
+      this.originTile = null;
+      this.webOriginSrc = null;
+      this.webOriginTitle = null;
     };
     this.imgEl.addEventListener("transitionend", done);
     setTimeout(done, 600); // safety if transitionend doesn't fire
@@ -844,26 +1191,39 @@ AFRAME.registerComponent("wall-focus", {
     if (this.overlay && this.onOverlayClick) {
       this.overlay.removeEventListener("click", this.onOverlayClick);
     }
+    if (this.webPrevBtn) this.webPrevBtn.removeEventListener("click", this.onWebPrev);
+    if (this.webNextBtn) this.webNextBtn.removeEventListener("click", this.onWebNext);
+    if (this.leftHand) this.leftHand.removeEventListener("xbuttondown", this.onCtrlPrev);
+    if (this.rightHand) this.rightHand.removeEventListener("abuttondown", this.onCtrlNext);
     // If focused mid-teardown, restore state so the grid/overlay aren't broken.
     if (this.mode === "vr" && this.focused && this.home) {
       const obj = this.focused.object3D;
+      if (this.vrOriginSrc != null) this.focused.setAttribute("src", this.vrOriginSrc);
       obj.position.copy(this.home.pos);
       obj.quaternion.copy(this.home.quat);
       obj.scale.copy(this.home.scale);
     }
     if (this.focused) delete this.focused.dataset.focused;
-    if (this.overlay) this.overlay.classList.remove("visible");
+    if (this.overlay) this.overlay.classList.remove("visible", "nav-on");
     if (this.imgEl) {
       this.imgEl.style.transition = "none";
       this.imgEl.style.transform = "none";
+      this.imgEl.style.opacity = "1";
     }
     this.teardownDim();
     this.teardownLabel();
+    this.teardownNavButtons();
     if (this.cameraEl) this.cameraEl.setAttribute("look-controls", "enabled", true);
     this.focused = null;
     this.mode = null;
     this.busy = false;
     this.home = null;
     this.anim = null;
+    this.navTiles = null;
+    this.navIndex = -1;
+    this.originTile = null;
+    this.vrOriginSrc = null;
+    this.webOriginSrc = null;
+    this.webOriginTitle = null;
   },
 });

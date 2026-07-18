@@ -52,3 +52,60 @@
   letter-spacing: 0.03em;
   color: #777;
 }
+/* "12 / 100" step counter (wall-focus FEATURE 2) — subtle, below the year.
+   Hidden by default; shown only with .nav-on (wall/triptych paging), so the
+   map-focus reveal — which reuses this overlay — never shows a stray counter. */
+#zoneb-focus-count {
+  display: none;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: #999;
+}
+
+/* Prev/next paging arrows. Hidden by default; revealed only when the overlay
+   carries .nav-on (wall-focus, not map-focus). Minimal Helvetica chevrons that
+   echo the overlay's restrained type. */
+#zoneb-focus-prev,
+#zoneb-focus-next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none; /* shown via .nav-on below */
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  color: #111;
+  font-family: inherit;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  transition: background 0.2s ease, transform 0.1s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#zoneb-focus-prev:hover,
+#zoneb-focus-next:hover {
+  background: rgba(255, 255, 255, 0.85);
+}
+#zoneb-focus-prev:active,
+#zoneb-focus-next:active {
+  transform: translateY(-50%) scale(0.94);
+}
+#zoneb-focus-prev { left: max(24px, 4vw); }
+#zoneb-focus-next { right: max(24px, 4vw); }
+/* Only wall-focus turns paging on; map-focus reuses this overlay without it. */
+#zoneb-focus.nav-on #zoneb-focus-prev,
+#zoneb-focus.nav-on #zoneb-focus-next {
+  display: flex;
+}
+#zoneb-focus.nav-on #zoneb-focus-count {
+  display: block;
+}
