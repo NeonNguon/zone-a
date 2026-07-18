@@ -202,6 +202,11 @@ AFRAME.registerComponent("map-board", {
     const sc = this.sidecar;
     const width = this.resolveWidth();
     const depth = width / sc.aspect; // follow the texture's Mercator aspect
+    // Expose the computed board dimensions for other Zone B furniture (the
+    // teleport manager reads these + gapBehindWall to place one return terminal
+    // at each map edge live — no copied map size). Kept in sync every build.
+    this.width = width;
+    this.depth = depth;
     // Plane centre in local frame: near (south) edge `gapBehindWall` behind
     // the wall line (local -z = behind), extending north away from spawn.
     const centerZ = -(d.gapBehindWall + depth / 2);

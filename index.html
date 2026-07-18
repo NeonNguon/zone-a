@@ -450,13 +450,36 @@
              retunes to each preset's ground profile like every other zone. -->
         <a-entity map-contact-cue="board: #zone-b-map-board"></a-entity>
 
-        <!-- Terminal B — "back to exhibition", near the arrival point (the
-             manager positions + orients it from the live map config). Child
-             of the map root so it relocates and hides/shows with the map.
+        <!-- Return terminals — ONE per map edge (near/far/left/right), so the
+             way home is in view from anywhere on the map. All children of the
+             map root (relocate + hide/show with the map); the manager derives
+             each one's edge position + inward facing live from the board and
+             wires every one to the SAME return jump. Bright amber accent screen
+             + a tall EXIT beacon above the sphere field make them unmistakable
+             against the dark surround. `data-edge` tells the manager which edge.
              Cue yoffset clears the map plane's own +0.02 lift. -->
         <a-entity
           id="terminal-b"
-          teleport-terminal="label: EXHIBITION"
+          data-edge="near"
+          teleport-terminal="label: EXIT; accent: #ffc400; beacon: true; beaconLabel: EXIT"
+          spot-contact-cue="yoffset: 0.04"
+        ></a-entity>
+        <a-entity
+          id="terminal-b-far"
+          data-edge="far"
+          teleport-terminal="label: EXIT; accent: #ffc400; beacon: true; beaconLabel: EXIT"
+          spot-contact-cue="yoffset: 0.04"
+        ></a-entity>
+        <a-entity
+          id="terminal-b-left"
+          data-edge="left"
+          teleport-terminal="label: EXIT; accent: #ffc400; beacon: true; beaconLabel: EXIT"
+          spot-contact-cue="yoffset: 0.04"
+        ></a-entity>
+        <a-entity
+          id="terminal-b-right"
+          data-edge="right"
+          teleport-terminal="label: EXIT; accent: #ffc400; beacon: true; beaconLabel: EXIT"
           spot-contact-cue="yoffset: 0.04"
         ></a-entity>
       </a-entity>
@@ -474,10 +497,11 @@
            Teleporting back lands you at this same spot.
 
            Tunables on zone-b-teleport: terminalAOffset (from the room centre) /
-           terminalBOffset (from the map's near-edge centre) / mapSpawnOffset /
-           returnSpawnOffset. Terminal geometry + hit sizes on each
-           teleport-terminal; glitch dur / intensity / color / style / sound on
-           the camera's transition-glitch.
+           mapSpawnOffset / returnSpawnOffset / returnInset (each return terminal's
+           inset inside its map edge) / returnY. Terminal geometry + hit sizes,
+           and the return terminals' accent / beacon / beaconHeight / beaconWidth /
+           beaconLabel, on each teleport-terminal; glitch dur / intensity / color /
+           style / sound on the camera's transition-glitch.
            ============================================================ -->
       <a-entity id="zone-b-teleport" zone-b-teleport>
         <a-entity
