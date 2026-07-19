@@ -254,6 +254,11 @@ AFRAME.registerComponent("zone-b-teleport", {
     // spheres sees the bright screen. Live-derived from the board (no map size).
     returnInset: { type: "number", default: 0.7 },
     returnY: { type: "number", default: 0.02 },
+    // The NEAR (spawn-edge) terminal is the exception: it sits this far BEHIND
+    // the arrival spawn (−x) instead of inset into the map, so its tall beacon
+    // isn't dead ahead when you teleport in. It still faces the map, so you read
+    // its EXIT face when you turn around or walk back to leave.
+    nearGap: { type: "number", default: 1.2 },
   },
 
   init: function () {
@@ -375,7 +380,11 @@ AFRAME.registerComponent("zone-b-teleport", {
       } else if (edge === "right") {
         px = cx; pz = bw / 2 - inset;
       } else {
-        px = gap + inset; pz = 0; // near / south (default)
+        // near / south (the spawn edge): sit BEHIND the arrival spawn (which
+        // faces +x into the map) so the beacon is behind the visitor, not
+        // blocking the first view. Tracks mapSpawnOffset so it stays behind it.
+        px = gap + d.mapSpawnOffset.x - d.nearGap;
+        pz = d.mapSpawnOffset.z;
       }
       t.setAttribute("position", { x: px, y: d.returnY, z: pz });
       // Face the map centre: yaw so the screen plane (+z) points inward.
