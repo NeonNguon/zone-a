@@ -1,8 +1,8 @@
 // ================================================================
 // Zone B — a 10×10 wall of 100 images, to the right of spawn.
-// Loaded in <head> AFTER components.js (so zoneARingPlacements() is defined,
-// letting image-wall auto-size itself from Zone A's ring radius) and BEFORE
-// <a-scene> parses, so both components are registered in time.
+// Loaded in <head> AFTER components.js (which owns the shared Zone A image
+// config and the hover/focus components this file reuses) and BEFORE <a-scene>
+// parses, so both components are registered in time.
 //
 // This is a PLACEMENT pass only: get the wall standing at the right size and
 // orientation. Focus/zoom, LOD and streaming come in later passes.
@@ -46,7 +46,8 @@ AFRAME.registerComponent("zone-b-root", {
 // directly ahead, its width spanning across the view.
 //
 // TUNABLES (all adjustable by eye via setAttribute — no code edits):
-//   width  — total wall width in metres. 0 = AUTO: 4 × Zone A's ring radius
+//   width  — total wall width in metres. 0 = AUTO is legacy and now DEAD (it
+//            derived from Zone A's ring, removed in V2) — see resolveWidth()
 //            (≈ double Zone A's overall diameter). Wall height derives from
 //            width via the grid + tile aspect.
 //   gap    — inter-tile spacing as a fraction of cell size (same absolute gap
@@ -74,7 +75,7 @@ function mulberry32(seed) {
 
 AFRAME.registerComponent("image-wall", {
   schema: {
-    width: { type: "number", default: 0 }, // 0 = auto (4 × Zone A ring radius)
+    width: { type: "number", default: 0 }, // 0 = auto: legacy, see resolveWidth()
     gap: { type: "number", default: 0.04 }, // fraction of cell size
     rows: { type: "int", default: 10 },
     cols: { type: "int", default: 10 },
@@ -161,27 +162,20 @@ AFRAME.registerComponent("image-wall", {
     this.build();
   },
 
-  // width=0 means AUTO: read Zone A's ring radius from its own source of truth
-  // (zoneARingPlacements() in components.js) and use 4× it — double Zone A's
-  // overall diameter. Falls back to a fixed default if that can't be read.
+  // width=0 means AUTO. The auto path used to read Zone A's ring radius and use
+  // 4x it; the ring was REMOVED in Zone A V2 (its images now hang in the chung
+  // cu apartments — see js/zone-a-corridor.js), so there is nothing left to
+  // derive a width from. index.html pins `width: 22.46` on #zone-b-wall — the
+  // number the old auto path produced — so this branch is dead in practice and
+  // kept only so a width of 0 still yields a standing wall rather than nothing.
+  // Behaviour for every caller is unchanged: a positive width wins, as before.
   resolveWidth: function () {
     if (this.data.width > 0) return this.data.width;
-    if (typeof zoneARingPlacements === "function") {
-      const p = zoneARingPlacements();
-      if (p && p.length) {
-        const w = 4 * p[0].radius;
-        console.log(
-          `image-wall: width AUTO = 4 × Zone A radius (${p[0].radius.toFixed(
-            2
-          )} m) = ${w.toFixed(2)} m`
-        );
-        return w;
-      }
-    }
     console.warn(
-      "image-wall: could not read Zone A ring radius; FALLBACK width = 15 m"
+      "image-wall: width AUTO is no longer derivable (the Zone A ring is gone); " +
+        "FALLBACK width = 22.46 m. Set an explicit `width` on image-wall."
     );
-    return 15;
+    return 22.46;
   },
 
   build: function () {
@@ -322,7 +316,7 @@ AFRAME.registerComponent("wall-tile-hover", {
 // ----------------------------------------------------------------
 // wall-contact-cue — floor contact cues under the Zone B wall's BOTTOM ROW.
 //
-// Mirrors Zone A's ring-contact-cue and REUSES its machinery via the shared
+// Mirrors the exhibition's other floor cues and REUSES their machinery via the shared
 // ContactCue kit (js/components.js): the SAME runtime radial-gradient texture,
 // the SAME shadow/glow material, and the SAME per-environment retuning. Only the
 // PLACEMENT differs — one flat quad per bottom-row tile, dropped to the floor
@@ -362,7 +356,7 @@ AFRAME.registerComponent("wall-contact-cue", {
     this.group = new THREE.Group();
     this.el.setObject3D("cue", this.group);
 
-    // Shared texture + material (identical to Zone A's ring cues).
+    // Shared texture + material (identical to every other cue in the show).
     this.texture = ContactCue.makeTexture(this.data.softness);
     this.material = ContactCue.makeMaterial(this.data, this.texture);
     this.buildGeometry();
@@ -384,7 +378,7 @@ AFRAME.registerComponent("wall-contact-cue", {
       this.el.parentNode.addEventListener("zonebrootchanged", this.onMoved);
     }
 
-    // Retune with the environment (same contract as ring-contact-cue): adopt the
+    // Retune with the environment (same contract as every other cue): adopt the
     // already-active profile now, and follow every later switch.
     this.onEnvChange = (e) => {
       this.curProfile = (e.detail && e.detail.profile) || null;

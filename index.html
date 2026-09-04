@@ -14,8 +14,9 @@
     <script src="js/captions.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/components.js"></script>
-    <!-- Zone B (10×10 image wall). AFTER components.js so it can read Zone A's
-         ring radius to auto-size the wall. -->
+    <!-- Zone B (10×10 image wall). AFTER components.js: it reuses that file's
+         hover/focus components (its wall width is pinned in the tag below —
+         the old auto-size-from-Zone-A's-ring path died with the ring). -->
     <script src="js/zone-b.js"></script>
     <!-- Zone B floor map (100 locations behind the wall). AFTER zone-b.js so
          it can read the wall's placement + width as its own defaults. -->
@@ -190,7 +191,7 @@
       <!-- ============================================================
            ENVIRONMENT LAYER — everything atmospheric (background/sky,
            fog, lights, ground, grid, particles), swappable as one unit.
-           The ring NEVER sets any of these. environment-manager builds the
+           The zones NEVER set any of these. environment-manager builds the
            active preset's children in here and tears them down on switch.
            FIXED on "void" (the migrated white look): runtime preset switching
            via the `e` key / right-hand `B` button is DISABLED
@@ -270,8 +271,8 @@
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
            the same three lines floating ~3.5 m in front of spawn at eye
-           height, facing spawn, WORLD-FIXED (clear of Zone A's ring, whose
-           nearest image sits ~4.3 m out). Activates when the scene loads
+           height, facing spawn, WORLD-FIXED, standing clear in the foyer
+           (nothing else is within ~5 m of it). Activates when the scene loads
            (in sync with the splash fade) and dissolves on the first
            exploration input — or after holdDuration on its own. One-shot;
            zero per-frame cost once gone. Tunables: holdDuration /
@@ -289,18 +290,9 @@
            math or the nine coordinates.
            ============================================================ -->
       <a-entity id="zone-a" zone-a-root="offset: 0 0 -12.5">
-        <!-- Ring container: ring-layout fills it with nine image entities. -->
-        <a-entity ring-layout position="0 0 0"></a-entity>
-
-        <!-- Per-image floor contact cue. Lives under #zone-a so it PERSISTS
-             across environment switches (env teardown only touches
-             #environment); it retunes its material to each preset's profile.
-             Tunables: radius / opacity / softness / yoffset / color / mode. -->
-        <a-entity ring-contact-cue position="0 0 0"></a-entity>
-
-        <!-- Zone A info terminal: beside the ring's right end, screen facing
-             spawn (+z). NUDGE BY EYE via position/rotation (local; the
-             zone-a-root offset carries it). Cue = shared spot-contact-cue. -->
+        <!-- Zone A info terminal: screen facing spawn (+z). NUDGE BY EYE via
+             position/rotation (local; the zone-a-root offset carries it).
+             Cue = shared spot-contact-cue. -->
         <a-entity
           id="info-terminal-a"
           info-terminal="key: a"
@@ -536,15 +528,15 @@
            ============================================================ -->
       <a-entity
         id="zone-c"
-số đề        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
+        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
       >
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
              none). Lives under #zone-c so it PERSISTS across environment
              switches (env teardown only touches #environment); it reuses the
              shared ContactCue kit and retunes its material to each preset's
-             ground profile, exactly like Zone A's ring cues and Zone B's
-             wall cues — with an `intensity` boost on the profile opacity so
+             ground profile, exactly like Zone B's wall cues and every spot
+             cue — with an `intensity` boost on the profile opacity so
              this one big pool doesn't read faint. Tunables: cueWidth /
              cueDepth / intensity / opacity / softness / yoffset.
              forceGlow: the Zone C floor is dark, so the void preset's shadow

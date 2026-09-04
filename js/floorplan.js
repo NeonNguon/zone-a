@@ -91,7 +91,9 @@ const DEFAULT_ROOMS = {
       "+x": { color: "#f5b4b0" },
     },
   },
-  // The ring, forward (-z). Its images top out ~2.3 m, so 5 m is ample.
+  // Zone A, forward (-z). Since Zone A V2 the room is EMPTY but for the
+  // teleport booth and the info terminal (the nine images moved out to the
+  // chung cu corridor), so nothing in it comes near this 5 m height.
   zoneA: { cx: 0, cz: -11.85, w: 11.2, d: 11.1, height: 5, ceiling: true },
   // Image wall + triptych, right (+x). The wall tops out ~4.9 m.
   //

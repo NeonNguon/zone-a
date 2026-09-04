@@ -2,7 +2,7 @@
 // Environment layer for Zone A.
 //
 // The atmosphere (background, fog, lights, ground, grid, particles) is a
-// SWAPPABLE unit, independent of the ring. `environment-manager` owns the
+// SWAPPABLE unit, independent of the zones. `environment-manager` owns the
 // #environment container and rebuilds it from a named preset.
 //
 // Design rules (from the Step 1 audit):
@@ -54,7 +54,7 @@ const PARTICLE_DRIFT = 0.02; // radians/sec — slow yaw of the whole field
 const PHOTO_SKY_SRC = "assets/qwantani_moonrise_puresky_4k.jpg";
 // Equirectangular image for the `room` preset's sphere (kept as-is).
 const ROOM_SKY_SRC = "assets/ferndale_studio_04_4k.jpg";
-// Radius (metres) of the `room` preset's inverted photo sphere. The ring sits
+// Radius (metres) of the `room` preset's inverted photo sphere. The gallery sits
 // ~3.7 m from centre, so it stays comfortably inside. Tune to resize the room.
 const ROOM_RADIUS = 8;
 
@@ -215,7 +215,7 @@ const FLOOR_TERRAZZO_SEED = 7;
 const FLOOR_TERRAZZO_TILE = 1.8;
 
 // `cityroom` preset (flat panels on a white box room) -------------------
-const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the ring; tune)
+const CITYROOM_SIZE = 32; // metres, box width & depth (must exceed the gallery; tune)
 const CITYROOM_HEIGHT = 20; // metres, box height (>= panel height below)
 // Which saigon image (1-4) maps to each of the 4 walls, in order: -Z, +X, +Z, -X.
 const WALL_IMAGES = [1, 2, 3, 4];
@@ -290,7 +290,7 @@ AFRAME.registerComponent("particle-field", {
       sizeAttenuation: true, // nearer points look bigger
       transparent: true,
       opacity: 0.85,
-      depthWrite: false, // don't occlude the ring; cheap soft look
+      depthWrite: false, // don't occlude the gallery; cheap soft look
       fog: true, // fade into the dataspace fog
     });
 
@@ -431,7 +431,7 @@ AFRAME.registerComponent("room-fixtures", {
 
 // ----------------------------------------------------------------
 // photo-room: an inverted sphere (BackSide — viewed from inside) textured with
-// an equirectangular image, so the photo wraps CLOSE around the ring rather
+// an equirectangular image, so the photo wraps CLOSE around the gallery rather
 // than sitting at an infinite a-sky distance. Kept a SPHERE on purpose: the
 // image is equirectangular and would distort on flat box faces. Same lifecycle
 // pattern as particle-field/three-grid — build in init(), dispose in remove()
@@ -685,8 +685,8 @@ const ENV_PRESETS = {
     env.appendChild(envEl("a-sky", { src: PHOTO_SKY_SRC }));
   },
 
-  // ROOM — the ring INSIDE the photo: an inverted equirect sphere (radius
-  // ROOM_RADIUS) wraps the studio close around the ring, instead of the
+  // ROOM — the gallery INSIDE the photo: an inverted equirect sphere (radius
+  // ROOM_RADIUS) wraps the studio close around the gallery, instead of the
   // infinite dome the `photo` preset uses. A separate preset — `photo` is
   // left exactly as-is.
   room: function (env, scene) {
@@ -707,7 +707,7 @@ const ENV_PRESETS = {
     env.appendChild(envEl("a-entity", { "photo-room": "" }));
   },
 
-  // SKYLINE — Saigon silhouettes as a distant horizon ringing the white space.
+  // SKYLINE — Saigon silhouettes as a distant horizon around the white space.
   // Flat planes standing on the floor line at SKYLINE_RADIUS, buildings rising
   // from the ground, white room above and behind. The 4 images repeat around.
   skyline: function (env, scene) {
@@ -743,7 +743,7 @@ const ENV_PRESETS = {
     }
   },
 
-  // CITYROOM — a big white box room enclosing the ring, with the Saigon
+  // CITYROOM — a big white box room enclosing the gallery, with the Saigon
   // silhouettes mapped FLAT onto the inner wall faces as graphic panels, each
   // sitting on the floor line of its wall (buildings rising from the floor).
   cityroom: function (env, scene) {
@@ -832,8 +832,8 @@ const ENV_PRESETS = {
 
 // ----------------------------------------------------------------
 // Ground-cue PROFILES — OPTIONAL, additive metadata on the preset definitions.
-// Zone A's ring-contact-cue reads the active preset's `.profile` and retunes
-// its shared material to it:
+// Every contact cue (spot-contact-cue, wall-contact-cue, map-contact-cue) reads
+// the active preset's `.profile` and retunes its shared material to it:
 //   { mode: 'shadow' | 'glow', color, opacity }
 // Presets WITHOUT a profile keep working unchanged — the cue falls back to its
 // dark "shadow" default (covers photo, room, skyline, splat).
@@ -924,7 +924,7 @@ AFRAME.registerComponent("environment-manager", {
     this.active = name;
     // Active preset's optional ground-cue profile (additive metadata; may be
     // undefined). Tracked here alongside the HUD's active-preset state, and
-    // broadcast so Zone A's ring-contact-cue can retune to match.
+    // broadcast so every zone's contact cues can retune to match.
     this.activeProfile = builder.profile || null;
     this.scene.emit("environmentchanged", {
       preset: name,

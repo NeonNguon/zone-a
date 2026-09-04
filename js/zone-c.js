@@ -991,7 +991,7 @@ AFRAME.registerComponent("zone-c-root", {
 //
 // ONE wide elliptical pool on the floor under the screen (the control strip
 // deliberately gets none), so the screen reads as deliberately-floating-but-
-// anchored — same philosophy as Zone A's ring cues and Zone B's wall cues.
+// anchored — same philosophy as Zone B's wall cues and the spot cues.
 // ALL texture / material / env-retune logic is the shared ContactCue kit in
 // components.js; this component owns only its single quad's geometry+layout.
 //
@@ -1002,7 +1002,7 @@ AFRAME.registerComponent("zone-c-root", {
 // opacity for THIS cue only — the big ellipse needs more presence than the
 // shared profiles (tuned for Zone A/B's small pools) give it.
 //
-// Env adaptation: identical contract to ring/wall cues — adopt the active
+// Env adaptation: identical contract to every other cue — adopt the active
 // ground profile on init, retune the material on every `environmentchanged`
 // (shadow on light floors, glow on dark ones, dark-shadow fallback when the
 // preset declares no profile). GEOMETRY persists; only the material retunes.
@@ -1060,7 +1060,7 @@ AFRAME.registerComponent("screen-contact-cue", {
       this.el.parentNode.addEventListener("zonecrootchanged", this.onMoved);
     }
 
-    // Retune with the environment (same contract as ring/wall cues): adopt the
+    // Retune with the environment (same contract as every other cue): adopt the
     // already-active profile now, and follow every later switch.
     this.onEnvChange = (e) => {
       this.curProfile = (e.detail && e.detail.profile) || null;
