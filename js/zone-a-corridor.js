@@ -925,7 +925,7 @@ const roomImages = [
 //   tubeWidth .11 / tubeLength 0      the fittings (0 = auto: 0.6 × width)
 //   tubeDrop .06                      how far a tube hangs below the ceiling
 //   imageProud .02                    a picture's clearance off its wall
-//   focusDistance 1.3 / focusDimRadius 1.7
+//   focusDistance 1.3 / focusDimRadius 2.5
 //                                     the VR focus view's fit INSIDE a 3.2×4 m
 //                                     apartment (see js/focus-vr.js)
 // ================================================================
@@ -976,8 +976,15 @@ AFRAME.registerComponent("corridor-root", {
     tubeLength: { type: "number", default: 0 }, // 0 = auto (0.6 × width)
     tubeDrop: { type: "number", default: 0.06 },
     imageProud: { type: "number", default: 0.02 },
+    // The VR focus view's fit inside an apartment (read by js/focus-vr.js via
+    // ZoneA.focusVR when the teleport puts you in here). 1.3 m keeps the panel
+    // clear of a 3.2 m-wide room's side walls; the dim radius has to stay
+    // OUTSIDE the panel's own farthest corner (2.42 m at this distance) or the
+    // dim sphere cuts a visible circle across the picture it is isolating —
+    // 2.5 m is the smallest radius that does, and it still dims the corridor
+    // seen through the open door.
     focusDistance: { type: "number", default: 1.3 },
-    focusDimRadius: { type: "number", default: 1.7 },
+    focusDimRadius: { type: "number", default: 2.5 },
   },
 
   init: function () {
@@ -1227,12 +1234,15 @@ AFRAME.registerComponent("corridor-root", {
     this.buildSideWall(L, -1);
     this.buildSideWall(L, +1);
     this.buildTubes(L);
+    this.partyWalls = {}; // two abutting apartments share ONE wall - see below
+    L.rooms.forEach((r) => this.buildRoom(L, r));
 
     this.built = true;
     console.log(
       "[corridor] " + L.run.toFixed(1) + " m run, " + L.bays + " bays of " +
         L.bay.toFixed(2) + " m, " +
         (L.openings["-1"].length + L.openings["1"].length) + " doorways, " +
+        L.rooms.length + " apartments, " + this.imageEls.length + " images, " +
         this.group.children.length + " meshes"
     );
     this.el.emit("zoneacorridorbuilt");
@@ -1340,6 +1350,154 @@ AFRAME.registerComponent("corridor-root", {
                              [0, 0, op.width / d.transomHeight, 1]);
     tr.position.set(faceX, d.doorHeight + d.transomHeight / 2, op.z);
     tr.rotation.y = face.rotation.y;
+  },
+
+  // ---------------------------------------------------------------
+  // ONE APARTMENT: a single room hanging off the corridor through an open
+  // doorway, with three of the nine images on its three own walls.
+  //
+  // Frame (all root-local): `side` is -1 for the left-hand wall, +1 for the
+  // right. `xNear` is the corridor wall's OUTER face — where the apartment
+  // starts — and the room runs roomDepth further out to `xFar`; along the
+  // corridor it spans roomWidth centred on its doorway.
+  //
+  // Its fourth wall is the corridor's own side wall, already built: that is
+  // what "three walls + the corridor wall it shares" means, and it is why the
+  // doorway needs no extra reveal geometry. Two apartments on the same wall
+  // land exactly one wall thickness apart (see layout()'s auto spacing), so
+  // they share a PARTY WALL — built once, by whichever room asks first.
+  // ---------------------------------------------------------------
+  buildRoom: function (L, r) {
+    const d = this.data;
+    const t = L.t;
+    const xNear = r.side * (L.halfW + t); // the room's face of the corridor wall
+    const xFar = xNear + r.side * d.roomDepth; // its back wall's inner face
+    const xMid = (xNear + xFar) / 2;
+    const zNear = r.z - d.roomWidth / 2; // -z wall inner face
+    const zFar = r.z + d.roomWidth / 2; // +z wall inner face
+    const variant = (r.index + 1) % 3;
+
+    // FLOOR + CEILING. Both reach back to the corridor's own inner face rather
+    // than stopping at the room side of the wall, so the doorway threshold is
+    // floored (and lidded) instead of showing a wallThickness-wide slot of
+    // nothing; the overlap is buried inside the wall, and the two floors abut
+    // exactly at the corridor face with no overlap to z-fight.
+    const spanX = d.roomDepth + t;
+    const xPlate = r.side * (L.halfW + spanX / 2);
+    const tile = d.roomTile * 4; // the gạch bông canvas is a 4×4 tile block
+    const floor = this.addPlane(spanX, d.roomWidth, this.m.roomFloor,
+                                [0, 0, spanX / tile, d.roomWidth / tile]);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(xPlate, 0, r.z);
+    const ceil = this.addPlane(spanX, d.roomWidth, this.m.ceiling,
+                               [0, 0, spanX / L.bay, d.roomWidth / L.bay]);
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.set(xPlate, d.height, r.z);
+
+    // BACK WALL (the one facing you as you walk in), spanning past both side
+    // walls so the corners close by overlap — the floorplan's trick.
+    this.addBox(t, d.height, d.roomWidth + t * 2, xFar + r.side * t / 2,
+                d.height / 2, r.z, this.m.wall[variant], L.bay, d.height);
+
+    // The TWO SIDE WALLS. Each runs from inside the corridor wall out past the
+    // back wall. A wall at a z another apartment has already built is that
+    // shared party wall: build it once.
+    [zNear - t / 2, zFar + t / 2].forEach((zc) => {
+      const key = r.side + "@" + zc.toFixed(4);
+      if (this.partyWalls[key]) return;
+      this.partyWalls[key] = true;
+      this.addBox(spanX + t, d.height, t,
+                  r.side * (L.halfW + (spanX + t) / 2), d.height / 2, zc,
+                  this.m.wall[(variant + 2) % 3], L.bay, d.height);
+    });
+
+    // One tube, in the middle of the room — the same fitting as the corridor's.
+    const tube = this.addPlane(L.tubeLength, d.tubeWidth, this.m.tube);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.set(xMid, d.height - d.tubeDrop, r.z);
+
+    this.buildOpenDoor(L, r);
+    this.hangImages(L, r, xMid, xFar, zNear, zFar);
+  },
+
+  // The apartment's own door, standing open into the room: the same leaf and
+  // the same texture as a closed one, hinged on the +z jamb of its frame and
+  // swung doorOpenAngle inward. Built under a pivot object so the hinge is a
+  // real hinge — the leaf's edge stays on the frame at any angle.
+  buildOpenDoor: function (L, r) {
+    const d = this.data;
+    const pivot = new THREE.Object3D();
+    pivot.position.set(r.side * (L.halfW + L.t / 2), 0,
+                       r.z + d.doorWidth / 2 + d.frameWidth / 2);
+    // Swing INTO the room: -x for a left-hand apartment, +x for a right-hand
+    // one, which is a positive yaw on the left and a negative one on the right.
+    pivot.rotation.y = THREE.MathUtils.degToRad(-r.side * d.doorOpenAngle);
+    this.group.add(pivot);
+
+    const geo = new THREE.BoxGeometry(d.leafThickness, d.doorHeight, d.doorWidth);
+    this.geometries.push(geo);
+    const leaf = new THREE.Mesh(geo, this.m.doorEdge);
+    leaf.position.set(0, d.doorHeight / 2, -d.doorWidth / 2);
+    pivot.add(leaf);
+
+    // The door's face. Its atlas cell is picked the same way a closed door's
+    // is, so the apartments' doors belong to the same set of four.
+    const pick = Math.abs(Math.round(r.z * 7 + (r.side + 1) * 3 + d.seed)) % 4;
+    const u0 = (pick % 2) * 0.5;
+    const v0 = 1 - (Math.floor(pick / 2) + 1) * 0.5;
+    const fgeo = new THREE.PlaneGeometry(d.doorWidth, d.doorHeight);
+    setPlaneUVs(fgeo, u0, v0, u0 + 0.5, v0 + 0.5);
+    this.geometries.push(fgeo);
+    const face = new THREE.Mesh(fgeo, this.m.door);
+    face.position.set(-r.side * (d.leafThickness / 2 + 0.004), d.doorHeight / 2,
+                      -d.doorWidth / 2);
+    face.rotation.y = r.side < 0 ? Math.PI / 2 : -Math.PI / 2;
+    pivot.add(face);
+  },
+
+  // THE PICTURES. Three per apartment, on its LEFT, BACK and RIGHT walls as you
+  // walk in, centred on each wall at IMG_Y with IMG_SIZE — the shared Zone A
+  // image config in js/components.js, the same numbers the ring used.
+  //
+  // Each is an <a-image class="clickable" image-hover focus-on-click>, which is
+  // exactly what ring-layout built, so hover, click, the desktop overlay, the
+  // VR focus view, the captions and the spoken memories all work here with no
+  // change to any of them.
+  //
+  // They stand `imageProud` off the wall. image-hover puts its hover frame at
+  // the image's local z -0.01, i.e. still (imageProud - 0.01) clear of the wall
+  // — no z-fighting, with the default 0.02 leaving a centimetre of margin.
+  hangImages: function (L, r, xMid, xFar, zNear, zFar) {
+    const d = this.data;
+    const ids = roomImages[r.index] || [];
+    // Walking in, your LEFT is +z in a left-hand apartment and -z in a
+    // right-hand one; your RIGHT is the opposite wall; the BACK wall faces back
+    // toward the corridor.
+    const leftSign = -r.side;
+    const walls = [
+      // left wall
+      { x: xMid, z: r.z + leftSign * (d.roomWidth / 2 - d.imageProud),
+        rotY: leftSign > 0 ? 180 : 0 },
+      // back wall — its face looks back toward the corridor
+      { x: xFar - r.side * d.imageProud, z: r.z, rotY: -90 * r.side },
+      // right wall
+      { x: xMid, z: r.z - leftSign * (d.roomWidth / 2 - d.imageProud),
+        rotY: leftSign > 0 ? 0 : 180 },
+    ];
+    walls.forEach((w, i) => {
+      if (!ids[i]) return;
+      const img = document.createElement("a-image");
+      img.setAttribute("src", ids[i]); // by asset id, never a path
+      img.setAttribute("position", w.x + " " + IMG_Y + " " + w.z);
+      img.setAttribute("rotation", "0 " + w.rotY + " 0");
+      img.setAttribute("width", IMG_SIZE);
+      img.setAttribute("height", IMG_SIZE);
+      img.setAttribute("class", "clickable");
+      img.setAttribute("image-hover", "");
+      img.setAttribute("focus-on-click", "");
+      this.el.appendChild(img);
+      this.imageEls.push(img);
+    });
   },
 
   // The tubes: one bright unlit quad just under the ceiling in the middle of
