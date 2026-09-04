@@ -995,6 +995,23 @@ AFRAME.registerComponent("corridor-root", {
     this.hiddenClickables = []; // clickables parked while the corridor is hidden
     this.built = false;
 
+    // WALKABILITY. The corridor is not in the floorplan, so it registers its
+    // own walkable rectangles with the collider's registry (js/rig-collision.js
+    // — RigRegions). One source, derived live from this component's schema and
+    // offset every time the collider rebuilds, so retuning the corridor retunes
+    // its walls for free. Registering here rather than in build() means the
+    // source exists no matter which component inits first; the function itself
+    // re-derives the layout on each call, so it is correct even before the
+    // first build.
+    this.regionSourceId = "zone-a-corridor";
+    if (window.RigRegions) {
+      window.RigRegions.addRegionSource(this.regionSourceId, (opts) =>
+        this.walkableRects(opts)
+      );
+    } else {
+      console.warn("corridor-root: no RigRegions; the corridor will have no walls");
+    }
+
     // Late-built hit boxes (TerminalKit's, inside the return booth) have to be
     // gated too — see applyShown.
     this.onLoaded = () => this.applyShown();
@@ -1054,7 +1071,76 @@ AFRAME.registerComponent("corridor-root", {
       this.el.setAttribute("position", { x: o.x, y: o.y, z: o.z });
       this.el.emit("zoneacorridorrootchanged");
     }
+    // The walkable rectangles are derived from the same schema + offset, so any
+    // change to either means the collider has to re-read them.
+    if ((geomChanged || moved) && window.RigRegions) window.RigRegions.rebuild();
     this.applyShown();
+  },
+
+  // ---------------------------------------------------------------
+  // walkableRects(opts) — THE CORRIDOR'S WALLS, for rig-collision.
+  //
+  // The union of axis-aligned world-space rectangles the visitor may stand in:
+  // the landing, the corridor, the three apartments, and one throat per open
+  // doorway bridging each apartment to the run. Derived from this component's
+  // own layout() — the same numbers the geometry was built from — so the walls
+  // you see and the walls you cannot cross can never disagree.
+  //
+  // INSETS. The collider's rooms inset from a wall's CENTRELINE by
+  // (wallThickness/2 + playerRadius). This component's `width` / `height` /
+  // `length` / `landingDepth` are CLEAR dimensions — they already name the wall
+  // INNER faces — so the identical stop line is just playerRadius in from a
+  // face, which is what is applied below.
+  //
+  // THROATS. A wall is wallThickness thick and both sides are inset by the
+  // player radius, so the corridor rectangle and an apartment rectangle stop
+  // short of each other with a gap between them; without a bridge the doorway
+  // would be a wall. Each throat is doorWidth minus a player diameter, extended
+  // doorOverlap past BOTH neighbours' inset edges so the union stays
+  // continuous — the same rule buildRegions() uses for the floorplan's
+  // hallways. The closed doors get no throat, which is exactly why they are
+  // solid: they sit inside a wall, where there is no rectangle at all.
+  // ---------------------------------------------------------------
+  walkableRects: function (opts) {
+    const d = this.data;
+    const L = this.layout();
+    const o = d.offset; // the root carries no rotation: local + offset = world
+    const r = (opts && opts.playerRadius) || 0;
+    const overlap = (opts && opts.doorOverlap) || 0;
+    const rects = [];
+    const push = (x0, x1, z0, z1, tag) => {
+      if (x1 - x0 <= 0 || z1 - z0 <= 0) return; // narrower than the visitor
+      rects.push({
+        x0: o.x + x0, x1: o.x + x1,
+        z0: o.z + z0, z1: o.z + z1,
+        tag: tag,
+      });
+    };
+
+    // The LANDING and the CORRIDOR: one tube, split at z = 0 into two
+    // rectangles that share that edge, so each carries its own tag while the
+    // union stays continuous.
+    push(-L.halfW + r, L.halfW - r, 0, L.zBack - r, "corridor:landing");
+    push(-L.halfW + r, L.halfW - r, L.zEnd + r, 0, "corridor:run");
+
+    L.rooms.forEach((room) => {
+      // The apartment itself.
+      const near = room.side * (L.halfW + L.t); // its face of the corridor wall
+      const far = near + room.side * d.roomDepth;
+      push(Math.min(near, far) + r, Math.max(near, far) - r,
+           room.z - d.roomWidth / 2 + r, room.z + d.roomWidth / 2 - r,
+           "corridor:room" + (room.index + 1));
+
+      // Its doorway throat: from inside the corridor, through the wall, to
+      // inside the apartment.
+      const inCorridor = room.side * (L.halfW - r - overlap);
+      const inRoom = room.side * (L.halfW + L.t + r + overlap);
+      push(Math.min(inCorridor, inRoom), Math.max(inCorridor, inRoom),
+           room.z - (d.doorWidth / 2 - r), room.z + (d.doorWidth / 2 - r),
+           "corridor:door" + (room.index + 1));
+    });
+
+    return rects;
   },
 
   // `shown` is visibility only — plus one thing visibility does NOT cover.
@@ -1574,6 +1660,9 @@ AFRAME.registerComponent("corridor-root", {
       this.el.sceneEl.removeEventListener("loaded", this.onSceneLoaded);
     }
     this.el.sceneEl.removeEventListener("loaded", this.onLoaded);
+    if (window.RigRegions) {
+      window.RigRegions.removeRegionSource(this.regionSourceId);
+    }
     this.teardown();
   },
 });

@@ -29,6 +29,11 @@
 // The doorway edges themselves are deliberately NOT inset: the corridor rect
 // bridging into the room is what keeps the opening passable.
 //
+// On top of that, SUB-SPACES outside the floorplan can register their own
+// rectangles through RigRegions (see the block below this comment) — that is
+// how the Zone A chung cư corridor, 400 m out and reachable only by teleport,
+// gets the same walls the gallery has.
+//
 // PER-TICK (after locomotion has moved the rig THIS frame — see the tick-order
 // note below): read the rig's new (x,z). If it's inside the union, remember it
 // as last-valid. If it's outside, try an axis-separated SLIDE so you glide
@@ -67,6 +72,72 @@
 //   enabled      — master on/off
 //   debug        — log every blocked / slid / reverted move
 // ================================================================
+
+// ================================================================
+// RigRegions — the walkable-region REGISTRY.
+//
+// The collider's own region comes from the floorplan: the exhibition's rooms
+// and hallways. But a SUB-SPACE that is not in the floorplan can want the same
+// clamp — the Zone A chung cư corridor is parked 400 m out and is reached only
+// by teleport, yet it wants walls you cannot walk through exactly as the
+// gallery does. Rather than teach this file about every such space, a space
+// registers a SOURCE: a function returning world-space rectangles
+// { x0, x1, z0, z1, tag } which are appended to the floorplan's in
+// buildRegions(). The source is called on every rebuild, so it can derive its
+// rectangles live from its own config and never copies a number.
+//
+// A module-level singleton rather than component methods, because registration
+// order is not guaranteed: #rig is the LAST entity in the scene, so a
+// sub-space's component inits well before this component does. Sources may
+// register whenever they like — rebuild() is a no-op until the collider exists,
+// and the collider collects every source already registered on its first build.
+//
+//   RigRegions.addRegionSource('zone-a-corridor', fn)   // fn(opts) -> [rect]
+//   RigRegions.removeRegionSource('zone-a-corridor')
+//   RigRegions.rebuild()      // ask the collider to re-read every source
+//
+// `opts` carries the collider's own { playerRadius, doorOverlap }, so a source
+// insets its rectangles by the same numbers the rooms and hallways use and
+// retunes with them for free.
+// ================================================================
+window.RigRegions = {
+  sources: {},
+
+  addRegionSource: function (id, fn) {
+    this.sources[id] = fn;
+    this.rebuild();
+  },
+
+  removeRegionSource: function (id) {
+    delete this.sources[id];
+    this.rebuild();
+  },
+
+  // Every registered source's rectangles, flattened. A source that throws is
+  // skipped with a warning rather than taking the whole walkable region down
+  // with it — losing one sub-space's walls beats trapping the visitor.
+  rects: function (opts) {
+    const out = [];
+    const ids = Object.keys(this.sources);
+    for (let i = 0; i < ids.length; i++) {
+      let r = null;
+      try {
+        r = this.sources[ids[i]](opts);
+      } catch (e) {
+        console.warn("[rig-collision] region source '" + ids[i] + "' failed", e);
+      }
+      if (r) for (let k = 0; k < r.length; k++) out.push(r[k]);
+    }
+    return out;
+  },
+
+  rebuild: function () {
+    const el = document.getElementById("rig");
+    const c = el && el.components && el.components["rig-collision"];
+    if (c) c.buildRegions();
+  },
+};
+
 AFRAME.registerComponent("rig-collision", {
   schema: {
     playerRadius: { type: "number", default: 0.25 },
@@ -191,10 +262,26 @@ AFRAME.registerComponent("rig-collision", {
       rects.push(rect);
     });
 
+    // SUB-SPACES: everything registered with RigRegions (see the header) —
+    // e.g. the Zone A corridor, which is not part of the floorplan at all.
+    // They are appended, never merged, so a source can only ever ADD walkable
+    // ground; it cannot take the gallery's away.
+    const extra = window.RigRegions
+      ? window.RigRegions.rects({ playerRadius: r, doorOverlap: this.data.doorOverlap })
+      : [];
+    for (let i = 0; i < extra.length; i++) rects.push(extra[i]);
+
     this.rects = rects;
     if (this.data.debug) {
       console.log("[rig-collision] built " + rects.length + " walkable rects", rects);
     }
+  },
+
+  // Re-read the floorplan and every registered region source. Exposed so a
+  // source can ask for a rebuild when its own geometry changes (the same thing
+  // RigRegions.rebuild() calls).
+  rebuild: function () {
+    this.buildRegions();
   },
 
   // Point (x,z) inside the walkable union? A null region (floorplan not built)
