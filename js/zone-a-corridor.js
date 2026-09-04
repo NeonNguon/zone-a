@@ -1752,8 +1752,10 @@ AFRAME.registerComponent("zone-a-teleport", {
       this.corridorEl.addEventListener("zoneacorridorrootchanged", this.onCorridorChange);
     }
 
-    this.layout();
+    // Label first: it does not depend on anything else having initialised, and
+    // it must not be skipped if the corridor is not ready yet.
     this.labelBooth();
+    this.layout();
   },
 
   update: function (oldData) {
@@ -1834,12 +1836,20 @@ AFRAME.registerComponent("zone-a-teleport", {
   },
 
   // The corridor's live schema (never a copy of its numbers).
+  //
+  // NOT ready until corridor-root has initialised: until then getAttribute
+  // hands back the RAW HTML attribute — a string, whose .offset is undefined —
+  // and #rig is the last entity in the scene, so this manager can easily run
+  // first. That is not an error worth warning about: the corridor emits
+  // `zoneacorridorbuilt` the moment it is ready and we lay out again then. Only
+  // a MISSING corridor is a real problem.
   corridorConfig: function () {
-    const attr = this.corridorEl && this.corridorEl.getAttribute("corridor-root");
-    if (!attr) {
+    if (!this.corridorEl) {
       console.warn("zone-a-teleport: no #zone-a-corridor; the booth goes nowhere");
       return null;
     }
+    const attr = this.corridorEl.getAttribute("corridor-root");
+    if (!attr || typeof attr !== "object" || !attr.offset) return null;
     return attr;
   },
 

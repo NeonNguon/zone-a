@@ -229,7 +229,9 @@
 
            Visual only here — this entity builds no collision. Walkability is
            enforced by #rig's rig-collision component, which reads THIS
-           floorplan's own room/hallway config (js/rig-collision.js).
+           floorplan's own room/hallway config (js/rig-collision.js). Spaces
+           OUTSIDE the floorplan — the Zone A corridor — add their own walkable
+           rectangles to that same collider through its RigRegions registry.
 
            Tunables (no code edits — setAttribute on #floorplan): height /
            thickness / color / shader, plus the full `rooms` and `hallways`
@@ -714,7 +716,16 @@
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
-           while the headset head-tracks the camera within it. -->
+           while the headset head-tracks the camera within it.
+
+           rig-collision clamps locomotion to the walkable floor. Its region is
+           built from the FLOORPLAN's own live config (so the walls you see and
+           the walls you cannot cross come from one set of numbers), PLUS any
+           sub-space that registers itself through the RigRegions registry in
+           js/rig-collision.js — which is how the Zone A corridor, 400 m out and
+           not part of the floorplan at all, gets the same walls the gallery
+           has. Tunables on this entity: playerRadius / doorOverlap /
+           teleportThreshold / enabled / debug. -->
       <a-entity id="rig" position="0 0 0" rig-collision>
         <!-- Camera at standing eye height; desktop controls unchanged.
              near:0.1 (up from the 0.005 default) tightens the depth range so
