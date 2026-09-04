@@ -396,7 +396,27 @@
            doorOpenAngle / floorTile / roomTile / tubeWidth / tubeLength /
            tubeDrop / imageProud / focusDistance / focusDimRadius).
            ============================================================ -->
-      <a-entity id="zone-a-corridor" corridor-root="offset: 0 0 400; shown: false"></a-entity>
+      <a-entity id="zone-a-corridor" corridor-root="offset: 0 0 400; shown: false">
+        <!-- RETURN BOOTH — the way home, standing on the landing against its
+             back wall with its screen facing back down the corridor, so you
+             read it the moment you turn around on arrival and again as you
+             walk back up the run. A CHILD of the corridor root, so it hides
+             and relocates with it (exactly like the floor map's return
+             terminals under #zone-b-map); the manager derives its spot from
+             the corridor's own landingDepth.
+
+             It borrows the map terminals’ amber accent and their EXIT
+             grammar deliberately: one “way home” language across the whole
+             exhibition. No beacon — that exists to be findable across a 25 m
+             floor map, and this is a 2.2 m-wide corridor. Its cue is forced to
+             glow, like Zone C’s, because the corridor floor is dark cement and
+             the void preset’s shadow pool would be invisible on it. -->
+        <a-entity
+          id="terminal-a2-return"
+          teleport-terminal="label: EXHIBITION; accent: #ffc400"
+          spot-contact-cue="forceGlow: true"
+        ></a-entity>
+      </a-entity>
 
       <!-- ============================================================
            ZONE B — a 10×10 wall of 100 images, to the RIGHT of spawn.

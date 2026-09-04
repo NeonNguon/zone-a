@@ -992,7 +992,14 @@ AFRAME.registerComponent("corridor-root", {
     this.geometries = [];
     this.materials = [];
     this.imageEls = [];
+    this.hiddenClickables = []; // clickables parked while the corridor is hidden
     this.built = false;
+
+    // Late-built hit boxes (TerminalKit's, inside the return booth) have to be
+    // gated too — see applyShown.
+    this.onLoaded = () => this.applyShown();
+    if (this.el.sceneEl.hasLoaded) setTimeout(this.onLoaded, 0);
+    else this.el.sceneEl.addEventListener("loaded", this.onLoaded);
 
     // DEBUG ENTRY — `?zonea=debug` shows the corridor on load and drops you on
     // the landing facing down it, instead of making you walk to the booth and
@@ -1050,16 +1057,47 @@ AFRAME.registerComponent("corridor-root", {
     this.applyShown();
   },
 
-  // `shown` is visibility only — plus the images' clickable class, because a
-  // raycaster with no `far` limit (the desktop mouse cursor) would otherwise be
-  // able to hit a picture parked 400 m behind the gallery.
+  // `shown` is visibility only — plus one thing visibility does NOT cover.
+  //
+  // THREE's raycaster does not skip invisible objects (checked against r173:
+  // a ray fired at a hidden mesh still returns a hit), and the desktop mouse
+  // cursor's raycaster has no `far` limit. A picture hangs at exactly eye
+  // height 400 m along +z, so looking back down the gallery and clicking would
+  // otherwise open a focus view on a picture in a corridor you are not in. So
+  // while the corridor is hidden, everything clickable inside it — the nine
+  // images and the return booth's hit box — loses the `clickable` class the
+  // raycasters filter on, and gets it back when the corridor is shown.
+  //
+  // Re-run on every build and once the scene has loaded, because the booth's
+  // hit box is built by TerminalKit inside the terminal's own init, which can
+  // land after ours.
   applyShown: function () {
     const on = this.data.shown;
     this.el.object3D.visible = on;
-    this.imageEls.forEach(function (img) {
-      if (on) img.setAttribute("class", "clickable");
-      else img.removeAttribute("class");
-    });
+    if (on) {
+      this.hiddenClickables.forEach(function (el) {
+        el.classList.add("clickable");
+      });
+      this.hiddenClickables = [];
+    } else {
+      const list = this.el.querySelectorAll(".clickable");
+      for (let i = 0; i < list.length; i++) {
+        list[i].classList.remove("clickable");
+        this.hiddenClickables.push(list[i]);
+      }
+    }
+    this.refreshRaycasters();
+  },
+
+  // A-Frame's raycasters cache the object list they test; a class change alone
+  // does not invalidate it, so ask each one to rebuild (the same nudge
+  // focus-vr.js gives them after adding or removing clickable entities).
+  refreshRaycasters: function () {
+    const list = this.el.sceneEl.querySelectorAll("[raycaster]");
+    for (let i = 0; i < list.length; i++) {
+      const rc = list[i].components && list[i].components.raycaster;
+      if (rc) rc.refreshObjects();
+    }
   },
 
   // ---------------------------------------------------------------
@@ -1535,6 +1573,7 @@ AFRAME.registerComponent("corridor-root", {
     if (this.onSceneLoaded) {
       this.el.sceneEl.removeEventListener("loaded", this.onSceneLoaded);
     }
+    this.el.sceneEl.removeEventListener("loaded", this.onLoaded);
     this.teardown();
   },
 });
@@ -1553,23 +1592,75 @@ AFRAME.registerComponent("corridor-root", {
 // CENTRE, read live from the floorplan's own config (the same way
 // zone-b-teleport reads the Zone B room centre), plus a tunable offset.
 //
+// Placements — all derived, none copied:
+//   Outbound booth  the CENTRE of the Zone A room (read live from the
+//                   floorplan) + boothOffset, screen facing +z.
+//   Return booth    root-local on the corridor's landing, returnBoothInset in
+//                   front of its back wall, screen facing -z so you read it
+//                   when you turn around, or when you walk back up the run.
+//                   A child of #zone-a-corridor, so it hides and relocates
+//                   with the corridor; re-placed on zoneacorridorbuilt and
+//                   zoneacorridorrootchanged.
+//   Corridor spawn  root-local (0, 0, landingDepth/2) + arrivalOffset, facing
+//                   -z straight down the corridor.
+//   Return spawn    returnSpawnOffset from the booth, yawed to face it
+//                   (TeleportRig.yawToward, so any offset still faces it).
+//
+// Sequence per jump, identical in shape to zone-b-teleport's: trigger the
+// glitch -> AT PEAK move the rig (TeleportRig.go, so the VISITOR and not the
+// rig origin lands on the target, playspace and head-yaw compensated), flip the
+// corridor's `shown`, resync the collider and set or clear the VR focus
+// override -> the glitch resolves. `busy` plus transition-glitch's own
+// active-guard block a re-trigger mid-flight.
+//
+// The collider is NOT deactivated on arrival, which is where this differs from
+// the map jump: the corridor registers its own walkable rectangles with
+// rig-collision (see corridor-root's region source), so the corridor is inside
+// the walkable union and the clamp should stay ON to give the corridor its
+// walls. All the jump has to do is resync() so last-valid is the landing.
+//
 // TUNABLES (setAttribute on #zone-a-teleport):
-//   boothOffset — the outbound booth's offset from the Zone A room centre (m).
+//   boothOffset       the outbound booth's offset from the Zone A room centre
+//   arrivalOffset     nudge on the corridor landing spawn (root-local)
+//   returnSpawnOffset where you land back in the Zone A room, from the booth
+//   returnBoothInset  the return booth's clearance off the landing's back wall
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-a-teleport", {
   schema: {
     boothOffset: { type: "vec3", default: { x: 0, y: 0, z: 0 } },
+    arrivalOffset: { type: "vec3", default: { x: 0, y: 0, z: 0 } },
+    returnSpawnOffset: { type: "vec3", default: { x: 0, y: 0, z: 1.8 } },
+    returnBoothInset: { type: "number", default: 0.3 },
   },
 
   init: function () {
+    this.busy = false;
+    this.corridorSpawn = new THREE.Vector3();
+    this.returnSpawn = new THREE.Vector3();
+    this.boothPos = new THREE.Vector3();
+
     this.booth = this.el.querySelector("#terminal-a2");
     this.floorplanEl = document.getElementById("floorplan");
+    this.corridorEl = document.getElementById("zone-a-corridor");
+    this.returnBooth = document.getElementById("terminal-a2-return");
+    this.cameraEl = document.getElementById("camera");
+
+    this.onOut = () => this.jump(true);
+    this.onBack = () => this.jump(false);
+    if (this.booth) this.booth.addEventListener("click", this.onOut);
+    if (this.returnBooth) this.returnBooth.addEventListener("click", this.onBack);
 
     // The floorplan can rebuild (any tunable change rebuilds the whole plan),
-    // and the room centre is derived from it — so re-derive when it does.
+    // and the room centre is derived from it — so re-derive when it does. The
+    // corridor likewise re-emits when it is rebuilt or moved.
     this.onFloorplanBuilt = () => this.layout();
     if (this.floorplanEl) {
       this.floorplanEl.addEventListener("floorplanbuilt", this.onFloorplanBuilt);
+    }
+    this.onCorridorChange = () => this.layout();
+    if (this.corridorEl) {
+      this.corridorEl.addEventListener("zoneacorridorbuilt", this.onCorridorChange);
+      this.corridorEl.addEventListener("zoneacorridorrootchanged", this.onCorridorChange);
     }
 
     this.layout();
@@ -1616,17 +1707,128 @@ AFRAME.registerComponent("zone-a-teleport", {
     // Floor level, at the room centre + the tunable nudge. Yaw 0 leaves the
     // screen facing +z — back toward the doorway from the foyer, so you read it
     // as you walk in.
-    this.booth.setAttribute("position", {
-      x: c.x + d.boothOffset.x,
-      y: 0 + d.boothOffset.y,
-      z: c.z + d.boothOffset.z,
-    });
+    const bx = c.x + d.boothOffset.x;
+    const by = 0 + d.boothOffset.y;
+    const bz = c.z + d.boothOffset.z;
+    this.booth.setAttribute("position", { x: bx, y: by, z: bz });
     this.booth.setAttribute("rotation", "0 0 0");
+    this.boothPos.set(bx, by, bz);
+
+    // Where a return jump lands: beside the booth, looking at it — the same
+    // grammar as coming back from the floor map.
+    this.returnSpawn.set(
+      bx + d.returnSpawnOffset.x,
+      by + d.returnSpawnOffset.y,
+      bz + d.returnSpawnOffset.z
+    );
+
+    // --- the corridor side ---
+    const cr = this.corridorConfig();
+    if (!cr) return;
+    // The corridor root carries no rotation, so root-local offsets are simply
+    // added to its world position.
+    this.corridorSpawn.set(
+      cr.offset.x + d.arrivalOffset.x,
+      cr.offset.y + d.arrivalOffset.y,
+      cr.offset.z + cr.landingDepth / 2 + d.arrivalOffset.z
+    );
+    if (this.returnBooth) {
+      // Root-LOCAL (it is a child of the corridor): on the landing, clear of
+      // the back wall, screen facing -z back down the corridor.
+      this.returnBooth.setAttribute("position", {
+        x: 0,
+        y: 0,
+        z: cr.landingDepth - this.data.returnBoothInset,
+      });
+      this.returnBooth.setAttribute("rotation", "0 180 0");
+    }
+  },
+
+  // The corridor's live schema (never a copy of its numbers).
+  corridorConfig: function () {
+    const attr = this.corridorEl && this.corridorEl.getAttribute("corridor-root");
+    if (!attr) {
+      console.warn("zone-a-teleport: no #zone-a-corridor; the booth goes nowhere");
+      return null;
+    }
+    return attr;
+  },
+
+  // One glitch-masked jump. `out` true = into the corridor, false = home.
+  // Everything happens at PEAK obscuration, so the cut is never seen.
+  jump: function (out) {
+    if (this.busy) return;
+    const cr = this.corridorConfig();
+    if (!cr) return;
+    const glitch =
+      this.cameraEl &&
+      this.cameraEl.components &&
+      this.cameraEl.components["transition-glitch"];
+
+    const cut = () => {
+      if (out) {
+        // Face -z, straight down the run: in the corridor's own frame that is
+        // A-Frame's zero yaw, which is why this needs no derived angle.
+        TeleportRig.go(this.corridorSpawn, 0);
+      } else {
+        TeleportRig.go(
+          this.returnSpawn,
+          TeleportRig.yawToward(this.returnSpawn, this.boothPos)
+        );
+      }
+      this.corridorEl.setAttribute("corridor-root", "shown", out);
+
+      // The clamp STAYS ON both ways round (unlike the map jump): the corridor
+      // registers its own walkable rectangles with rig-collision, so it is
+      // inside the walkable union and the clamp is what gives it walls. The
+      // 400 m jump itself trips rig-collision's teleport safety net, which
+      // suspends the clamp for exactly as long as it takes the visitor to be
+      // inside a registered rect again — resync() lands last-valid on the
+      // arrival spot so there is no snap-back either way.
+      const rigEl = document.getElementById("rig");
+      const collider = rigEl && rigEl.components && rigEl.components["rig-collision"];
+      if (collider) {
+        collider.setActive(true);
+        collider.resync();
+      }
+
+      // The VR focus view is sized for the open gallery; inside a 3.2 × 4 m
+      // apartment it needs to sit closer, with a tighter dim sphere. Set the
+      // override on arrival, clear it on the way home (js/focus-vr.js reads it
+      // at open time; the desktop overlay is untouched either way).
+      window.ZoneA = window.ZoneA || {};
+      if (out) {
+        window.ZoneA.focusVR = {
+          distance: cr.focusDistance,
+          dimRadius: cr.focusDimRadius,
+        };
+      } else {
+        delete window.ZoneA.focusVR;
+      }
+    };
+
+    if (!glitch) {
+      console.warn("zone-a-teleport: no transition-glitch on camera; hard cut");
+      cut();
+      return;
+    }
+    this.busy = true;
+    // trigger() returns false if a transition is ALREADY in flight, in which
+    // case its onDone never fires — so clear the guard here rather than
+    // leaving this booth stuck busy for the rest of the session. (There are
+    // two teleport managers now, sharing the one glitch on the camera.)
+    if (!glitch.trigger(cut, () => { this.busy = false; })) this.busy = false;
   },
 
   remove: function () {
+    if (this.booth) this.booth.removeEventListener("click", this.onOut);
+    if (this.returnBooth) this.returnBooth.removeEventListener("click", this.onBack);
     if (this.floorplanEl) {
       this.floorplanEl.removeEventListener("floorplanbuilt", this.onFloorplanBuilt);
+    }
+    if (this.corridorEl) {
+      this.corridorEl.removeEventListener("zoneacorridorbuilt", this.onCorridorChange);
+      this.corridorEl.removeEventListener("zoneacorridorrootchanged", this.onCorridorChange);
     }
   },
 });
