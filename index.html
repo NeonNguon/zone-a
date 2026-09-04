@@ -355,6 +355,50 @@
       </a-entity>
 
       <!-- ============================================================
+           ZONE A CORRIDOR — the nine images’ actual home: the long corridor
+           of an old Saigon chung cư (apartment block), with three one-room
+           apartments off its far end holding three images each.
+
+           A TELEPORT SUB-SPACE, built on exactly the pattern the Zone B floor
+           map established: the root offset parks the whole thing 400 m out on
+           +z — the floor map is 400 m out on −z, so the two sub-spaces can
+           never meet, and neither is reachable on foot from the gallery — and
+           `shown: false` hides it. That hiding is a PURE visibility flip: every
+           procedural canvas texture stays resident on the GPU, so the first
+           teleport in has no hitch. (It also strips the pictures’ clickable
+           class while hidden, so no stray desktop ray can reach a picture
+           parked behind the gallery.)
+
+           Root-local frame: the landing is z 0..landingDepth, closed behind
+           you; the corridor runs from z 0 out to z −length; x 0 is the
+           centreline; the floor is y 0 and the ceiling y height.
+
+           EVERYTHING here is generated at runtime from the schema — geometry
+           from primitives, and every surface from a seeded canvas texture (no
+           image assets, the same approach as the contact cues and the terrazzo
+           bench). All of it is UNLIT (`shader: flat`): the gallery’s lights
+           only exist over the floorplan’s rooms, so 400 m out the corridor
+           bakes its own light into the textures instead — darker toward the
+           ceiling, a pool under every tube, dark margins along the floor edges.
+           That makes it independent of the active environment preset and free
+           per frame.
+
+           ?zonea=debug on the URL shows the corridor on load and drops you on
+           the landing facing down it — the iteration path, same convention as
+           environment.js’s ?env= / ?debug.
+
+           Tunables (all on corridor-root, all with defaults — see the full
+           annotated list in js/zone-a-corridor.js): offset / shown; length /
+           width / height / landingDepth; doorPitch / doorWidth / doorHeight /
+           transomHeight; roomWidth / roomDepth / roomSpacing; wallThickness;
+           textureSize / seed; tubeSpacing / tubeColor; and the joinery
+           (frameWidth / frameDepth / frameColor / leafThickness /
+           doorOpenAngle / floorTile / roomTile / tubeWidth / tubeLength /
+           tubeDrop / imageProud / focusDistance / focusDimRadius).
+           ============================================================ -->
+      <a-entity id="zone-a-corridor" corridor-root="offset: 0 0 400; shown: false"></a-entity>
+
+      <!-- ============================================================
            ZONE B — a 10×10 wall of 100 images, to the RIGHT of spawn.
            zone-b-root offsets the WHOLE wall as a unit (same pattern/intent as
            zone-a-root); default ~6 3 0 places it to the right (+x) and raised.
