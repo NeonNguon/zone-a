@@ -65,6 +65,13 @@
          re-reads on the floorplan's `floorplanbuilt` event. See
          js/rig-collision.js. -->
     <script src="js/rig-collision.js"></script>
+    <!-- Zone A V2: the chung cư corridor sub-space (the nine images' new home,
+         parked 400 m out) and the booth pair that teleports you in and out.
+         LAST of the scene scripts, because it needs all of these registered
+         first: teleport-terminal + TerminalKit (booth furniture), TeleportRig +
+         transition-glitch (the masked jump), floorplan (the Zone A room centre)
+         and rig-collision (the walkable-region registry it adds itself to). -->
+    <script src="js/zone-a-corridor.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -282,24 +289,69 @@
       <a-entity id="exhibition-title" exhibition-title></a-entity>
 
       <!-- ============================================================
-           ZONE A — the exhibition itself: ONLY the ring, its nine images
-           and their audio. Sets no background / fog / lights / ground.
-           zone-a-root offsets the WHOLE assembly (ring + cues + audio/focus
-           triggers) as a unit; default 4 m back (-z) to make room for Zones
-           B & C. Tune via the zone-a-root `offset` property — never the ring
-           math or the nine coordinates.
+           ZONE A — "All the Places I Have Lived". The room is now EMPTY.
+
+           V1 stood the nine images in here, in a half-circle ring around the
+           middle of the room. V2 takes them out of the gallery entirely: the
+           work is about nine Saigon neighbourhoods lived in, so the images now
+           hang in a place rather than in a white room — three one-room
+           apartments off the corridor of an old chung cư (see
+           #zone-a-corridor below). The ring, its layout component and its
+           floor cues are gone from the codebase; only the shared image config
+           (COUNT / IMG_SIZE / IMG_Y / ASSET_PREFIX in js/components.js)
+           survives, and the corridor's apartment walls read it.
+
+           So this room holds exactly two things: the info terminal (the work's
+           statement) and — as a SIBLING entity, because it stands in world
+           coordinates derived from the floorplan rather than from this root —
+           the teleport booth that takes you to the corridor.
+
+           zone-a-root still offsets everything parented HERE as one unit;
+           default 12.5 m back (-z), which is where the room is. Sets no
+           background / fog / lights / ground, like every zone root.
            ============================================================ -->
       <a-entity id="zone-a" zone-a-root="offset: 0 0 -12.5">
-        <!-- Zone A info terminal: screen facing spawn (+z). NUDGE BY EYE via
+        <!-- Zone A info terminal: screen facing spawn (+z), off to the +x side
+             of the now-empty room and forward toward the doorway, so you pass
+             it on the way in and it never crowds the booth in the middle
+             (~2.5 m of clear floor between the two hit boxes). NUDGE BY EYE via
              position/rotation (local; the zone-a-root offset carries it).
              Cue = shared spot-contact-cue. -->
         <a-entity
           id="info-terminal-a"
           info-terminal="key: a"
-          position="4.6 0 1.2"
+          position="3.4 0 1.9"
           rotation="0 0 0"
           spot-contact-cue
         ></a-entity>
+      </a-entity>
+
+      <!-- ============================================================
+           ZONE A TELEPORT — the booth pair linking the (empty) Zone A room to
+           the chung cư corridor parked 400 m out, each jump masked by the
+           camera's transition-glitch exactly like the Zone B map jump.
+           A SIBLING of #zone-a, not a child, for the same reason
+           #zone-b-teleport is a sibling of #zone-b: the manager places its
+           terminals in WORLD coordinates it derives itself.
+
+           The OUTBOUND booth (#terminal-a2) stands in the MIDDLE of the Zone A
+           room — its centre read live from the floorplan's rooms.zoneA, so no
+           coordinate is copied here — screen facing +z, back toward the
+           doorway from the foyer, so it is the first thing you read walking in.
+           Its screen carries the work's TITLE, which the manager reads from
+           js/zone-texts.js (the same single source the info terminal uses); the
+           label is deliberately NOT written here, so the string exists once.
+
+           The RETURN booth lives inside #zone-a-corridor (it must hide and
+           relocate with it) — see that block below.
+
+           Tunables on zone-a-teleport: boothOffset (from the room centre).
+           Terminal geometry + hit sizes on the teleport-terminal itself;
+           glitch dur / intensity / color / style / sound on the camera's
+           transition-glitch.
+           ============================================================ -->
+      <a-entity id="zone-a-teleport" zone-a-teleport>
+        <a-entity id="terminal-a2" teleport-terminal spot-contact-cue></a-entity>
       </a-entity>
 
       <!-- ============================================================
