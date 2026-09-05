@@ -2185,7 +2185,7 @@ AFRAME.registerComponent("corridor-root", {
     // is common ground nobody has painted in decades; a room someone lives in
     // gets repainted, so its walls are the same stack of coats far less far
     // gone. 1 would make a room exactly as ruined as the corridor.
-    roomWallFlake: { type: "number", default: 0.45 },
+    roomWallFlake: { type: "number", default: 0.22 },
     wallGrain: { type: "number", default: 1 },
     wallStripe: { type: "boolean", default: true },
     // WHICH COLOURS the wall generator paints with. `wallPalette` names an
