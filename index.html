@@ -385,18 +385,58 @@
            That makes it independent of the active environment preset and free
            per frame.
 
+           THE WALLS are a stack of five coats of paint — plaster, an old ochre
+           scheme, a deep cerulean, the pale lime-wash, a thin top wash — worn
+           back through each other, each with its own noise-driven coverage
+           mask, hard proud edges, vertical brush grain, grime in the breaks,
+           and the stencilled phone-number ads that are on every wall in Saigon
+           (always partial: a mark is destroyed by the same flaking that shaped
+           the wall, and never leaves more than seven of ten digits readable).
+           The colours are a PALETTE the generator takes as an argument, so the
+           same code paints any scheme — see WALL_PALETTES in
+           js/zone-a-corridor.js. Building the three wall canvases is the
+           corridor’s one real cost: ~120 ms each on a desktop, once, at load.
+
+           TUNING ON THE HEADSET — no code edits, both on this tag: if the
+           build pause is noticeable on the Quest, set wallNoiseRes to 4 (the
+           noise fields drop to a quarter resolution; coat edges stay crisp
+           because they are thresholded after the interpolation, and the cost
+           per wall canvas falls by about a third). If it is still slow, set
+           textureSize to 512, which quarters both the drawing and the texture
+           memory. ?zonea=debug prints a per-phase millisecond breakdown for
+           every wall canvas.
+
            ?zonea=debug on the URL shows the corridor on load and drops you on
            the landing facing down it — the iteration path, same convention as
            environment.js’s ?env= / ?debug.
 
            Tunables (all on corridor-root, all with defaults — see the full
-           annotated list in js/zone-a-corridor.js): offset / shown; length /
-           width / height / landingDepth; doorPitch / doorWidth / doorHeight /
-           transomHeight; roomWidth / roomDepth / roomSpacing; wallThickness;
-           textureSize / seed; tubeSpacing / tubeColor; and the joinery
-           (frameWidth / frameDepth / frameColor / leafThickness /
-           doorOpenAngle / floorTile / roomTile / tubeWidth / tubeLength /
-           tubeDrop / imageProud / focusDistance / focusDimRadius).
+           annotated list in js/zone-a-corridor.js):
+             placement   offset (0 0 400) / shown (false)
+             the box     length 16 / width 2.2 / height 3 / landingDepth 2
+             openings    doorPitch 3.2 / doorWidth 0.9 / doorHeight 2.1 /
+                         transomHeight 0.4
+             apartments  roomWidth 3.2 / roomDepth 4 / roomSpacing 0 (auto)
+             fabric      wallThickness 0.15 / textureSize 1024 / seed 1
+             the walls   wallNoiseRes 2      noise resolution divisor
+                         wallFlake 1         how much of each coat is GONE
+                                             (0 repaints the corridor)
+                         wallGrain 1         vertical brush streaking
+                         wallStripe true     allow the ochre band variant
+                         wallStencils 0.6    painted-ad density (0 = none)
+                         wallStencilWords true   trade above the number
+                         wallPalette "chungcu"   or "green"
+                         wallPaletteOverride null   patches the named palette
+                         roomWallPalettes [null,null,null]
+                                             per-apartment scheme, in
+                                             roomImages order; each distinct
+                                             palette costs 3 more canvases
+             lighting    tubeSpacing 4 (snapped) / tubeColor #f4f1e2
+             joinery     frameWidth .07 / frameDepth .045 / frameColor #8d7f62 /
+                         leafThickness .045 / doorOpenAngle 100 / floorTile .2 /
+                         roomTile .2 / tubeWidth .11 / tubeLength 0 (auto) /
+                         tubeDrop .06 / imageProud .02
+             VR focus    focusDistance 1.3 / focusDimRadius 2.5
            ============================================================ -->
       <a-entity id="zone-a-corridor" corridor-root="offset: 0 0 400; shown: false">
         <!-- RETURN BOOTH — the way home, standing on the landing against its

@@ -50,15 +50,59 @@
 // reads 2.1 m tall wherever it is.
 //
 // Palette + wear are taken from photographs of old Saigon chung cư corridors:
-// peeling pale-blue lime-wash over a darker grey-blue dado, whitish plaster
-// flaking through, rust drip stains, dark red-brown cement floor tiles worn
-// shiny down the middle, a yellowed stained ceiling, cream/yellow (sometimes
-// faded green) two-leaf doors with louvred transoms, and patterned gạch bông
-// encaustic tiles inside the apartments.
+// dark red-brown cement floor tiles worn shiny down the middle, a yellowed
+// stained ceiling, cream/yellow (sometimes faded green) two-leaf doors with
+// louvred transoms, patterned gạch bông encaustic tiles inside the apartments
+// — and, the thing the walls are actually about, paint.
 //
-// EIGHT canvases in total, cached by their full parameter key so a rebuild
-// (or a second corridor) reuses them: 3 wall variants, floor, ceiling, door
-// atlas, room floor — all textureSize² — plus one small transom strip.
+// ---------------------------------------------------------------- THE WALLS
+// A chung cư wall is not a colour, it is a STACK of coats put on over fifty
+// years and worn back through each other, so that is how wall() builds it.
+//
+//   THE LAYER MODEL. Five coats — plaster, an earlier ochre scheme, a deep
+//   cerulean, the pale lime-wash, a thin whitish top wash. Each has a COVERAGE
+//   MASK: its own mix of a coarse (44 cm), a mid (24 cm) and a fine (13 cm)
+//   noise field, all modulated by an 8:1 vertically stretched field so every
+//   edge striates. Old thick coats fail in slabs, thin washes in small bits.
+//   The mask is thresholded at a QUANTILE, so `coverage` is an area fraction
+//   and means what it says. The stack resolves bottom-up: each surviving coat
+//   is laid over what is already there — the old ones opaquely, the two washes
+//   translucently and thinner still at the edge of an island, which is what
+//   gives white-over-blue rather than white-beside-blue.
+//
+//   WHAT MAKES IT PAINT. Hard edges (a dark line at the foot of every step, a
+//   light one on top, broken up by the fine field so it reads as relief and not
+//   as ink); a wear gradient that takes more off low down and at the dado line;
+//   grime keyed to what is actually exposed rather than sprayed evenly; a 2 cm
+//   speckle inside every coat's body, without which the whole thing reads as a
+//   contour map.
+//
+//   VARIANTS. Three, handed out along the run and deliberately far apart:
+//   "intact" (calm, no painted ads — and the one forced onto every segment
+//   beside an apartment doorway, and onto the apartments themselves), "flaked"
+//   (top washes largely gone, big blue islands, heavy grime, two ads) and
+//   "stripe" (intact plus a ragged vertical band of the earlier ochre scheme,
+//   one ad). They are behaviour presets — coverage biases, stripe on/off,
+//   streak and grime strength — NOT colours, so they apply to any palette.
+//
+//   PAINTED MARKS. Stencilled service ads, painted on ONE coat and then
+//   destroyed by whatever happened to the wall afterwards (see markSurvival and
+//   the (a)/(b)/(c) guarantee above wallMarks — a number is never complete).
+//
+//   PALETTES. Every colour lives in WALL_PALETTES, and wall() takes one as an
+//   argument, so the same generator paints any scheme — the relationship
+//   makeTerrazzoTexture (js/bench.js) has with tinted-floor. Two are built in
+//   ("chungcu", "green"); corridor-root picks one with `wallPalette`, patches it
+//   with `wallPaletteOverride`, and can give each apartment its own with
+//   `roomWallPalettes`. See the comment on WALL_PALETTES for the schema.
+//
+// EIGHT canvases in total, cached by their full parameter key — which includes
+// a hash of the palette — so a rebuild (or a second corridor) reuses them:
+// 3 wall variants, floor, ceiling, door atlas, room floor, all textureSize²,
+// plus one small transom strip. Each extra palette in use costs three more wall
+// canvases. On this desktop a wall canvas takes ~120 ms warm at the defaults
+// (1024², wallNoiseRes 2); halving the noise resolution or the texture size are
+// the two levers, and ?zonea=debug prints the per-phase breakdown.
 // ================================================================
 const CorridorTextures = {
   cache: new Map(),
@@ -106,7 +150,12 @@ const CorridorTextures = {
   // total is always the work actually done this build.
   get: function (key, make) {
     if (this.cache.has(key)) {
-      this.timings[key] = 0;
+      // A hit records 0 ms — but only if this canvas was not already DRAWN this
+      // build. A texture is legitimately asked for more than once per build
+      // (the wall canvases are fetched once for `tex` and again when their
+      // materials are made), and the second ask must not erase the first's
+      // cost from the report.
+      if (!(key in this.timings)) this.timings[key] = 0;
       return this.cache.get(key);
     }
     const t0 = (window.performance || Date).now();
@@ -293,6 +342,20 @@ const CorridorTextures = {
       grain: 1.35, grime: 1.0, marks: 1 },
   ],
 
+  // Named scratch buffers. Each wall canvas wants five noise fields and four
+  // coat masks — nine megabytes of Float32Array at the default resolution — and
+  // three canvases in a row churning that is enough to show up as GC pauses in
+  // the middle of the build. The buffers are only live while one canvas is
+  // being drawn, so they are pooled by name and reused by the next.
+  scratch: {},
+  buf: function (slot, n) {
+    const b = this.scratch[slot];
+    if (b && b.length === n) return b;
+    const fresh = new Float32Array(n);
+    this.scratch[slot] = fresh;
+    return fresh;
+  },
+
   // ---- NOISE FIELDS ------------------------------------------------------
   // A seeded value-noise / fbm generator. Everything on the wall that has to
   // look like weather rather than like a pattern — which coat of paint survives
@@ -325,7 +388,9 @@ const CorridorTextures = {
     const octaves = opts.octaves || 4;
     const gain = opts.gain != null ? opts.gain : 0.5;
     const lac = opts.lacunarity || 2;
-    const out = new Float32Array(w * h);
+    // `slot` reuses a pooled buffer (the wall does; a one-off caller need not).
+    const out = opts.slot ? this.buf(opts.slot, w * h) : new Float32Array(w * h);
+    if (opts.slot) out.fill(0);
     let amp = 1;
     let norm = 0;
     let fx = opts.baseFreqX;
@@ -923,6 +988,12 @@ const CorridorTextures = {
       const ctx = c.getContext("2d");
       const rand = this.rand(seed * 131 + variant * 17 + 3);
       const V = this.WALL_VARIANTS[((variant % 3) + 3) % 3];
+      // Phase stopwatch — six timestamps, reported in debug mode. Which phase
+      // dominates decides which knob to turn (wallNoiseRes for the fields,
+      // textureSize for the per-pixel work), so it is worth having on hand.
+      const T = [];
+      const mark = (n) => T.push([n, (window.performance || Date).now()]);
+      mark("start");
       const coats = pal.coats;
 
       // Pixels per metre. The canvas is square but the wall it covers is not,
@@ -936,19 +1007,21 @@ const CorridorTextures = {
       // ---- the noise fields, at reduced resolution ------------------------
       const fw = Math.max(32, Math.round(S / res));
       const fh = fw;
-      const mk = (m, oct, stretch) =>
+      const mk = (slot, m, oct, stretch) =>
         this.noiseField(rand, fw, fh, {
           octaves: oct,
           baseFreqX: fqx(m),
           baseFreqY: fqy(m) / (stretch || 1),
+          slot: slot,
         });
-      const FW = mk(0.44, 4); // coarse wear: islands ~44 cm down to ~6 cm
-      const FF = mk(0.13, 4); // fine: the bitty flakes of the top washes, ~2 cm
-      const FG = mk(0.24, 4); // mid: decorrelates the coats from each other
-      const FV = mk(0.34, 4, 8); // 8:1 vertical stretch — the brushed grain
-      const FD = mk(1.5, 3); // low frequency: where the grime pooled
+      const FW = mk("fw", 0.44, 4); // coarse wear: islands ~44 cm down to ~6 cm
+      const FF = mk("ff", 0.13, 4); // fine: the bitty flakes of the top washes
+      const FG = mk("fg", 0.24, 4); // mid: decorrelates the coats from each other
+      const FV = mk("fv", 0.34, 4, 8); // 8:1 vertical stretch — the brushed grain
+      const FD = mk("fd", 1.5, 3); // low frequency: where the grime pooled
       [FW, FF, FG, FV, FD].forEach(this.normaliseField);
 
+      mark("fields");
       // ---- coat masks + their quantile thresholds -------------------------
       // Each coat mixes the coarse / mid / fine fields differently: the old
       // deep coats fail in big slabs, the thin top washes in small bits.
@@ -964,7 +1037,7 @@ const CorridorTextures = {
       const thresh = [0];
       for (let i = 1; i < coats.length; i++) {
         const mx = mixes[i];
-        const m = new Float32Array(fw * fh);
+        const m = this.buf("mask" + i, fw * fh);
         for (let p = 0; p < m.length; p++) {
           const v = FW.data[p] * mx[0] + FG.data[p] * mx[1] + FF.data[p] * mx[2];
           // The vertical grain rides on every mask, so flake edges striate.
@@ -979,6 +1052,7 @@ const CorridorTextures = {
         thresh.push(this.maskThreshold(m, Math.max(0.02, Math.min(0.995, cov))));
       }
 
+      mark("masks");
       // ---- per-column tables: the dado line, the ochre stripe, the drips ---
       // All three must be PERIODIC in x or the bay joins would show. The dado's
       // wavering top edge is a sum of two integer harmonics (as before), the
@@ -1064,10 +1138,30 @@ const CorridorTextures = {
       const lipPx = Math.max(1, S * 0.006);
       const stripeBias = 0.34;
 
+      // ROW BUFFERS. Every field is sampled bilinearly, but the vertical half of
+      // that interpolation is the SAME for every pixel in a row — so do it once
+      // per row into a scratch row of the field's own width, and the inner loop
+      // is left with two reads and one lerp per field instead of four and
+      // three. On a 1024² canvas that is the difference between ~145 ms and
+      // ~105 ms per wall.
+      const SRC = [m1, m2, m3, m4, FV.data, FD.data, FF.data];
+      const ROW = [];
+      for (let i = 0; i < SRC.length; i++) ROW.push(this.buf("row" + i, fw));
+
       for (let y = 0; y < S; y++) {
         const ry0 = ty.i0[y] * fw;
         const ry1 = ty.i1[y] * fw;
         const wy = ty.w[y];
+        for (let f = 0; f < SRC.length; f++) {
+          const src = SRC[f];
+          const dst = ROW[f];
+          for (let i = 0; i < fw; i++) {
+            const a = src[ry0 + i];
+            dst[i] = a + (src[ry1 + i] - a) * wy;
+          }
+        }
+        const R1 = ROW[0], R2f = ROW[1], R3 = ROW[2], R4 = ROW[3];
+        const RV = ROW[4], RD = ROW[5], RF = ROW[6];
         const vy = y / S;
         // More of every coat is gone low down, and in a band at the dado line.
         const dy = y - dadoBase;
@@ -1083,31 +1177,23 @@ const CorridorTextures = {
           const i0 = tx.i0[x];
           const i1 = tx.i1[x];
           const wx = tx.w[x];
-          const a0 = ry0 + i0, a1 = ry0 + i1, b0 = ry1 + i0, b1 = ry1 + i1;
 
-          // Four mask samples + the grain + the grime field. Written out rather
-          // than through a helper: this is a million iterations.
-          let p0 = m1[a0], p1 = m1[a1], q0 = m1[b0], q1 = m1[b1];
-          let ta = p0 + (p1 - p0) * wx, tb = q0 + (q1 - q0) * wx;
-          const v1 = ta + (tb - ta) * wy;
-          p0 = m2[a0]; p1 = m2[a1]; q0 = m2[b0]; q1 = m2[b1];
-          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
-          const v2 = ta + (tb - ta) * wy;
-          p0 = m3[a0]; p1 = m3[a1]; q0 = m3[b0]; q1 = m3[b1];
-          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
-          const v3 = ta + (tb - ta) * wy;
-          p0 = m4[a0]; p1 = m4[a1]; q0 = m4[b0]; q1 = m4[b1];
-          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
-          const v4 = ta + (tb - ta) * wy;
-          p0 = FV.data[a0]; p1 = FV.data[a1]; q0 = FV.data[b0]; q1 = FV.data[b1];
-          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
-          const vv = ta + (tb - ta) * wy;
-          p0 = FD.data[a0]; p1 = FD.data[a1]; q0 = FD.data[b0]; q1 = FD.data[b1];
-          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
-          const vd = ta + (tb - ta) * wy;
-          p0 = FF.data[a0]; p1 = FF.data[a1]; q0 = FF.data[b0]; q1 = FF.data[b1];
-          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
-          const vf = ta + (tb - ta) * wy;
+          // The four coat masks, the grain, the slow field and the fine one —
+          // now one lerp each along the pre-interpolated row.
+          let a = R1[i0];
+          const v1 = a + (R1[i1] - a) * wx;
+          a = R2f[i0];
+          const v2 = a + (R2f[i1] - a) * wx;
+          a = R3[i0];
+          const v3 = a + (R3[i1] - a) * wx;
+          a = R4[i0];
+          const v4 = a + (R4[i1] - a) * wx;
+          a = RV[i0];
+          const vv = a + (RV[i1] - a) * wx;
+          a = RD[i0];
+          const vd = a + (RD[i1] - a) * wx;
+          a = RF[i0];
+          const vf = a + (RF[i1] - a) * wx;
 
           // Thresholds for THIS pixel: the coat's own, plus the height bias,
           // plus the stripe (which only eats the coats above the ochre).
@@ -1217,6 +1303,7 @@ const CorridorTextures = {
         }
       }
 
+      mark("composite");
       // ---- edge pass: make every coat stand proud -------------------------
       // Reads the coat-index map, not the masks: wherever a pixel's neighbour
       // belongs to a HIGHER coat, this pixel is at the foot of a step and gets
@@ -1282,6 +1369,7 @@ const CorridorTextures = {
           }
         }
       }
+      mark("edges");
       ctx.putImageData(img, 0, 0);
 
       // ---- 2D passes over the composite -----------------------------------
@@ -1307,6 +1395,7 @@ const CorridorTextures = {
         debug: !!o.debug,
       });
 
+      mark("marks");
       // BRUSHED VERTICALS: thin translucent strokes, the visible half of the
       // grain whose other half is already inside every mask.
       const streakL = this.hexRGB(pal.streak.light);
@@ -1434,6 +1523,14 @@ const CorridorTextures = {
       if (darken > 0) {
         ctx.fillStyle = "rgba(0,0,0," + darken + ")";
         ctx.fillRect(0, 0, S, S);
+      }
+      mark("passes");
+      if (o.debug) {
+        const parts = [];
+        for (let i = 1; i < T.length; i++) {
+          parts.push(T[i][0] + " " + (T[i][1] - T[i - 1][1]).toFixed(0));
+        }
+        console.log("[corridor] wall '" + V.name + "' ms: " + parts.join(", "));
       }
       return c;
     });
