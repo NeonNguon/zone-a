@@ -135,6 +135,44 @@ const CorridorTextures = {
     this.timings = {};
   },
 
+  // ---- THE PAINT STACK ---------------------------------------------------
+  // The five coats of the chung cư wall, bottom to top, each with the two tones
+  // it varies between and how much of it is still there. `coverage` is read as
+  // an AREA FRACTION (see maskThreshold), so 0.65 means roughly two thirds of
+  // the wall still carries that coat.
+  // `coverage` is an area fraction, and because a pixel shows the TOPMOST coat
+  // that survives, what you actually see is the cascade: ~50% top wash, ~30%
+  // pale, ~14% blue, the rest ochre and bare plaster. That is the proportion
+  // the reference walls hold — mostly pale, with the older schemes showing
+  // through in a minority of places, not a camouflage of equal patches.
+  //
+  // `opacity` is what makes it read as PAINT: the old thick coats cover what is
+  // under them, but the two limewashes are thin, so where a wash is thin (near
+  // the edge of its island) the coat beneath shows through it. That is exactly
+  // the white-over-cerulean of reference 02.
+  WALL_COATS: [
+    { rgb: [148, 141, 128], rgb2: [116, 110, 99], coverage: 1.0, opacity: 1 }, // 0 plaster
+    { rgb: [186, 143, 52], rgb2: [206, 164, 63], coverage: 0.75, opacity: 1 }, // 1 ochre
+    { rgb: [58, 126, 164], rgb2: [74, 148, 185], coverage: 0.88, opacity: 0.96 }, // 2 deep blue
+    { rgb: [157, 186, 197], rgb2: [172, 198, 206], coverage: 0.86, opacity: 0.88 }, // 3 pale
+    { rgb: [212, 220, 214], rgb2: [197, 207, 202], coverage: 0.55, opacity: 0.8 }, // 4 top
+  ],
+  WALL_GRIME: [58, 46, 34], // the warm dark that collects in broken paint
+  WALL_DADO: [88, 120, 133], // the grey-blue band over the lower wall
+  WALL_DRIP: [138, 90, 58], // rust running down from the slab
+
+  // The three looks handed out along the run. `coverBias` shifts each coat's
+  // coverage (positive keeps more of it), so the differences are big enough to
+  // read from the far end of the corridor rather than being a subtle reseed.
+  WALL_VARIANTS: [
+    { name: "intact", coverBias: [0, 0.06, 0.08, 0.14, 0.22], stripe: false,
+      grain: 0.85, grime: 0.65, marks: 0 },
+    { name: "flaked", coverBias: [0, -0.14, -0.16, -0.26, -0.3], stripe: false,
+      grain: 1.15, grime: 1.45, marks: 2 },
+    { name: "stripe", coverBias: [0, 0.02, 0.0, -0.04, -0.12], stripe: true,
+      grain: 1.35, grime: 1.0, marks: 1 },
+  ],
+
   // ---- NOISE FIELDS ------------------------------------------------------
   // A seeded value-noise / fbm generator. Everything on the wall that has to
   // look like weather rather than like a pattern — which coat of paint survives
@@ -317,194 +355,476 @@ const CorridorTextures = {
   },
 
   // ---- WALL --------------------------------------------------------------
-  // One canvas covers `bay` metres of wall length by the FULL wall height, so
-  // the dado band and the darkening toward the ceiling are baked at their true
-  // heights and never tile vertically. Its length is one lighting bay, so the
-  // soft pool painted down its centre lands under a ceiling tube on every
-  // repeat. Three seeded variants are handed out along the run so 16 m of
-  // corridor never shows the same wall twice in a row.
-  wall: function (size, seed, variant, darken) {
-    const key = "wall|" + size + "|" + seed + "|" + variant + "|" + darken;
+  // PAINT STRATIGRAPHY. One canvas covers `bay` metres of wall length by the
+  // FULL wall height, so the dado band and the darkening toward the ceiling are
+  // baked at their true heights and never tile vertically. Its length is one
+  // lighting bay, so the pool painted down its centre lands under a ceiling
+  // tube on every repeat.
+  //
+  // THE MODEL. These walls are not a colour, they are a stack of coats put on
+  // over fifty years and worn back through each other, and that is how they are
+  // built here. Five coats, bottom to top — plaster, an old ochre scheme, a
+  // deep cerulean, the pale lime-wash, a thin whitish top wash — each with a
+  // COVERAGE MASK: its own combination of noise fields, thresholded. A pixel
+  // shows the TOPMOST coat whose mask survives its threshold, so where the top
+  // wash has gone you see the pale wash, where that has gone the blue, and in
+  // the worst places the bare plaster. Because the masks share a common coarse
+  // field they mostly nest, like real flaking; because each also has its own
+  // finer component they do not nest exactly, which is what stops it reading as
+  // onion rings.
+  //
+  // The threshold is a QUANTILE of the mask, not a raw value, so a coat's
+  // `coverage` means what it says: 0.65 keeps roughly 65% of the wall. That is
+  // what makes wallFlake and the per-variant biases behave predictably.
+  //
+  // Four things then make it read as paint rather than as noise:
+  //   HARD EDGES  no blending between coats. A second pass walks the coat-index
+  //               map and draws a dark line on the LOWER side of every step and
+  //               a light line on the upper side, so each coat stands proud.
+  //   VERTICAL    every mask is modulated by a 6:1 vertically stretched field,
+  //   GRAIN       and a few hundred thin translucent strokes are drawn over the
+  //               top: the brushed grain that runs down all four references.
+  //   WEAR        thresholds are biased by height — more is gone low down and
+  //   GRADIENT    in a band at the dado line, where the wall gets wet and
+  //               knocked.
+  //   GRIME       a dark warm glaze that collects where the surface is broken
+  //               (masked by 1 − the pale coat's mask), not evenly.
+  //
+  // Three VARIANTS are handed out along the run — "intact" (calm, the default
+  // between doors and always next to a hung image), "flaked" (top washes
+  // largely gone, big blue islands, heavy grime) and "stripe" (intact plus a
+  // ragged vertical band where an earlier ochre scheme shows through) — so
+  // 16 m of corridor never shows the same wall twice in a row.
+  //
+  // `opts` carries what the canvas cannot know by itself: { bay, height } in
+  // metres (so islands can be sized in centimetres and text in millimetres),
+  // noiseRes, and the flake / grain / stripe knobs from corridor-root.
+  wall: function (size, seed, variant, darken, opts) {
+    const o = opts || {};
+    const bayM = o.bay > 0 ? o.bay : 3.6;
+    const heightM = o.height > 0 ? o.height : 3.0;
+    const res = Math.max(1, Math.round(o.noiseRes || 2));
+    const flake = o.flake != null ? o.flake : 1;
+    const grainAmt = o.grain != null ? o.grain : 1;
+    const allowStripe = o.stripe !== false;
+    const key =
+      "wall|" +
+      [size, seed, variant, darken, bayM.toFixed(3), heightM.toFixed(3),
+       res, flake, grainAmt, allowStripe ? 1 : 0].join("|");
+
     return this.get(key, () => {
-      const c = this.canvas(size, size);
+      const S = size;
+      const c = this.canvas(S, S);
       const ctx = c.getContext("2d");
       const rand = this.rand(seed * 131 + variant * 17 + 3);
-      const S = size;
+      const V = this.WALL_VARIANTS[((variant % 3) + 3) % 3];
+      const coats = this.WALL_COATS;
 
-      // Base lime-wash: pale blue, a touch greener low down.
-      const base = ctx.createLinearGradient(0, 0, 0, S);
-      base.addColorStop(0, "#7fa7b8");
-      base.addColorStop(0.55, "#9dbcc8");
-      base.addColorStop(1, "#a9c4cf");
-      ctx.fillStyle = base;
-      ctx.fillRect(0, 0, S, S);
+      // Pixels per metre. The canvas is square but the wall it covers is not,
+      // so these differ — everything sized in metres goes through them.
+      const pxX = S / bayM;
+      const pxY = S / heightM;
+      // Field frequencies for a feature `m` metres across, in METRIC space.
+      const fqx = (m) => bayM / m;
+      const fqy = (m) => heightM / m;
 
-      // MOTTLE - the ground layer. Hundreds of soft, small, slightly shifted
-      // washes, so the wall is never a flat field at any distance: this is what
-      // carries the surface when you are standing a metre from it.
-      for (let i = 0; i < 300; i++) {
-        const warm = rand();
-        const rgb =
-          warm > 0.62 ? "168,196,207" : warm > 0.3 ? "120,158,174" : "146,178,190";
-        const y = rand() * S;
-        const rx = S * (0.008 + rand() * 0.045);
-        const ry = S * (0.008 + rand() * 0.05);
-        const a = 0.06 + rand() * 0.22;
-        this.wrapX(S, rand() * S, (x) =>
-          this.softBlob(ctx, rand, x, y, rx, ry, rgb, a));
-      }
+      // ---- the noise fields, at reduced resolution ------------------------
+      const fw = Math.max(32, Math.round(S / res));
+      const fh = fw;
+      const mk = (m, oct, stretch) =>
+        this.noiseField(rand, fw, fh, {
+          octaves: oct,
+          baseFreqX: fqx(m),
+          baseFreqY: fqy(m) / (stretch || 1),
+        });
+      const FW = mk(0.44, 4); // coarse wear: islands ~44 cm down to ~6 cm
+      const FF = mk(0.13, 4); // fine: the bitty flakes of the top washes, ~2 cm
+      const FG = mk(0.24, 4); // mid: decorrelates the coats from each other
+      const FV = mk(0.34, 4, 8); // 8:1 vertical stretch — the brushed grain
+      const FD = mk(1.5, 3); // low frequency: where the grime pooled
+      [FW, FF, FG, FV, FD].forEach(this.normaliseField);
 
-      // Darker teal patches - old paint that never took, or damp coming
-      // through. Soft, and clustered rather than evenly scattered.
-      for (let i = 0; i < 40; i++) {
-        const cx0 = rand() * S;
-        const cy0 = rand() * S;
-        for (let k = 0; k < 3; k++) {
-          const dx = (rand() - 0.5) * S * 0.12;
-          const y = cy0 + (rand() - 0.5) * S * 0.12;
-          const rx = S * (0.015 + rand() * 0.055);
-          const ry = S * (0.015 + rand() * 0.06);
-          const a = 0.08 + rand() * 0.24;
-          this.wrapX(S, (cx0 + dx + S) % S, (x) =>
-            this.softBlob(ctx, rand, x, y, rx, ry, "79,122,136", a));
+      // ---- coat masks + their quantile thresholds -------------------------
+      // Each coat mixes the coarse / mid / fine fields differently: the old
+      // deep coats fail in big slabs, the thin top washes in small bits.
+      const mixes = [
+        null,
+        [0.52, 0.30, 0.18], // 1 ochre — the oldest, fails in the largest slabs
+        [0.44, 0.26, 0.30], // 2 deep blue
+        [0.30, 0.22, 0.48], // 3 pale wash
+        [0.18, 0.16, 0.66], // 4 top wash — thin, so it goes in small bits
+      ];
+      const grainMix = 0.46 * grainAmt * V.grain;
+      const masks = [null];
+      const thresh = [0];
+      for (let i = 1; i < coats.length; i++) {
+        const mx = mixes[i];
+        const m = new Float32Array(fw * fh);
+        for (let p = 0; p < m.length; p++) {
+          const v = FW.data[p] * mx[0] + FG.data[p] * mx[1] + FF.data[p] * mx[2];
+          // The vertical grain rides on every mask, so flake edges striate.
+          m[p] = v * (1 - grainMix + grainMix * FV.data[p]);
         }
+        this.normaliseField({ data: m });
+        masks.push(m);
+        // coverage -> threshold, as a quantile of THIS mask. wallFlake scales
+        // how much of the coat is gone, so 0 restores an unweathered wall.
+        let cov = coats[i].coverage + V.coverBias[i];
+        cov = 1 - (1 - cov) * flake;
+        thresh.push(this.maskThreshold(m, Math.max(0.02, Math.min(0.995, cov))));
       }
 
-      // FLAKING - where the lime-wash has come off, greyish plaster shows
-      // through: a soft halo of dust with a harder chip inside it, and a thin
-      // dark line along part of the chip where the remaining paint stands
-      // proud. Concentrated low down and around the dado line, which is where
-      // the wall gets wet and knocked.
-      for (let i = 0; i < 110; i++) {
-        const y = rand() < 0.55 ? S * (0.5 + rand() * 0.5) : rand() * S;
-        const rx = S * (0.005 + rand() * 0.019);
-        const ry = rx * (0.6 + rand() * 0.9);
-        const halo = 0.06 + rand() * 0.14;
-        const core = 0.16 + rand() * 0.3;
-        const line = rand() > 0.5 ? 0.12 + rand() * 0.2 : 0;
-        const lw = 1 + rand();
-        this.wrapX(S, rand() * S, (x) => {
-          this.softBlob(ctx, rand, x, y, rx * 2.1, ry * 2.1, "203,209,203", halo);
-          ctx.fillStyle = "rgba(207,210,201," + core.toFixed(3) + ")";
-          this.blob(ctx, rand, x, y, rx, ry, 11);
-          if (line) {
-            ctx.strokeStyle = "rgba(74,96,104," + line.toFixed(3) + ")";
-            ctx.lineWidth = lw;
-            ctx.stroke();
-          }
-        });
-      }
-
-      // Rust-brown drips running DOWN from the top: leaks along the slab edge
-      // and off the window bars. Built from a few overlapping columns of
-      // decreasing width, so a stain feathers sideways instead of ending on a
-      // hard vertical edge.
-      for (let i = 0; i < 9; i++) {
-        const top = rand() < 0.7 ? 0 : S * rand() * 0.25; // most from the slab
-        const len = S * (0.08 + rand() * 0.3);
-        const w = 4 + rand() * 14;
-        const jitter = [];
-        for (let k = 0; k < 4; k++) jitter.push((rand() - 0.5) * 3, 0.7 + rand() * 0.3);
-        this.wrapX(S, rand() * S, (x) => {
-          for (let k = 0; k < 4; k++) {
-            const kw = w * (1 - k * 0.22);
-            const g = ctx.createLinearGradient(0, top, 0, top + len);
-            g.addColorStop(0, "rgba(138,90,58," + (0.07 + k * 0.05).toFixed(3) + ")");
-            g.addColorStop(0.5, "rgba(150,104,66," + (0.04 + k * 0.03).toFixed(3) + ")");
-            g.addColorStop(1, "rgba(150,104,66,0)");
-            ctx.fillStyle = g;
-            ctx.fillRect(x - kw / 2 + jitter[k * 2], top, kw, len * jitter[k * 2 + 1]);
-          }
-        });
-      }
-
-      // DADO: a darker grey-blue band over the lower ~0.9 m of the wall, with a
-      // soft top edge (it was brushed on by hand, never masked). Drawn from the
-      // canvas BOTTOM, which is the wall's floor line (CanvasTexture keeps the
-      // canvas's top row at v=1, and the meshes map v = y / wallHeight).
-      // Its top edge is a WAVERING line, never a ruled one: it was brushed on
-      // by hand at roughly waist height and nobody masked anything.
-      const dadoTop = S * (1 - 0.3); // ~0.9 m of a 3 m wall
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(0, S);
-      ctx.lineTo(0, dadoTop);
-      // A sum of two sine waves with a little jitter: gentle, and PERIODIC over
-      // the canvas width, so the band meets itself exactly at every repeat
-      // instead of stepping up or down at the seam.
+      // ---- per-column tables: the dado line, the ochre stripe, the drips ---
+      // All three must be PERIODIC in x or the bay joins would show. The dado's
+      // wavering top edge is a sum of two integer harmonics (as before), the
+      // stripe's ragged edge likewise, and the drips are wrapped by hand.
+      const dadoY = new Float32Array(S);
       const ph1 = rand() * Math.PI * 2;
       const ph2 = rand() * Math.PI * 2;
-      const STEPS = 96;
-      for (let i = 0; i <= STEPS; i++) {
-        const u = i / STEPS;
-        const wave =
-          Math.sin(u * Math.PI * 2 + ph1) * 0.6 +
-          Math.sin(u * Math.PI * 6 + ph2) * 0.4;
-        ctx.lineTo(u * S, dadoTop + wave * S * 0.007 + (rand() - 0.5) * S * 0.002);
+      const dadoBase = S * (1 - 0.3); // ~0.9 m of a 3 m wall
+      for (let x = 0; x < S; x++) {
+        const u = x / S;
+        dadoY[x] =
+          dadoBase +
+          (Math.sin(u * Math.PI * 2 + ph1) * 0.6 +
+            Math.sin(u * Math.PI * 6 + ph2) * 0.4) *
+            S *
+            0.007;
       }
-      ctx.lineTo(S, S);
-      ctx.closePath();
-      ctx.clip();
-      ctx.fillStyle = "rgba(88,120,133,0.72)";
-      ctx.fillRect(0, dadoTop - S * 0.05, S, S);
-      // The band has its own wear: scuffing at ankle height, hands at the top.
-      for (let i = 0; i < 60; i++) {
-        this.softBlob(ctx, rand, rand() * S, dadoTop + rand() * (S - dadoTop),
-                      S * (0.01 + rand() * 0.06), S * (0.008 + rand() * 0.035),
-                      rand() > 0.5 ? "40,58,66" : "150,176,186",
-                      0.06 + rand() * 0.22);
-      }
-      ctx.restore();
-      // A soft shadow under the brushed edge, where the band stands proud of
-      // the wash by one coat of paint.
-      const lip = ctx.createLinearGradient(0, dadoTop, 0, dadoTop + S * 0.02);
-      lip.addColorStop(0, "rgba(30,46,52,0.28)");
-      lip.addColorStop(1, "rgba(30,46,52,0)");
-      ctx.fillStyle = lip;
-      ctx.fillRect(0, dadoTop, S, S * 0.02);
-      // Grime piling up in the floor junction.
-      const skirt = ctx.createLinearGradient(0, S - S * 0.06, 0, S);
-      skirt.addColorStop(0, "rgba(26,36,40,0)");
-      skirt.addColorStop(1, "rgba(26,36,40,0.55)");
-      ctx.fillStyle = skirt;
-      ctx.fillRect(0, S - S * 0.06, S, S * 0.06);
 
-      // Chalk / marker scribbles and nail marks — abstract strokes only, never
-      // readable words (the corridor should feel lived in, not captioned).
-      for (let i = 0; i < 7; i++) {
-        const y = S * (0.24 + rand() * 0.4);
-        // Faint, and always chalk-pale or pencil-dark; never a strong mark.
-        const stroke = rand() > 0.5
-          ? "rgba(223,231,226," + (0.1 + rand() * 0.16).toFixed(3) + ")"
-          : "rgba(60,72,66," + (0.08 + rand() * 0.14).toFixed(3) + ")";
-        const lw = 0.8 + rand() * 1.4;
-        // A short CURVED scrawl, small enough to read as somebody's hand at
-        // arm's length rather than as a drawing: three quadratic segments
-        // inside about 12 cm of wall.
-        const seg = [];
-        for (let k = 0; k < 3; k++) {
-          seg.push((rand() - 0.5) * S * 0.03, (rand() - 0.5) * S * 0.022,
-                   (rand() - 0.5) * S * 0.03, (rand() - 0.5) * S * 0.022);
+      // THE OLD COLOUR SCHEME showing as a vertical band: where it runs, coats
+      // 2-4 are thresholded much harder, so the ochre underneath is what
+      // survives. Its edges are ragged and it fades out top and bottom rather
+      // than ending on a line.
+      const stripeCol = new Float32Array(S);
+      if (V.stripe && allowStripe) {
+        const cx = rand() * S;
+        const halfW = ((0.06 + rand() * 0.14) * pxX) / 2;
+        const soft = Math.max(2, halfW * 0.5);
+        const j1 = rand() * Math.PI * 2;
+        const j2 = rand() * Math.PI * 2;
+        for (let x = 0; x < S; x++) {
+          let dx = Math.abs(x - cx);
+          dx = Math.min(dx, S - dx); // wrapped distance
+          const u = x / S;
+          const jit =
+            Math.sin(u * Math.PI * 2 * 7 + j1) * 0.2 +
+            Math.sin(u * Math.PI * 2 * 3 + j2) * 0.14;
+          const hw = halfW * (1 + jit);
+          stripeCol[x] = dx < hw ? 1 : Math.max(0, 1 - (dx - hw) / soft);
         }
-        this.wrapX(S, rand() * S, (x) => {
-          ctx.strokeStyle = stroke;
-          ctx.lineWidth = lw;
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          let px = x;
-          let py = y;
-          for (let k = 0; k < 3; k++) {
-            ctx.quadraticCurveTo(px + seg[k * 4], py + seg[k * 4 + 1],
-                                 px + seg[k * 4 + 2], py + seg[k * 4 + 3]);
-            px += seg[k * 4 + 2];
-            py += seg[k * 4 + 3];
+      }
+
+      // DRIPS: narrow vertical runs, masked by the noise so they break up
+      // instead of ending on a hard rectangle edge.
+      const dripAmt = new Float32Array(S);
+      const dripTop = new Float32Array(S);
+      const dripLen = new Float32Array(S);
+      const nDrips = 3 + Math.floor(rand() * 4);
+      for (let i = 0; i < nDrips; i++) {
+        const cx = rand() * S;
+        const w = (0.01 + rand() * 0.035) * pxX; // 1-4.5 cm wide
+        const top = rand() < 0.7 ? 0 : rand() * S * 0.2;
+        const len = S * (0.15 + rand() * 0.55);
+        const a = 0.35 + rand() * 0.5;
+        for (let k = -Math.ceil(w); k <= Math.ceil(w); k++) {
+          const x = ((Math.round(cx) + k) % S + S) % S; // wraps
+          const f = Math.max(0, 1 - Math.abs(k) / w);
+          if (f * a > dripAmt[x]) {
+            dripAmt[x] = f * a;
+            dripTop[x] = top;
+            dripLen[x] = len;
           }
+        }
+      }
+
+      // ---- the composite: one pass, per pixel -----------------------------
+      const img = ctx.createImageData(S, S);
+      const px = img.data;
+      const coatIdx = new Uint8Array(S * S);
+      const tx = this.bilinTable(fw, S, true); // x wraps: the seam closes
+      const ty = this.bilinTable(fh, S, false);
+
+      const m1 = masks[1], m2 = masks[2], m3 = masks[3], m4 = masks[4];
+      const t1 = thresh[1], t2 = thresh[2], t3 = thresh[3], t4 = thresh[4];
+      const R = coats.map((k) => k.rgb);
+      const R2 = coats.map((k) => k.rgb2);
+      const OP = coats.map((k) => (k.opacity != null ? k.opacity : 1));
+      const grimeRGB = this.WALL_GRIME;
+      const dripRGB = this.WALL_DRIP;
+      const dadoRGB = this.WALL_DADO;
+      const wearLow = 0.11; // extra threshold at the floor
+      const dadoBand = 0.10; // extra threshold in the band at the dado line
+      const dadoSig = S * 0.045;
+      const lipPx = Math.max(1, S * 0.006);
+      const stripeBias = 0.34;
+
+      for (let y = 0; y < S; y++) {
+        const ry0 = ty.i0[y] * fw;
+        const ry1 = ty.i1[y] * fw;
+        const wy = ty.w[y];
+        const vy = y / S;
+        // More of every coat is gone low down, and in a band at the dado line.
+        const dy = y - dadoBase;
+        const bias =
+          wearLow * vy * vy * (0.4 + 0.6 * vy) +
+          dadoBand * Math.exp(-(dy * dy) / (2 * dadoSig * dadoSig));
+        // The stripe fades in below the ceiling and out above the floor.
+        const stripeY =
+          Math.min(1, vy / 0.16) * Math.min(1, (1 - vy) / 0.22);
+        const row = y * S;
+
+        for (let x = 0; x < S; x++) {
+          const i0 = tx.i0[x];
+          const i1 = tx.i1[x];
+          const wx = tx.w[x];
+          const a0 = ry0 + i0, a1 = ry0 + i1, b0 = ry1 + i0, b1 = ry1 + i1;
+
+          // Four mask samples + the grain + the grime field. Written out rather
+          // than through a helper: this is a million iterations.
+          let p0 = m1[a0], p1 = m1[a1], q0 = m1[b0], q1 = m1[b1];
+          let ta = p0 + (p1 - p0) * wx, tb = q0 + (q1 - q0) * wx;
+          const v1 = ta + (tb - ta) * wy;
+          p0 = m2[a0]; p1 = m2[a1]; q0 = m2[b0]; q1 = m2[b1];
+          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
+          const v2 = ta + (tb - ta) * wy;
+          p0 = m3[a0]; p1 = m3[a1]; q0 = m3[b0]; q1 = m3[b1];
+          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
+          const v3 = ta + (tb - ta) * wy;
+          p0 = m4[a0]; p1 = m4[a1]; q0 = m4[b0]; q1 = m4[b1];
+          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
+          const v4 = ta + (tb - ta) * wy;
+          p0 = FV.data[a0]; p1 = FV.data[a1]; q0 = FV.data[b0]; q1 = FV.data[b1];
+          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
+          const vv = ta + (tb - ta) * wy;
+          p0 = FD.data[a0]; p1 = FD.data[a1]; q0 = FD.data[b0]; q1 = FD.data[b1];
+          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
+          const vd = ta + (tb - ta) * wy;
+          p0 = FF.data[a0]; p1 = FF.data[a1]; q0 = FF.data[b0]; q1 = FF.data[b1];
+          ta = p0 + (p1 - p0) * wx; tb = q0 + (q1 - q0) * wx;
+          const vf = ta + (tb - ta) * wy;
+
+          // Thresholds for THIS pixel: the coat's own, plus the height bias,
+          // plus the stripe (which only eats the coats above the ochre).
+          const sb = stripeCol[x] * stripeY * stripeBias;
+          const h1 = t1 + bias * 0.5;
+          const h2 = t2 + bias + sb;
+          const h3 = t3 + bias + sb;
+          const h4 = t4 + bias + sb;
+
+          // Resolve the stack BOTTOM-UP, starting from bare plaster. Each coat
+          // that survives here is laid over what is already there — the old
+          // thick ones opaquely, the two washes translucently and thinner still
+          // near the edge of their island, where `local` is small. That is what
+          // gives white-over-blue instead of white-beside-blue.
+          let r = R[0][0] + (R2[0][0] - R[0][0]) * vd;
+          let g = R[0][1] + (R2[0][1] - R[0][1]) * vd;
+          let b = R[0][2] + (R2[0][2] - R[0][2]) * vd;
+          let idx = 0;
+          if (v1 > h1) {
+            idx = 1;
+            const a = OP[1];
+            r += (R[1][0] + (R2[1][0] - R[1][0]) * vd - r) * a;
+            g += (R[1][1] + (R2[1][1] - R[1][1]) * vd - g) * a;
+            b += (R[1][2] + (R2[1][2] - R[1][2]) * vd - b) * a;
+          }
+          if (v2 > h2) {
+            idx = 2;
+            const lo = (v2 - h2) * 7;
+            const a = OP[2] * (0.6 + 0.4 * (lo > 1 ? 1 : lo));
+            r += (R[2][0] + (R2[2][0] - R[2][0]) * vd - r) * a;
+            g += (R[2][1] + (R2[2][1] - R[2][1]) * vd - g) * a;
+            b += (R[2][2] + (R2[2][2] - R[2][2]) * vd - b) * a;
+          }
+          if (v3 > h3) {
+            idx = 3;
+            const lo = (v3 - h3) * 7;
+            const a = OP[3] * (0.5 + 0.5 * (lo > 1 ? 1 : lo));
+            r += (R[3][0] + (R2[3][0] - R[3][0]) * vd - r) * a;
+            g += (R[3][1] + (R2[3][1] - R[3][1]) * vd - g) * a;
+            b += (R[3][2] + (R2[3][2] - R[3][2]) * vd - b) * a;
+          }
+          if (v4 > h4) {
+            idx = 4;
+            const lo = (v4 - h4) * 7;
+            const a = OP[4] * (0.45 + 0.55 * (lo > 1 ? 1 : lo));
+            r += (R[4][0] + (R2[4][0] - R[4][0]) * vd - r) * a;
+            g += (R[4][1] + (R2[4][1] - R[4][1]) * vd - g) * a;
+            b += (R[4][2] + (R2[4][2] - R[4][2]) * vd - b) * a;
+          }
+          coatIdx[row + x] = idx;
+
+          // Brush grain: a gentle multiply, stronger on the flaked variants.
+          const sh = 1 + (vv - 0.5) * 0.26 * grainAmt * V.grain;
+          r *= sh; g *= sh; b *= sh;
+
+          // FINE BREAK-UP. Every coat gets a couple-of-centimetres speckle in
+          // its own body, so no island is ever a flat field — without this the
+          // wall reads as a contour map however good the shapes are.
+          const spk = 0.90 + vf * 0.20;
+          r *= spk; g *= spk; b *= spk;
+
+          // GRIME collects where the surface is BROKEN — i.e. where a coat
+          // below the pale wash is what you are looking at — and only where the
+          // slow field says it pooled. Keyed to the exposed coat rather than to
+          // a raw mask, so clean wall stays clean.
+          if (idx < 3) {
+            const depth = idx === 0 ? 1 : idx === 1 ? 0.72 : 0.5;
+            const gr = 0.2 * depth * V.grime * (0.25 + 0.75 * vd);
+            r += (grimeRGB[0] - r) * gr;
+            g += (grimeRGB[1] - g) * gr;
+            b += (grimeRGB[2] - b) * gr;
+          }
+
+          // DADO: a darker grey-blue glaze over the lower wall, itself worn —
+          // where the coats have flaked, the band has gone with them.
+          if (y > dadoY[x]) {
+            const wear = 0.5 + 0.5 * Math.min(1, Math.max(0, (v2 - 0.2) * 2.2));
+            const da = 0.62 * wear;
+            r += (dadoRGB[0] - r) * da;
+            g += (dadoRGB[1] - g) * da;
+            b += (dadoRGB[2] - b) * da;
+            // its lip: one coat of paint standing proud, so it casts a line
+            const ld = y - dadoY[x];
+            if (ld < lipPx) {
+              const k = 1 - ld / lipPx;
+              r *= 1 - 0.3 * k; g *= 1 - 0.3 * k; b *= 1 - 0.3 * k;
+            }
+          }
+
+          // DRIPS down the face, broken up by the grain field.
+          const dA = dripAmt[x];
+          if (dA > 0 && y > dripTop[x]) {
+            const t = (y - dripTop[x]) / dripLen[x];
+            if (t < 1) {
+              const k = dA * (1 - t) * (0.35 + 0.65 * vv);
+              r += (dripRGB[0] - r) * k * 0.5;
+              g += (dripRGB[1] - g) * k * 0.5;
+              b += (dripRGB[2] - b) * k * 0.5;
+            }
+          }
+
+          const q = (row + x) * 4;
+          px[q] = r < 0 ? 0 : r > 255 ? 255 : r;
+          px[q + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
+          px[q + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+          px[q + 3] = 255;
+        }
+      }
+
+      // ---- edge pass: make every coat stand proud -------------------------
+      // Reads the coat-index map, not the masks: wherever a pixel's neighbour
+      // belongs to a HIGHER coat, this pixel is at the foot of a step and gets
+      // a shadow; wherever a neighbour is LOWER, this pixel is the top of the
+      // step and catches the light. Two pixels of shadow, one of highlight —
+      // that asymmetry is what reads as thickness. x wraps, so the seam is
+      // seamless here too.
+      const etx = tx;
+      const ety = ty;
+      for (let y = 0; y < S; y++) {
+        const row = y * S;
+        const up = y > 0 ? row - S : row;
+        const dn = y < S - 1 ? row + S : row;
+        const ey0 = ety.i0[y] * fw;
+        const ey1 = ety.i1[y] * fw;
+        const ewy = ety.w[y];
+        for (let x = 0; x < S; x++) {
+          const idx = coatIdx[row + x];
+          const xl = x === 0 ? S - 1 : x - 1;
+          const xr = x === S - 1 ? 0 : x + 1;
+          const n1 = coatIdx[row + xl];
+          const n2 = coatIdx[row + xr];
+          const n3 = coatIdx[up + x];
+          const n4 = coatIdx[dn + x];
+          let hi = n1 > n2 ? n1 : n2;
+          if (n3 > hi) hi = n3;
+          if (n4 > hi) hi = n4;
+          let lo = n1 < n2 ? n1 : n2;
+          if (n3 < lo) lo = n3;
+          if (n4 < lo) lo = n4;
+
+          let k = 0;
+          if (hi > idx) k = -0.11; // in the hole, at the foot of the step
+          else {
+            // second ring: the rest of the shadow's width
+            const xl2 = xl === 0 ? S - 1 : xl - 1;
+            const xr2 = xr === S - 1 ? 0 : xr + 1;
+            if (
+              coatIdx[row + xl2] > idx || coatIdx[row + xr2] > idx ||
+              coatIdx[(y > 1 ? row - S - S : row) + x] > idx ||
+              coatIdx[(y < S - 2 ? row + S + S : row) + x] > idx
+            ) {
+              k = -0.05;
+            }
+          }
+          if (lo < idx) k += 0.085; // the lit lip of the coat above
+
+          if (k !== 0) {
+            // A real paint edge is not a drawn outline: it is thick here, worn
+            // away there. Modulating by the fine field breaks the line up so it
+            // reads as relief rather than as ink.
+            const e0 = ey0 + etx.i0[x], e1 = ey0 + etx.i1[x];
+            const f0 = ey1 + etx.i0[x], f1 = ey1 + etx.i1[x];
+            const ewx = etx.w[x];
+            const eta = FF.data[e0] + (FF.data[e1] - FF.data[e0]) * ewx;
+            const etb = FF.data[f0] + (FF.data[f1] - FF.data[f0]) * ewx;
+            k *= 0.35 + 1.15 * (eta + (etb - eta) * ewy);
+            const q = (row + x) * 4;
+            const f = 1 + k;
+            px[q] = Math.min(255, Math.max(0, px[q] * f));
+            px[q + 1] = Math.min(255, Math.max(0, px[q + 1] * f));
+            px[q + 2] = Math.min(255, Math.max(0, px[q + 2] * f));
+          }
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+
+      // ---- 2D passes over the composite -----------------------------------
+
+      // BRUSHED VERTICALS: thin translucent strokes, the visible half of the
+      // grain whose other half is already inside every mask.
+      const nStreak = Math.round((200 + rand() * 200) * grainAmt);
+      for (let i = 0; i < nStreak; i++) {
+        const y0 = rand() * S * 0.92;
+        const len = S * (0.05 + rand() * 0.5);
+        const light = rand() > 0.5;
+        const a = (0.02 + rand() * 0.055) * grainAmt * V.grain;
+        const lw = 0.5 + rand();
+        const lean = (rand() - 0.5) * 2;
+        ctx.strokeStyle = light
+          ? "rgba(219,229,226," + a.toFixed(3) + ")"
+          : "rgba(70,86,92," + a.toFixed(3) + ")";
+        ctx.lineWidth = lw;
+        this.wrapX(S, rand() * S, (xx) => {
+          ctx.beginPath();
+          ctx.moveTo(xx, y0);
+          ctx.lineTo(xx + lean, y0 + len);
           ctx.stroke();
         });
       }
+
+      // LICHEN: small pale spots with a dark centre, the crusty blooms that
+      // come out on damp lime — mostly on the upper half.
+      const nLichen = 15 + Math.floor(rand() * 26);
+      for (let i = 0; i < nLichen; i++) {
+        const y = rand() < 0.72 ? rand() * S * 0.55 : rand() * S;
+        const r1 = 2 + rand() * 5;
+        const a1 = 0.3 + rand() * 0.45;
+        const a2 = 0.25 + rand() * 0.35;
+        this.wrapX(S, rand() * S, (xx) => {
+          ctx.fillStyle = "rgba(226,226,212," + a1.toFixed(3) + ")";
+          ctx.beginPath();
+          ctx.arc(xx, y, r1, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "rgba(58,54,44," + a2.toFixed(3) + ")";
+          ctx.beginPath();
+          ctx.arc(xx, y, r1 * 0.34, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      // Nail holes: a dark dot in a pale halo of broken plaster.
       for (let i = 0; i < 12; i++) {
-        // Nail holes: a dark dot in a pale halo of broken plaster.
         const y = S * (0.15 + rand() * 0.4);
         const r1 = 3 + rand() * 4;
         const r2 = 1.2 + rand() * 1.4;
@@ -519,6 +839,43 @@ const CorridorTextures = {
           ctx.fill();
         });
       }
+
+      // A couple of pencil-dark scrawls per bay — somebody's hand at arm's
+      // length, never a readable word.
+      const nScrawl = 2 + Math.floor(rand() * 3);
+      for (let i = 0; i < nScrawl; i++) {
+        const y = S * (0.24 + rand() * 0.4);
+        const stroke = "rgba(60,72,66," + (0.08 + rand() * 0.14).toFixed(3) + ")";
+        const lw = 0.8 + rand() * 1.4;
+        const seg = [];
+        for (let k = 0; k < 3; k++) {
+          seg.push((rand() - 0.5) * S * 0.03, (rand() - 0.5) * S * 0.022,
+                   (rand() - 0.5) * S * 0.03, (rand() - 0.5) * S * 0.022);
+        }
+        this.wrapX(S, rand() * S, (x) => {
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = lw;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          let cxp = x;
+          let cyp = y;
+          for (let k = 0; k < 3; k++) {
+            ctx.quadraticCurveTo(cxp + seg[k * 4], cyp + seg[k * 4 + 1],
+                                 cxp + seg[k * 4 + 2], cyp + seg[k * 4 + 3]);
+            cxp += seg[k * 4 + 2];
+            cyp += seg[k * 4 + 3];
+          }
+          ctx.stroke();
+        });
+      }
+
+      // Grime piling up in the floor junction (unchanged).
+      const skirt = ctx.createLinearGradient(0, S - S * 0.06, 0, S);
+      skirt.addColorStop(0, "rgba(26,36,40,0)");
+      skirt.addColorStop(1, "rgba(26,36,40,0.55)");
+      ctx.fillStyle = skirt;
+      ctx.fillRect(0, S - S * 0.06, S, S * 0.06);
 
       this.grain(ctx, rand, S, S, Math.round(S * 5), 0.3);
 
@@ -551,6 +908,47 @@ const CorridorTextures = {
       }
       return c;
     });
+  },
+
+  // Stretch a field to fill [0,1]. fbm lands well inside that range, and the
+  // coat thresholds are quantiles of the result, so normalising first is what
+  // makes `coverage` mean the same thing for every field.
+  normaliseField: function (f) {
+    const d = f.data;
+    let mn = Infinity;
+    let mx = -Infinity;
+    for (let i = 0; i < d.length; i++) {
+      const v = d[i];
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    const s = 1 / (mx - mn || 1);
+    for (let i = 0; i < d.length; i++) d[i] = (d[i] - mn) * s;
+    return f;
+  },
+
+  // The threshold above which `keep` of the mask's area survives — a 256-bin
+  // histogram over every third sample, which is plenty for a number that only
+  // has to be right to a percent or so. This is what lets a coat's `coverage`
+  // be read as "how much of this coat is left" instead of an opaque constant.
+  maskThreshold: function (mask, keep) {
+    const bins = 256;
+    const hist = new Int32Array(bins);
+    let total = 0;
+    for (let i = 0; i < mask.length; i += 3) {
+      let b = (mask[i] * 255) | 0;
+      if (b < 0) b = 0;
+      else if (b > 255) b = 255;
+      hist[b]++;
+      total++;
+    }
+    let want = total * (1 - keep);
+    let acc = 0;
+    for (let i = 0; i < bins; i++) {
+      acc += hist[i];
+      if (acc >= want) return i / 255;
+    }
+    return 1;
   },
 
   // ---- FLOOR (corridor + landing) ---------------------------------------
@@ -1082,7 +1480,8 @@ const roomImages = [
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
-  "wallThickness", "textureSize", "seed", "wallNoiseRes", "tubeSpacing", "tubeColor",
+  "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
+  "wallGrain", "wallStripe", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
   "floorTile", "roomTile", "tubeWidth", "tubeLength", "tubeDrop", "imageProud",
 ];
@@ -1116,6 +1515,17 @@ AFRAME.registerComponent("corridor-root", {
     // flake contours. Coat edges stay pixel-crisp either way — they are
     // thresholded after the interpolation, not before.
     wallNoiseRes: { type: "number", default: 2 },
+    // The wall's weathering, as three knobs over the whole stack of coats:
+    //   wallFlake   0..1+ — a global multiplier on how much of each coat is
+    //               GONE. 0 repaints the corridor (every coat intact), 1 is the
+    //               reference walls, above 1 strips it further.
+    //   wallGrain   0..1+ — the strength of the vertical brushed streaking,
+    //               both inside the coat masks and as strokes over them.
+    //   wallStripe  allow the "stripe" variant to show its ragged band of an
+    //               earlier ochre scheme. Off makes that variant a plain wall.
+    wallFlake: { type: "number", default: 1 },
+    wallGrain: { type: "number", default: 1 },
+    wallStripe: { type: "boolean", default: true },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -1484,11 +1894,23 @@ AFRAME.registerComponent("corridor-root", {
     const S = d.textureSize;
     CorridorTextures.resetTimings();
     // --- the palette: eight canvases, drawn once and shared by everything ---
+    // What the wall canvases need that the canvas cannot know by itself: how
+    // many metres it covers (so wear can be sized in centimetres), and the
+    // weathering knobs.
+    const wopts = {
+      bay: L.bay,
+      height: d.height,
+      noiseRes: d.wallNoiseRes,
+      flake: d.wallFlake,
+      grain: d.wallGrain,
+      stripe: d.wallStripe,
+    };
+    this.wopts = wopts;
     this.tex = {
       wall: [
-        CorridorTextures.wall(S, d.seed, 0, 0),
-        CorridorTextures.wall(S, d.seed, 1, 0),
-        CorridorTextures.wall(S, d.seed, 2, 0),
+        CorridorTextures.wall(S, d.seed, 0, 0, wopts),
+        CorridorTextures.wall(S, d.seed, 1, 0, wopts),
+        CorridorTextures.wall(S, d.seed, 2, 0, wopts),
       ],
       floor: CorridorTextures.floor(S, d.seed, Math.max(2, Math.round(d.width / d.floorTile))),
       ceiling: CorridorTextures.ceiling(S, d.seed),
