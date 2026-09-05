@@ -2112,13 +2112,22 @@ const roomImages = [
 // TUNABLES — all of them, with their defaults. Nothing in the code below is a
 // number that is not derived from these:
 //   offset 0 0 400 / shown false      placement + visibility
-//   length 16 / width 2.2 / height 3  the corridor's clear box
+//   length 16 / width 4.4 / height 3  the corridor's clear box
 //   landingDepth 2                    the arrival end, behind z = 0
 //   doorPitch 3.2                     spacing of the CLOSED doors along a wall
 //   doorWidth 0.9 / doorHeight 2.1    every opening, closed or open
 //   transomHeight 0.4                 the louvred fanlight over a closed door
-//   roomWidth 3.2 / roomDepth 4       an apartment: along / away from the run
-//   roomSpacing 0                     0 = auto (rooms share party walls)
+//   roomWidth 3.2 / roomDepth 4       the DEFAULT apartment: along / away from
+//                                     the run
+//   roomSizes [{},{},{}]              per-apartment { w, d } overrides, indexed
+//                                     like roomImages; either key may be left
+//                                     out. index.html sets 4.8x6.0 / default /
+//                                     6.4 wide
+//   roomOffsets [0,0,0]               a by-eye z nudge per apartment, applied
+//                                     after the packing
+//   roomSpacing 0                     0 = auto: the left pair packed tight
+//                                     around one party wall. Above 0 it
+//                                     overrides that pair's HALF step
 //   wallThickness 0.15                every wall, exactly like the floorplan
 //   textureSize 1024 / seed 1         the canvases: resolution + which corridor
 //   tubeSpacing 4 / tubeColor #f4f1e2 the ceiling lights (spacing is SNAPPED)
@@ -2131,8 +2140,8 @@ const roomImages = [
 //   tubeDrop .06                      how far a tube hangs below the ceiling
 //   imageProud .02                    a picture's clearance off its wall
 //   focusDistance 1.3 / focusDimRadius 2.5
-//                                     the VR focus view's fit INSIDE a 3.2×4 m
-//                                     apartment (see js/focus-vr.js)
+//                                     the VR focus view's fit inside the
+//                                     SMALLEST apartment (see js/focus-vr.js)
 // ================================================================
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",

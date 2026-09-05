@@ -417,10 +417,33 @@
            Tunables (all on corridor-root, all with defaults — see the full
            annotated list in js/zone-a-corridor.js):
              placement   offset (0 0 400) / shown (false)
-             the box     length 16 / width 2.2 / height 3 / landingDepth 2
+             the box     length 16 / width 4.4 / height 3 / landingDepth 2
+                         width was 2.2 and read as a tunnel; 4.4 is set on the
+                         tag and everything follows it — floor tile columns,
+                         tube length, the end walls, the collider
              openings    doorPitch 3.2 / doorWidth 0.9 / doorHeight 2.1 /
                          transomHeight 0.4
-             apartments  roomWidth 3.2 / roomDepth 4 / roomSpacing 0 (auto)
+             apartments  roomWidth 3.2 / roomDepth 4   the DEFAULT size, w
+                         ALONG the corridor and d away from it
+                         roomSizes [{},{},{}]   per-apartment { w, d }
+                         overrides indexed like roomImages, either key
+                         optional. Set on the tag: apartment 1 (left, nearest)
+                         4.8 x 6.0, apartment 2 (left, far) the default
+                         3.2 x 4.0, apartment 3 (right) 6.4 wide x 4.0 deep
+                         roomOffsets [0,0,0]   a by-eye z nudge each, applied
+                         after the packing
+                         roomSpacing 0 (auto)   the left pair packs tight
+                         around ONE party wall; above 0 it overrides that
+                         pair's half step
+
+                         HOW THEY ARE PACKED: apartment 2 sits at the far end
+                         with its outer wall against the corridor's end wall;
+                         apartment 1 sits directly in front of it, the two
+                         sharing one party wall; apartment 3 is centred on the
+                         midpoint of that pair's whole span, so its doorway
+                         looks across at the party wall rather than into
+                         either of their doors. The closed doors fill whatever
+                         corridor is left in front of the stretch.
              fabric      wallThickness 0.15 / textureSize 1024 / seed 1
              the walls   wallNoiseRes 2      noise resolution divisor
                          wallFlake 1         how weathered the wall is — how
@@ -462,6 +485,7 @@
       <a-entity
         id="zone-a-corridor"
         corridor-root='offset: 0 0 400; shown: false; width: 4.4;
+                       roomSizes: [{"w": 4.8, "d": 6.0}, {}, {"w": 6.4}];
                        roomWallPalettes: ["yellow", "red", "green"]'
       >
         <!-- RETURN BOOTH — the way home, standing on the landing against its
