@@ -85,9 +85,10 @@
 //   one ad). They are behaviour presets — coverage biases, stripe on/off,
 //   streak and grime strength — NOT colours, so they apply to any palette.
 //
-//   PAINTED MARKS. Stencilled service ads, painted on ONE coat and then
-//   destroyed by whatever happened to the wall afterwards (see markSurvival and
-//   the (a)/(b)/(c) guarantee above wallMarks — a number is never complete).
+//   PAINTED MARKS. Stencilled phone numbers — no lettering of any kind, see
+//   the note above wallMarks — painted at a few degrees off level on ONE coat
+//   and then destroyed by whatever happened to the wall afterwards (see
+//   markSurvival and the (a)/(b)/(c) guarantee — a number is never complete).
 //
 //   PALETTES. Every colour lives in WALL_PALETTES, and wall() takes one as an
 //   argument, so the same generator paints any scheme — the relationship
@@ -204,7 +205,6 @@ const CorridorTextures = {
   //   lichen    { color, core } the pale blooms and their dark centres
   //   streak    { light, dark } the brushed vertical strokes
   //   stencil   { red, dark } the painted service ads
-  //   brush     { color } freehand painted letters
   //
   // TO ADD A SCHEME: copy an entry, change the colours, and set `wallPalette`
   // on corridor-root to its name. To change ONE thing about an existing scheme,
@@ -229,7 +229,6 @@ const CorridorTextures = {
       lichen: { color: "#e2e2d4", core: "#3a362c" },
       streak: { light: "#dbe5e2", dark: "#46565c" },
       stencil: { red: "#c8472a", dark: "#1c2a44" },
-      brush: { color: "#c8472a" },
     },
     // The other colour these buildings are painted: a faded jade green over the
     // same ochre and plaster. Proof that the generator is not about blue.
@@ -247,7 +246,6 @@ const CorridorTextures = {
       lichen: { color: "#e2e2d4", core: "#3a362c" },
       streak: { light: "#d8e4dd", dark: "#42574e" },
       stencil: { red: "#c8472a", dark: "#1c2a44" },
-      brush: { color: "#c8472a" },
     },
   },
 
@@ -561,17 +559,21 @@ const CorridorTextures = {
   //       than seven survive, another run is overpainted until they do not.
   // (c) is what makes the guarantee hold no matter how the noise fell.
   //
+  // NUMBERS ONLY. No trade above them, no freehand lettering: anything with
+  // letters in it reads as a WORD from across the corridor and pulls the eye,
+  // and a wall that captions itself is not what this place is. A phone number
+  // is a texture — you register what it is without reading it.
+  //
   // The number itself is a real Vietnamese mobile: 0 + a live prefix + seven
-  // seeded digits, grouped the way they are written on walls.
+  // seeded digits, grouped the way they are written on walls, and never level:
+  // it was painted freehand off a card, so it always sits a few degrees off
+  // horizontal (wallStencilTilt).
   MARK_FONT: "Impact, 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif",
   MARK_PREFIXES: [
     "90", "91", "93", "97", "98", "32", "33", "34", "35", "36", "37", "38",
     "39", "70", "76", "77", "78", "79", "81", "82", "83", "84", "85", "88",
     "89",
   ],
-  // The trades that paint them. UTF-8; the diacritics matter and the system
-  // stack renders them (the same assumption the info terminals make).
-  MARK_WORDS: ["KHOAN CẮT BÊ TÔNG", "HÚT HẦM CẦU", "RÚT HẦM CẦU"],
 
   // How much of a mark survives, given which coat the wall has ended up
   // showing at that pixel. Index 3 is the coat it was painted on.
@@ -596,11 +598,6 @@ const CorridorTextures = {
     for (let i = 0; i < n; i++) {
       legibleLog.push(this.oneNumberMark(ctx, C));
     }
-    // 0-2 freehand brush marks, the reference-03 kind: a few big hand-painted
-    // capitals, half eaten by the wash.
-    const nb = Math.floor(rand() * (1 + density * 2));
-    for (let i = 0; i < nb; i++) this.oneBrushMark(ctx, C);
-
     if (C.debug && legibleLog.length) {
       console.log(
         "[corridor] wall marks (" + C.variant.name + "): legible digits " +
@@ -711,7 +708,10 @@ const CorridorTextures = {
     const font = "700 " + fontPx.toFixed(1) + "px " + this.MARK_FONT;
     ctx.font = font;
     const wpx = ctx.measureText(text).width;
-    const theta = ((rand() - 0.5) * 4 * Math.PI) / 180; // ±2°
+    // Painted freehand: never level, and always tilted enough to see. The sign
+    // is random, the magnitude 40-100% of the tunable, so no mark is straight.
+    const tiltDeg = C.tilt * (0.4 + rand() * 0.6) * (rand() < 0.5 ? -1 : 1);
+    const theta = (tiltDeg * Math.PI) / 180;
 
     // (b) — one of the two guarantees, by seed: run it off the edge of the bay
     // so at least three digits are simply not there, or keep it inside and
@@ -779,18 +779,6 @@ const CorridorTextures = {
         boxes.push({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
       }
       cursor += adv;
-    }
-
-    // --- the trade, above the number, in the same hand
-    if (C.words && rand() < 0.55) {
-      const word = this.MARK_WORDS[Math.floor(rand() * this.MARK_WORDS.length)];
-      const wfont = "700 " + (fontPx * 0.62).toFixed(1) + "px " + this.MARK_FONT;
-      sctx.save();
-      sctx.font = wfont;
-      sctx.fillStyle = stencil;
-      sctx.globalAlpha = alpha * 0.85;
-      sctx.fillText(word, 0, -dh * 1.35);
-      sctx.restore();
     }
 
     // --- mask it to the wall, and audit the digits
@@ -876,45 +864,6 @@ const CorridorTextures = {
     ctx.restore();
   },
 
-  // A freehand painted mark in the manner of reference 03: a few big capitals
-  // in thin rounded brush strokes, heavily faded. Deliberately NOT a word.
-  oneBrushMark: function (ctx, C) {
-    const S = C.S;
-    const rand = C.rand;
-    const letters = "ABCDEĐGHIKLMNOPQRSTUVXY";
-    let text = "";
-    const n = 2 + Math.floor(rand() * 4);
-    for (let i = 0; i < n; i++) {
-      text += letters[Math.floor(rand() * letters.length)];
-    }
-    const dh = (0.16 + rand() * 0.14) * C.pxY; // 16-30 cm capitals
-    const fontPx = dh / 0.72;
-    const baselineM = 0.9 + rand() * 1.0;
-    const by = S * (1 - baselineM / C.heightM);
-    const font = "600 " + fontPx.toFixed(1) + "px 'Helvetica Neue', Helvetica, Arial, sans-serif";
-    ctx.font = font;
-    const wpx = ctx.measureText(text).width;
-    const x0 = rand() * Math.max(1, S - wpx);
-    const pad = Math.ceil(dh * 0.8);
-    const bx = Math.floor(x0 - pad);
-    const byTop = Math.floor(by - dh * 1.5);
-    const bw = Math.ceil(wpx + pad * 2);
-    const bh = Math.ceil(dh * 2.2);
-    const sc = this.canvas(bw, bh);
-    const sctx = sc.getContext("2d");
-    sctx.font = font;
-    sctx.textBaseline = "alphabetic";
-    sctx.lineJoin = "round";
-    sctx.lineCap = "round";
-    sctx.strokeStyle = C.pal.brush.color;
-    sctx.globalAlpha = 0.22 + rand() * 0.22;
-    sctx.lineWidth = Math.max(1.5, dh * 0.055);
-    sctx.strokeText(text, x0 - bx, by - byTop);
-    const img = this.maskToWall(sctx, C, bx, byTop, bw, bh, null, 0);
-    sctx.putImageData(img, 0, 0);
-    ctx.drawImage(sc, bx, byTop);
-  },
-
   // ---- WALL --------------------------------------------------------------
   // PAINT STRATIGRAPHY. One canvas covers `bay` metres of wall length by the
   // FULL wall height, so the darkening toward the ceiling is baked at its true
@@ -971,14 +920,14 @@ const CorridorTextures = {
     const grainAmt = o.grain != null ? o.grain : 1;
     const allowStripe = o.stripe !== false;
     const stencils = o.stencils != null ? o.stencils : 0.6;
-    const stencilWords = o.stencilWords !== false;
+    const stencilTilt = o.stencilTilt != null ? o.stencilTilt : 6;
     // The palette is part of the key, so two rooms with different colours never
     // share a canvas and two with the same colours always do.
     const key =
       "wall|" +
       [size, seed, variant, darken, bayM.toFixed(3), heightM.toFixed(3),
        res, flake, grainAmt, allowStripe ? 1 : 0, stencils,
-       stencilWords ? 1 : 0, this.paletteKey(pal)].join("|");
+       stencilTilt, this.paletteKey(pal)].join("|");
 
     return this.get(key, () => {
       const S = size;
@@ -1363,7 +1312,7 @@ const CorridorTextures = {
         heightM: heightM,
         variant: V,
         density: stencils,
-        words: stencilWords,
+        tilt: stencilTilt,
         debug: !!o.debug,
       });
 
@@ -2081,7 +2030,7 @@ const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
-  "wallGrain", "wallStripe", "wallStencils", "wallStencilWords",
+  "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallPalette", "wallPaletteOverride",
   "roomWallPalettes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
@@ -2142,9 +2091,12 @@ AFRAME.registerComponent("corridor-root", {
     // "flaked" variant, 1 on "stripe" and 0 on "intact" — and "intact" is what
     // the segments beside an apartment doorway and the apartments themselves
     // are built from, so the hung images never compete with an ad.
-    // `wallStencilWords` adds the trade above the number.
+    // `wallStencilTilt` is how many degrees off horizontal they are painted
+    // (each mark takes 40-100% of it, either way up) — they are done freehand
+    // off a card and none of them is level. There is deliberately no lettering
+    // option: numbers only.
     wallStencils: { type: "number", default: 0.6 },
-    wallStencilWords: { type: "boolean", default: true },
+    wallStencilTilt: { type: "number", default: 6 },
     wallPalette: { type: "string", default: "chungcu" },
     wallPaletteOverride: {
       default: null,
@@ -2554,7 +2506,7 @@ AFRAME.registerComponent("corridor-root", {
       grain: d.wallGrain,
       stripe: d.wallStripe,
       stencils: d.wallStencils,
-      stencilWords: d.wallStencilWords,
+      stencilTilt: d.wallStencilTilt,
       debug: this.debugMode,
     };
     this.wopts = wopts;

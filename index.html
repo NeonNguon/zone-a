@@ -390,8 +390,9 @@
            back through each other, each with its own noise-driven coverage
            mask, hard proud edges, vertical brush grain, grime in the breaks,
            and the stencilled phone-number ads that are on every wall in Saigon
-           (always partial: a mark is destroyed by the same flaking that shaped
-           the wall, and never leaves more than seven of ten digits readable).
+           — numbers only, never lettering, painted a few degrees off level and
+           always partial: a mark is destroyed by the same flaking that shaped
+           the wall, and never leaves more than seven of ten digits readable.
            The colours are a PALETTE the generator takes as an argument, so the
            same code paints any scheme — see WALL_PALETTES in
            js/zone-a-corridor.js. Building the three wall canvases is the
@@ -424,7 +425,9 @@
                          wallGrain 1         vertical brush streaking
                          wallStripe true     allow the ochre band variant
                          wallStencils 0.6    painted-ad density (0 = none)
-                         wallStencilWords true   trade above the number
+                         wallStencilTilt 6   degrees off level they are
+                                             painted at (numbers only — there
+                                             is no lettering anywhere)
                          wallPalette "chungcu"   or "green"
                          wallPaletteOverride null   patches the named palette
                          roomWallPalettes [null,null,null]
