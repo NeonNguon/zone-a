@@ -2136,7 +2136,8 @@ const roomImages = [
 // ================================================================
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
-  "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
+  "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSizes",
+  "roomOffsets", "roomSpacing",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
@@ -2161,8 +2162,43 @@ AFRAME.registerComponent("corridor-root", {
     doorHeight: { type: "number", default: 2.1 },
     transomHeight: { type: "number", default: 0.4 },
 
+    // The DEFAULT apartment, used by any of the three that does not override it.
     roomWidth: { type: "number", default: 3.2 },
     roomDepth: { type: "number", default: 4.0 },
+    // PER-APARTMENT sizes, indexed like roomImages (0 = apartment 1, left and
+    // nearest the mouth; 1 = apartment 2, left and far; 2 = apartment 3,
+    // right). Each entry is { w, d } in metres — w ALONG the corridor, d away
+    // from it — and either key may be left out to fall back to roomWidth /
+    // roomDepth. An object, or the JSON string an HTML attribute carries (the
+    // pattern floorplan.js uses for `rooms`). Empty by default, so the
+    // component on its own still builds three identical 3.2 x 4.0 rooms; the
+    // real sizes are set on the tag in index.html.
+    roomSizes: {
+      default: [{}, {}, {}],
+      parse: function (v) {
+        if (typeof v !== "string") return v || [{}, {}, {}];
+        return v ? JSON.parse(v) : [{}, {}, {}];
+      },
+      stringify: function (v) {
+        return typeof v === "string" ? v : JSON.stringify(v);
+      },
+    },
+    // A by-eye nudge along the corridor per apartment, in metres, same
+    // indexing. Applied AFTER the packing below, so it deliberately breaks the
+    // exact fit — that is what it is for.
+    roomOffsets: {
+      default: [0, 0, 0],
+      parse: function (v) {
+        if (typeof v !== "string") return v || [0, 0, 0];
+        return v ? JSON.parse(v) : [0, 0, 0];
+      },
+      stringify: function (v) {
+        return typeof v === "string" ? v : JSON.stringify(v);
+      },
+    },
+    // OPTIONAL override of the LEFT PAIR's step (apartment 2's centre to
+    // apartment 1's centre is twice this). 0 = packed tight, sharing a party
+    // wall, which is what the auto packing does.
     roomSpacing: { type: "number", default: 0 }, // 0 = auto
 
     wallThickness: { type: "number", default: 0.15 },
@@ -2419,9 +2455,9 @@ AFRAME.registerComponent("corridor-root", {
     L.rooms.forEach((room) => {
       // The apartment itself.
       const near = room.side * (L.halfW + L.t); // its face of the corridor wall
-      const far = near + room.side * d.roomDepth;
+      const far = near + room.side * room.d;
       push(Math.min(near, far) + r, Math.max(near, far) - r,
-           room.z - d.roomWidth / 2 + r, room.z + d.roomWidth / 2 - r,
+           room.z - room.w / 2 + r, room.z + room.w / 2 - r,
            "corridor:room" + (room.index + 1));
 
       // Its doorway throat: from inside the corridor, through the wall, to
@@ -2500,25 +2536,71 @@ AFRAME.registerComponent("corridor-root", {
     const bays = Math.max(1, Math.round(run / d.tubeSpacing));
     const bay = run / bays;
 
-    // THE THREE APARTMENTS take the far stretch of the corridor. `spacing` is
-    // the step between consecutive openings, alternating walls, so two
-    // same-side apartments end up (2 × spacing) apart. The auto value makes
-    // that exactly roomWidth + one wall thickness — i.e. the two left-hand
-    // apartments SHARE a party wall, which is what a chung cư actually does.
-    const spacing =
-      d.roomSpacing > 0 ? d.roomSpacing : (d.roomWidth + t) / 2;
+    // THE THREE APARTMENTS take the far stretch of the corridor, and each has
+    // its OWN size now (roomSizes), so where they sit has to be packed
+    // explicitly rather than fallen out of a single step.
+    //
+    //   LEFT WALL. Apartment 2 sits at the far end, its outer side wall against
+    //   the corridor's end wall — centre at zEnd + (w2 + t)/2, which is where
+    //   it has always been. Apartment 1 sits directly in front of it, the two
+    //   of them SHARING one party wall, so its centre is a half of each width
+    //   plus a wall thickness further along. That is a chung cư: apartments
+    //   packed wall to wall, not spaced out.
+    //
+    //   RIGHT WALL. Apartment 3 is centred on the MIDPOINT of the left pair's
+    //   whole span, so its doorway looks across at the party wall between them
+    //   rather than into either of their doors.
+    //
+    // roomOffsets then nudges any of the three along the corridor by eye.
+    const rs = d.roomSizes || [];
+    const sizeOf = (i) => {
+      const e = rs[i] || {};
+      return {
+        w: e.w > 0 ? e.w : d.roomWidth,
+        d: e.d > 0 ? e.d : d.roomDepth,
+      };
+    };
+    const ro = d.roomOffsets || [];
+    const nudge = (i) => (typeof ro[i] === "number" ? ro[i] : 0);
+    const sz = [sizeOf(0), sizeOf(1), sizeOf(2)];
+
+    const z2 = zEnd + (sz[1].w + t) / 2; // apartment 2, hard against the end
+    // The left pair's step: half of each width plus the party wall between
+    // them, unless roomSpacing overrides it (it is a HALF step, as it always
+    // was, so two same-side apartments end up 2 × it apart).
+    const leftStep =
+      d.roomSpacing > 0 ? d.roomSpacing * 2 : sz[1].w / 2 + t + sz[0].w / 2;
+    const z1 = z2 + leftStep; // apartment 1, in front of it
+    // ...and apartment 3 opposite the middle of the pair.
+    const z3 = (z2 - sz[1].w / 2 + (z1 + sz[0].w / 2)) / 2;
+
     // Ordered from the END WALL back toward the mouth. `index` is the index
     // into roomImages: walking in you pass apartment 1 (left), 3 (right),
     // 2 (left), so from the far end that is 2, 3, 1.
-    // Each carries its own optional wall palette override (default none), so an
-    // apartment can be painted a different scheme from the corridor — the first
-    // real consumer of the generator's palette argument.
+    // Each carries its own size and its own optional wall palette override.
     const rp = d.roomWallPalettes || [];
     const rooms = [
-      { side: -1, z: zEnd + spacing * 1, index: 1, wallPaletteOverride: rp[1] || null },
-      { side: +1, z: zEnd + spacing * 2, index: 2, wallPaletteOverride: rp[2] || null },
-      { side: -1, z: zEnd + spacing * 3, index: 0, wallPaletteOverride: rp[0] || null },
+      { side: -1, z: z2 + nudge(1), index: 1, w: sz[1].w, d: sz[1].d,
+        wallPaletteOverride: rp[1] || null },
+      { side: +1, z: z3 + nudge(2), index: 2, w: sz[2].w, d: sz[2].d,
+        wallPaletteOverride: rp[2] || null },
+      { side: -1, z: z1 + nudge(0), index: 0, w: sz[0].w, d: sz[0].d,
+        wallPaletteOverride: rp[0] || null },
     ];
+
+    // The apartments must not run into the landing. Their near end is
+    // apartment 1's outer wall; if that reaches within a door pitch of z = 0
+    // there is no corridor left in front of them, so say so loudly rather than
+    // quietly overlapping the doors or the landing.
+    const nearEnd = z1 + nudge(0) + sz[0].w / 2 + t;
+    if (nearEnd > -d.doorPitch) {
+      console.warn(
+        "[corridor] the apartments reach the landing: apartment 1's near wall " +
+          "is at z " + nearEnd.toFixed(2) + ", which leaves less than one door " +
+          "pitch (" + d.doorPitch + " m) of corridor in front of it. Lengthen " +
+          "`length` (now " + d.length + ") or shrink roomSizes."
+      );
+    }
 
     // CLOSED DOORS fill the rest of each wall on a regular pitch, the two walls
     // half a pitch out of step so doors never face each other across the
@@ -2539,7 +2621,9 @@ AFRAME.registerComponent("corridor-root", {
       // stay in front of it (and clear of its wall).
       let limit = zEnd;
       list.forEach(function (op) {
-        limit = Math.max(limit, op.z + d.roomWidth / 2 + t);
+        // op.room is set for the apartments' openings, which are the only ones
+        // in the list at this point — and each has its OWN width now.
+        limit = Math.max(limit, op.z + op.room.w / 2 + t);
       });
       const phase = side < 0 ? 0.5 : 1.0; // left wall offset by half a pitch
       for (let k = 0; k < 64; k++) {
@@ -2566,7 +2650,6 @@ AFRAME.registerComponent("corridor-root", {
       run: run,
       bays: bays,
       bay: bay,
-      spacing: spacing,
       rooms: rooms,
       openings: openings,
       // Wall runs span the FULL outer extent, so the corners overlap and close
@@ -2682,6 +2765,29 @@ AFRAME.registerComponent("corridor-root", {
     this.built = true;
     const wallT = CorridorTextures.timeFor("wall|");
     const allT = CorridorTextures.timeFor("");
+    // The apartments' own line: where each one sits, how big it is, how many
+    // closed doors are left on each wall, and how much clear corridor there is
+    // in front of the whole stretch — the numbers you need to decide whether
+    // `length` should grow.
+    const closed = (side) =>
+      L.openings[String(side)].filter((o) => !o.open).length;
+    let nearest = L.zEnd;
+    L.rooms.forEach((r) => {
+      nearest = Math.max(nearest, r.z + r.w / 2 + L.t);
+    });
+    console.log(
+      "[corridor] apartments " +
+        L.rooms
+          .slice()
+          .sort((a, b) => a.index - b.index)
+          .map((r) => "#" + (r.index + 1) + " " + (r.side < 0 ? "L" : "R") +
+                      " z " + r.z.toFixed(2) + " " +
+                      r.w.toFixed(1) + "x" + r.d.toFixed(1))
+          .join(", ") +
+        " | closed doors L " + closed(-1) + " R " + closed(1) +
+        " | clear corridor in front of them " +
+        Math.abs(0 - nearest).toFixed(2) + " m"
+    );
     console.log(
       "[corridor] " + L.run.toFixed(1) + " m run, " + L.bays + " bays of " +
         L.bay.toFixed(2) + " m, " +
@@ -2875,11 +2981,14 @@ AFRAME.registerComponent("corridor-root", {
   buildRoom: function (L, r) {
     const d = this.data;
     const t = L.t;
+    // This apartment's own size — every apartment has its own now (roomSizes).
+    const rw = r.w; // along the corridor
+    const rd = r.d; // away from it
     const xNear = r.side * (L.halfW + t); // the room's face of the corridor wall
-    const xFar = xNear + r.side * d.roomDepth; // its back wall's inner face
+    const xFar = xNear + r.side * rd; // its back wall's inner face
     const xMid = (xNear + xFar) / 2;
-    const zNear = r.z - d.roomWidth / 2; // -z wall inner face
-    const zFar = r.z + d.roomWidth / 2; // +z wall inner face
+    const zNear = r.z - rw / 2; // -z wall inner face
+    const zFar = r.z + rw / 2; // +z wall inner face
     // An apartment uses ONE variant, and it is 0 ("plain"): no painted ads on
     // a wall a picture hangs on, and no ochre stripe — the stripe is a fine
     // thing once along a 16 m corridor and far too much four times over in a
@@ -2900,27 +3009,58 @@ AFRAME.registerComponent("corridor-root", {
     // floored (and lidded) instead of showing a wallThickness-wide slot of
     // nothing; the overlap is buried inside the wall, and the two floors abut
     // exactly at the corridor face with no overlap to z-fight.
-    const spanX = d.roomDepth + t;
+    const spanX = rd + t;
     const xPlate = r.side * (L.halfW + spanX / 2);
     // Where the room's own side walls start and stop (see the note on them
     // below): from the corridor wall's centreline out to the back wall's outer
     // face, so both ends are buried and neither shows on a surface you can see.
     const sideStartX = L.halfW + t / 2;
-    const sideLen = L.halfW + t + d.roomDepth + t - sideStartX;
+    const sideLen = L.halfW + t + rd + t - sideStartX;
     const tile = d.roomTile * 4; // the gạch bông canvas is a 4×4 tile block
-    const floor = this.addPlane(spanX, d.roomWidth, this.m.roomFloor,
-                                [0, 0, spanX / tile, d.roomWidth / tile]);
+    const floor = this.addPlane(spanX, rw, this.m.roomFloor,
+                                [0, 0, spanX / tile, rw / tile]);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(xPlate, 0, r.z);
-    const ceil = this.addPlane(spanX, d.roomWidth, this.m.ceiling,
-                               [0, 0, spanX / L.bay, d.roomWidth / L.bay]);
+    const ceil = this.addPlane(spanX, rw, this.m.ceiling,
+                               [0, 0, spanX / L.bay, rw / L.bay]);
     ceil.rotation.x = Math.PI / 2;
     ceil.position.set(xPlate, d.height, r.z);
 
-    // BACK WALL (the one facing you as you walk in), spanning past both side
-    // walls so the corners close by overlap — the floorplan's trick.
-    this.addBox(t, d.height, d.roomWidth + t * 2, xFar + r.side * t / 2,
-                d.height / 2, r.z, wallMat, L.bay, d.height);
+    // Is either side of this apartment a PARTY WALL — a plane with another
+    // apartment on the far side of it? Both the back wall and the side walls
+    // need to know, so work it out once.
+    const sharedAt = [zNear - t / 2, zFar + t / 2].map((zc) =>
+      L.rooms.some(
+        (o) =>
+          o !== r &&
+          o.side === r.side &&
+          (Math.abs(o.z - o.w / 2 - t / 2 - zc) < 1e-4 ||
+            Math.abs(o.z + o.w / 2 + t / 2 - zc) < 1e-4)
+      )
+    );
+
+    // BACK WALL (the one facing you as you walk in). It runs past its own side
+    // walls so the corners close by overlap — the floorplan's trick — but only
+    // as far as each side wall's OUTER face: a full thickness on a wall this
+    // room owns, and half a thickness where the wall is a party leaf shared
+    // with the neighbour.
+    //
+    // That distinction only started to matter when the apartments got
+    // different depths. A back wall that overshot a party wall by the full
+    // thickness used to end up buried in the neighbour's identical back wall;
+    // with a shallower neighbour it instead pokes through the party wall into
+    // the DEEPER room and shows its end face there, as a stripe in the
+    // neighbour's colour.
+    // On a shared side the overlap is a QUARTER thickness, which lands the back
+    // wall's end inside this room's own half-thickness party leaf. Half a
+    // thickness would put that end face exactly coplanar with the NEIGHBOUR's
+    // leaf and the two would z-fight — a stripe of the neighbour's colour up
+    // the corner of this room, which is precisely what it did.
+    const backExt = sharedAt.map((sh) => (sh ? t / 4 : t));
+    const backZ0 = zNear - backExt[0];
+    const backZ1 = zFar + backExt[1];
+    this.addBox(t, d.height, backZ1 - backZ0, xFar + r.side * t / 2,
+                d.height / 2, (backZ0 + backZ1) / 2, wallMat, L.bay, d.height);
 
     // The TWO SIDE WALLS. Each runs from inside the corridor wall out past the
     // back wall — but only HALF WAY into it, never through it.
@@ -2940,15 +3080,16 @@ AFRAME.registerComponent("corridor-root", {
     // apartment paints its own face. That matters now the rooms have their own
     // schemes: with a single shared box, whichever room happened to build
     // first would put its colour on the other room's wall.
+    //
+    // The two apartments sharing it can now be DIFFERENT DEPTHS. Each leaf runs
+    // its own room's depth, so over the shallower room they form a full wall
+    // between the two, and past its back wall the deeper room's leaf carries on
+    // alone — closing that room, with nothing but exterior on its other side.
+    // That is why the leaf's length comes from `rd` and not from a shared
+    // figure.
     [zNear - t / 2, zFar + t / 2].forEach((zc, i) => {
       const inward = i === 0 ? 1 : -1; // toward THIS room's interior
-      const shared = L.rooms.some(
-        (o) =>
-          o !== r &&
-          o.side === r.side &&
-          (Math.abs(o.z - d.roomWidth / 2 - t / 2 - zc) < 1e-4 ||
-            Math.abs(o.z + d.roomWidth / 2 + t / 2 - zc) < 1e-4)
-      );
+      const shared = sharedAt[i];
       const th = shared ? t / 2 : t;
       const zcc = shared ? zc + (inward * t) / 4 : zc;
       const key = r.side + "@" + zcc.toFixed(4);
@@ -2967,10 +3108,23 @@ AFRAME.registerComponent("corridor-root", {
     // still corridor blue.
     this.lineCorridorWall(L, r, wallMat);
 
-    // One tube, in the middle of the room — the same fitting as the corridor's.
-    const tube = this.addPlane(L.tubeLength, d.tubeWidth, this.m.tube);
-    tube.rotation.x = Math.PI / 2;
-    tube.position.set(xMid, d.height - d.tubeDrop, r.z);
+    // TUBES, on the corridor's own rule: fittings spread along the room at
+    // roughly tubeSpacing, each laid ACROSS that run. A room is lit along its
+    // depth, so a 6 m-deep apartment gets two rather than being lit by one
+    // fitting in the middle, and the tube's length follows the room's width so
+    // a wide apartment gets a long one.
+    const roomBays = Math.max(1, Math.round(rd / d.tubeSpacing));
+    const roomTubeLen = d.tubeLength > 0 ? d.tubeLength : rw * 0.6;
+    for (let k = 0; k < roomBays; k++) {
+      const tube = this.addPlane(roomTubeLen, d.tubeWidth, this.m.tube);
+      tube.rotation.x = Math.PI / 2;
+      // spread evenly along the depth, measured from the corridor wall out
+      tube.position.set(
+        xNear + r.side * ((k + 0.5) / roomBays) * rd,
+        d.height - d.tubeDrop,
+        r.z
+      );
+    }
 
     this.buildOpenDoor(L, r);
     this.hangImages(L, r, xMid, xFar, zNear, zFar);
@@ -2985,8 +3139,8 @@ AFRAME.registerComponent("corridor-root", {
     const d = this.data;
     const x = r.side * (L.halfW + L.t + 0.005);
     const rotY = (r.side * Math.PI) / 2; // normal points into the room
-    const zA = r.z - d.roomWidth / 2;
-    const zB = r.z + d.roomWidth / 2;
+    const zA = r.z - r.w / 2;
+    const zB = r.z + r.w / 2;
     const dz0 = r.z - d.doorWidth / 2;
     const dz1 = r.z + d.doorWidth / 2;
     const H = d.height;
@@ -3066,12 +3220,12 @@ AFRAME.registerComponent("corridor-root", {
     const leftSign = -r.side;
     const walls = [
       // left wall
-      { x: xMid, z: r.z + leftSign * (d.roomWidth / 2 - d.imageProud),
+      { x: xMid, z: r.z + leftSign * (r.w / 2 - d.imageProud),
         rotY: leftSign > 0 ? 180 : 0 },
       // back wall — its face looks back toward the corridor
       { x: xFar - r.side * d.imageProud, z: r.z, rotY: -90 * r.side },
       // right wall
-      { x: xMid, z: r.z - leftSign * (d.roomWidth / 2 - d.imageProud),
+      { x: xMid, z: r.z - leftSign * (r.w / 2 - d.imageProud),
         rotY: leftSign > 0 ? 0 : 180 },
     ];
     walls.forEach((w, i) => {
