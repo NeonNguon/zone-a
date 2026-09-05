@@ -95,12 +95,162 @@ const CorridorTextures = {
     return tex;
   },
 
-  // Cache wrapper: every getter goes through this, keyed by its arguments.
+  // Build-time accounting. The wall canvases are the expensive ones (per-pixel
+  // paint stratigraphy over several noise fields), and how long they take is
+  // the number that decides wallNoiseRes / textureSize on a given device — so
+  // every canvas records its own ms here and build() reports them.
+  timings: {},
+
+  // Cache wrapper: every getter goes through this, keyed by its arguments. A
+  // cache HIT costs nothing and is recorded as such (0 ms), so the reported
+  // total is always the work actually done this build.
   get: function (key, make) {
-    if (this.cache.has(key)) return this.cache.get(key);
+    if (this.cache.has(key)) {
+      this.timings[key] = 0;
+      return this.cache.get(key);
+    }
+    const t0 = (window.performance || Date).now();
     const tex = this.texture(make());
+    this.timings[key] = (window.performance || Date).now() - t0;
     this.cache.set(key, tex);
     return tex;
+  },
+
+  // ms spent this build on the canvases whose key starts with `prefix`, and how
+  // many of them were actually drawn rather than served from the cache.
+  timeFor: function (prefix) {
+    let ms = 0;
+    let drawn = 0;
+    Object.keys(this.timings).forEach((k) => {
+      if (k.indexOf(prefix) !== 0) return;
+      ms += this.timings[k];
+      if (this.timings[k] > 0) drawn++;
+    });
+    return { ms: ms, drawn: drawn };
+  },
+
+  // Clear the accounting at the start of a build (not the cache — the canvases
+  // themselves are meant to survive).
+  resetTimings: function () {
+    this.timings = {};
+  },
+
+  // ---- NOISE FIELDS ------------------------------------------------------
+  // A seeded value-noise / fbm generator. Everything on the wall that has to
+  // look like weather rather than like a pattern — which coat of paint survives
+  // where, the vertical brush grain, where the grime pooled — is a threshold on
+  // one of these fields.
+  //
+  // Two properties matter, and both are deliberate:
+  //
+  //  PERIODIC IN X. The wall canvas repeats every lighting bay along the run,
+  //  so a field that did not wrap would put a vertical seam every few metres.
+  //  The lattice wraps in x (the last column interpolates back to the first),
+  //  so every field tiles exactly — the same guarantee wrapX gives the canvas
+  //  2D passes. It is NOT periodic in y: the canvas is used exactly once over
+  //  the wall's height, and the wear has to differ at the ceiling and the floor.
+  //
+  //  ANISOTROPIC. baseFreqX and baseFreqY are separate, so a field can be
+  //  stretched vertically into long streaks (the brushed grain that runs down
+  //  every one of the reference walls) or kept round in METRIC space — which is
+  //  not the same as round in pixels, because the canvas covers a bay's length
+  //  by the wall's height and those are different numbers of metres.
+  //
+  // Fields are computed at a REDUCED resolution (wallNoiseRes on corridor-root:
+  // 2 = half, 4 = quarter) and sampled bilinearly when the full-size canvas is
+  // composited. Thresholding happens AFTER that interpolation, so a coat's edge
+  // is still pixel-crisp — the reduction costs contour smoothness, not
+  // sharpness, and it is the single biggest lever on build time.
+  //
+  // Returns { data: Float32Array(w*h), w, h } normalised to [0,1].
+  noiseField: function (rand, w, h, opts) {
+    const octaves = opts.octaves || 4;
+    const gain = opts.gain != null ? opts.gain : 0.5;
+    const lac = opts.lacunarity || 2;
+    const out = new Float32Array(w * h);
+    let amp = 1;
+    let norm = 0;
+    let fx = opts.baseFreqX;
+    let fy = opts.baseFreqY;
+    for (let o = 0; o < octaves; o++) {
+      this.valueOctave(out, w, h, rand, fx, fy, amp);
+      norm += amp;
+      amp *= gain;
+      fx *= lac;
+      fy *= lac;
+    }
+    const inv = 1 / (norm || 1);
+    for (let i = 0; i < out.length; i++) out[i] *= inv;
+    return { data: out, w: w, h: h };
+  },
+
+  // One octave of value noise, added into `out`. `cx` lattice cells across the
+  // width (rounded to a whole number — that is what makes the field periodic in
+  // x) and `cy` down the height. Smoothstep interpolation, which is enough:
+  // these fields are thresholded into hard edges, so gradient continuity buys
+  // nothing that a Perlin gradient would.
+  valueOctave: function (out, w, h, rand, cx, cy, amp) {
+    const gw = Math.max(1, Math.round(cx)); // wraps
+    const gh = Math.max(1, Math.round(cy)) + 1; // does not wrap: +1 for the edge
+    const g = new Float32Array(gw * gh);
+    for (let i = 0; i < g.length; i++) g[i] = rand();
+
+    const sx = gw / w;
+    const sy = (gh - 1) / h;
+    // The x lattice lookup is the same for every row, so do it once.
+    const ix0 = new Int32Array(w);
+    const ixw = new Float32Array(w);
+    for (let x = 0; x < w; x++) {
+      const fxv = x * sx;
+      const x0 = Math.floor(fxv);
+      const tx = fxv - x0;
+      ix0[x] = x0 % gw;
+      ixw[x] = tx * tx * (3 - 2 * tx);
+    }
+    for (let y = 0; y < h; y++) {
+      const fyv = y * sy;
+      const y0 = Math.floor(fyv);
+      const ty = fyv - y0;
+      const wy = ty * ty * (3 - 2 * ty);
+      const r0 = y0 * gw;
+      const r1 = Math.min(gh - 1, y0 + 1) * gw;
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        const x0 = ix0[x];
+        const x1 = x0 + 1 === gw ? 0 : x0 + 1; // wrap: the seam closes here
+        const wx = ixw[x];
+        const a = g[r0 + x0];
+        const b = g[r0 + x1];
+        const c = g[r1 + x0];
+        const d = g[r1 + x1];
+        const top = a + (b - a) * wx;
+        const bot = c + (d - c) * wx;
+        out[row + x] += (top + (bot - top) * wy) * amp;
+      }
+    }
+  },
+
+  // Index + weight tables for sampling a reduced field at full canvas size.
+  // Built once per canvas and shared by every field (they all share a
+  // resolution), so the composite loop is four array reads and three lerps per
+  // field per pixel and no arithmetic on coordinates at all.
+  //   wrap: x wraps (periodic), y clamps.
+  bilinTable: function (srcN, dstN, wrap) {
+    const i0 = new Int32Array(dstN);
+    const i1 = new Int32Array(dstN);
+    const wt = new Float32Array(dstN);
+    const scale = srcN / dstN;
+    for (let i = 0; i < dstN; i++) {
+      const f = i * scale;
+      const a = Math.floor(f);
+      const t = f - a;
+      const a0 = wrap ? a % srcN : Math.min(srcN - 1, a);
+      const a1 = wrap ? (a0 + 1) % srcN : Math.min(srcN - 1, a0 + 1);
+      i0[i] = a0;
+      i1[i] = a1;
+      wt[i] = t;
+    }
+    return { i0: i0, i1: i1, w: wt };
   },
 
   // ---- shared drawing helpers -------------------------------------------
@@ -932,7 +1082,7 @@ const roomImages = [
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
-  "wallThickness", "textureSize", "seed", "tubeSpacing", "tubeColor",
+  "wallThickness", "textureSize", "seed", "wallNoiseRes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
   "floorTile", "roomTile", "tubeWidth", "tubeLength", "tubeDrop", "imageProud",
 ];
@@ -959,6 +1109,13 @@ AFRAME.registerComponent("corridor-root", {
     wallThickness: { type: "number", default: 0.15 },
     textureSize: { type: "number", default: 1024 },
     seed: { type: "number", default: 1 },
+    // The wall's noise fields are computed at textureSize / wallNoiseRes and
+    // sampled bilinearly onto the full canvas (see CorridorTextures.noiseField).
+    // 2 = half resolution, and by far the cheapest lever on the corridor's build
+    // pause: 4 quarters the field work again at the cost of slightly smoother
+    // flake contours. Coat edges stay pixel-crisp either way — they are
+    // thresholded after the interpolation, not before.
+    wallNoiseRes: { type: "number", default: 2 },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -1325,6 +1482,7 @@ AFRAME.registerComponent("corridor-root", {
     this.el.setObject3D("corridor", this.group);
 
     const S = d.textureSize;
+    CorridorTextures.resetTimings();
     // --- the palette: eight canvases, drawn once and shared by everything ---
     this.tex = {
       wall: [
@@ -1362,12 +1520,17 @@ AFRAME.registerComponent("corridor-root", {
     L.rooms.forEach((r) => this.buildRoom(L, r));
 
     this.built = true;
+    const wallT = CorridorTextures.timeFor("wall|");
+    const allT = CorridorTextures.timeFor("");
     console.log(
       "[corridor] " + L.run.toFixed(1) + " m run, " + L.bays + " bays of " +
         L.bay.toFixed(2) + " m, " +
         (L.openings["-1"].length + L.openings["1"].length) + " doorways, " +
         L.rooms.length + " apartments, " + this.imageEls.length + " images, " +
-        this.group.children.length + " meshes"
+        this.group.children.length + " meshes | textures " +
+        allT.ms.toFixed(0) + " ms total, " + wallT.drawn + " wall canvas(es) " +
+        (wallT.drawn ? (wallT.ms / wallT.drawn).toFixed(0) : "0") +
+        " ms each (noiseRes " + d.wallNoiseRes + ", size " + S + ")"
     );
     this.el.emit("zoneacorridorbuilt");
   },
