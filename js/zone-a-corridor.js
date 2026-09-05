@@ -97,13 +97,16 @@
 //   with `wallPaletteOverride`, and can give each apartment its own with
 //   `roomWallPalettes`. See the comment on WALL_PALETTES for the schema.
 //
-// EIGHT canvases in total, cached by their full parameter key — which includes
-// a hash of the palette — so a rebuild (or a second corridor) reuses them:
-// 3 wall variants, floor, ceiling, door atlas, room floor, all textureSize²,
-// plus one small transom strip. Each extra palette in use costs three more wall
-// canvases. On this desktop a wall canvas takes ~120 ms warm at the defaults
-// (1024², wallNoiseRes 2); halving the noise resolution or the texture size are
-// the two levers, and ?zonea=debug prints the per-phase breakdown.
+// ELEVEN canvases as the corridor ships, cached by their full parameter key —
+// which includes a hash of the palette — so a rebuild (or a second corridor)
+// reuses them: 3 corridor wall variants, ONE wall canvas for each of the three
+// apartments' own schemes, floor, ceiling, door atlas, room floor, all
+// textureSize², plus one small transom strip. About 41 MB, 55 MB with mipmaps.
+// A palette costs one canvas per VARIANT it is actually used with, which is why
+// an apartment (one variant) is cheap and the corridor (three) is not.
+// On this desktop a wall canvas takes ~105 ms at the defaults (1024²,
+// wallNoiseRes 2); halving the noise resolution or the texture size are the two
+// levers, and ?zonea=debug prints the per-phase breakdown.
 // ================================================================
 const CorridorTextures = {
   cache: new Map(),
@@ -204,7 +207,9 @@ const CorridorTextures = {
   //   drip      { color } rust running down from the slab
   //   lichen    { color, core } the pale blooms and their dark centres
   //   streak    { light, dark } the brushed vertical strokes
-  //   stencil   { red, dark } the painted service ads
+  //   stencil   { red, dark } the two inks a mark is painted in — the first is
+  //             usually the red-orange, but it is whatever READS on that wall
+  //             (on the red scheme it is a chalky white)
   //
   // TO ADD A SCHEME: copy an entry, change the colours, and set `wallPalette`
   // on corridor-root to its name. To change ONE thing about an existing scheme,
@@ -230,21 +235,79 @@ const CorridorTextures = {
       streak: { light: "#dbe5e2", dark: "#46565c" },
       stencil: { red: "#c8472a", dark: "#1c2a44" },
     },
-    // The other colour these buildings are painted: a faded jade green over the
-    // same ochre and plaster. Proof that the generator is not about blue.
+    // ---- THE THREE APARTMENTS ------------------------------------------
+    // Each is a whole stack, not a recoloured top coat. Two things are tuned
+    // differently from the corridor and they are what make a room read as its
+    // colour rather than as a white room with a tint:
+    //
+    //   The COVERAGE BALANCE is shifted down the stack. In the corridor the
+    //   near-white top wash holds ~55% of the wall and the colour underneath
+    //   ~30%, which is right for a passage nobody has repainted in decades.
+    //   In a room the top wash is dropped to ~45% and the coloured wash raised
+    //   to ~88%, so the room's own colour is the biggest thing in it and the
+    //   off-white reads as the later, thinner coat over it.
+    //
+    //   The WHOLE STACK is keyed to the scheme: the deep coat is a saturated
+    //   version of it, the wash is that colour let down, the top wash is an
+    //   off-white carrying the same cast, and the coat UNDER it all is a
+    //   plausible earlier scheme for that building — which is what shows in
+    //   the deep flakes and in the stripe.
+    //
+    // The two stencil inks are just "the two colours a mark is painted in";
+    // the first is usually the red-orange, but on a red wall red would not
+    // read, so there it is the chalky white people actually use.
+
+    // Colonial yellow: the soft ochre of every French-era block in Saigon,
+    // over an older terracotta scheme.
+    yellow: {
+      coats: [
+        { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
+        { color: "#a2593a", color2: "#b56b48", coverage: 0.78, opacity: 1 },
+        { color: "#cf9a2e", color2: "#dfab42", coverage: 0.94, opacity: 0.96 },
+        { color: "#dcc274", color2: "#e6cf8c", coverage: 0.88, opacity: 0.88 },
+        { color: "#efe6cd", color2: "#e3d8bd", coverage: 0.45, opacity: 0.8 },
+      ],
+      stripe: { color: "#b56b48" },
+      grime: { color: "#3a2c1c" },
+      drip: { color: "#8a5a3a" },
+      lichen: { color: "#e8e3cc", core: "#3a352a" },
+      streak: { light: "#f5ecd4", dark: "#6d5c36" },
+      stencil: { red: "#b8402a", dark: "#23304a" },
+    },
+
+    // Oxide red: the deep brick-red of a stairwell or a communal room, over
+    // the usual ochre.
+    red: {
+      coats: [
+        { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
+        { color: "#ba8f34", color2: "#cea43f", coverage: 0.78, opacity: 1 },
+        { color: "#9e3a2c", color2: "#b5493a", coverage: 0.94, opacity: 0.96 },
+        { color: "#c47f6c", color2: "#d1907e", coverage: 0.88, opacity: 0.88 },
+        { color: "#ecdcd4", color2: "#dfcec6", coverage: 0.45, opacity: 0.8 },
+      ],
+      stripe: { color: "#cea43f" },
+      grime: { color: "#3a2820" },
+      drip: { color: "#8a5a3a" },
+      lichen: { color: "#e8e0d6", core: "#3a322c" },
+      streak: { light: "#f2e2da", dark: "#6e3f34" },
+      stencil: { red: "#f0e6d8", dark: "#2a1c18" },
+    },
+
+    // Faded jade: the other colour these buildings are painted, over the same
+    // ochre and plaster.
     green: {
       coats: [
         { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
         { color: "#ba8f34", color2: "#cea43f", coverage: 0.78, opacity: 1 },
         { color: "#2f6b57", color2: "#3d8069", coverage: 0.94, opacity: 0.96 },
-        { color: "#8fb1a2", color2: "#a2bfb1", coverage: 0.86, opacity: 0.88 },
-        { color: "#d2dcd4", color2: "#c2cdc4", coverage: 0.55, opacity: 0.8 },
+        { color: "#86ad9b", color2: "#99bcab", coverage: 0.88, opacity: 0.88 },
+        { color: "#d8e0d8", color2: "#c8d2c9", coverage: 0.45, opacity: 0.8 },
       ],
       stripe: { color: "#cea43f" },
       grime: { color: "#3a2e22" },
       drip: { color: "#8a5a3a" },
       lichen: { color: "#e2e2d4", core: "#3a362c" },
-      streak: { light: "#d8e4dd", dark: "#42574e" },
+      streak: { light: "#dde8e0", dark: "#42574e" },
       stencil: { red: "#c8472a", dark: "#1c2a44" },
     },
   },
@@ -2514,7 +2577,7 @@ AFRAME.registerComponent("corridor-root", {
 
     const S = d.textureSize;
     CorridorTextures.resetTimings();
-    // --- the palette: eight canvases, drawn once and shared by everything ---
+    // --- the corridor's own canvases; the apartments add theirs on demand ---
     // What the wall canvases need that the canvas cannot know by itself: how
     // many metres it covers (so wear can be sized in centimetres), and the
     // weathering knobs.
@@ -2603,14 +2666,23 @@ AFRAME.registerComponent("corridor-root", {
       CorridorTextures.wall(S, seed, v, 0, pal, this.wopts));
   },
 
-  // ...and the materials over them, one set per distinct palette. Keyed the
-  // same way the canvases are, so two rooms painted alike share both.
-  wallMaterials: function (pal) {
-    const key = CorridorTextures.paletteKey(pal);
+  // ONE variant's material for a palette, built on demand and cached by
+  // palette + variant. Lazy on purpose: an apartment uses a single variant, so
+  // giving it its own scheme costs ONE extra canvas rather than three.
+  wallMaterial: function (pal, variant) {
+    const key = CorridorTextures.paletteKey(pal) + "|" + variant;
     if (this._wallMats[key]) return this._wallMats[key];
-    const mats = this.wallTextures(pal).map((tx) => this.mat({ map: tx }));
-    this._wallMats[key] = mats;
-    return mats;
+    const m = this.mat({
+      map: CorridorTextures.wall(this.data.textureSize, this.data.seed,
+                                 variant, 0, pal, this.wopts),
+    });
+    this._wallMats[key] = m;
+    return m;
+  },
+
+  // All three variants — what the corridor itself needs.
+  wallMaterials: function (pal) {
+    return [0, 1, 2].map((v) => this.wallMaterial(pal, v));
   },
 
   // Floor, ceiling, the landing's back wall and the corridor's end wall.
@@ -2749,17 +2821,19 @@ AFRAME.registerComponent("corridor-root", {
     const xMid = (xNear + xFar) / 2;
     const zNear = r.z - d.roomWidth / 2; // -z wall inner face
     const zFar = r.z + d.roomWidth / 2; // +z wall inner face
-    // An apartment's walls use only variants 0 ("intact", no ads) and 2
-    // ("stripe", at most one), alternating per apartment so the rooms still
-    // differ from each other — variant 1 carries up to two ads and has no
-    // business on a wall a picture hangs on.
-    const variant = r.index % 2 === 0 ? 2 : 0;
-    const sideVariant = variant === 2 ? 0 : 2;
-    // This apartment's walls: the corridor's palette unless the room carries an
-    // override, in which case it gets its own three canvases.
-    const wallMats = r.wallPaletteOverride
-      ? this.wallMaterials(this.wallPalette(r.wallPaletteOverride))
-      : this.m.wall;
+    // An apartment uses ONE variant, and it is 0 ("intact"): no painted ads on
+    // a wall a picture hangs on, and no ochre stripe — the stripe is a fine
+    // thing once along a 16 m corridor and far too much four times over in a
+    // 3.2 m room. The apartments differ from each other by COLOUR now, which
+    // is a stronger difference than a variant ever was. One variant also means
+    // giving a room its own scheme costs one canvas, not three.
+    const variant = 0;
+    const roomPal = r.wallPaletteOverride
+      ? this.wallPalette(r.wallPaletteOverride)
+      : null;
+    const wallMat = roomPal
+      ? this.wallMaterial(roomPal, variant)
+      : this.m.wall[variant];
 
     // FLOOR + CEILING. Both reach back to the corridor's own inner face rather
     // than stopping at the room side of the wall, so the doorway threshold is
@@ -2781,19 +2855,42 @@ AFRAME.registerComponent("corridor-root", {
     // BACK WALL (the one facing you as you walk in), spanning past both side
     // walls so the corners close by overlap — the floorplan's trick.
     this.addBox(t, d.height, d.roomWidth + t * 2, xFar + r.side * t / 2,
-                d.height / 2, r.z, wallMats[variant], L.bay, d.height);
+                d.height / 2, r.z, wallMat, L.bay, d.height);
 
     // The TWO SIDE WALLS. Each runs from inside the corridor wall out past the
-    // back wall. A wall at a z another apartment has already built is that
-    // shared party wall: build it once.
-    [zNear - t / 2, zFar + t / 2].forEach((zc) => {
-      const key = r.side + "@" + zc.toFixed(4);
+    // back wall.
+    //
+    // A PARTY WALL — one plane with an apartment on either side of it — is
+    // built as TWO half-thickness leaves rather than one box, so each
+    // apartment paints its own face. That matters now the rooms have their own
+    // schemes: with a single shared box, whichever room happened to build
+    // first would put its colour on the other room's wall.
+    [zNear - t / 2, zFar + t / 2].forEach((zc, i) => {
+      const inward = i === 0 ? 1 : -1; // toward THIS room's interior
+      const shared = L.rooms.some(
+        (o) =>
+          o !== r &&
+          o.side === r.side &&
+          (Math.abs(o.z - d.roomWidth / 2 - t / 2 - zc) < 1e-4 ||
+            Math.abs(o.z + d.roomWidth / 2 + t / 2 - zc) < 1e-4)
+      );
+      const th = shared ? t / 2 : t;
+      const zcc = shared ? zc + (inward * t) / 4 : zc;
+      const key = r.side + "@" + zcc.toFixed(4);
       if (this.partyWalls[key]) return;
       this.partyWalls[key] = true;
-      this.addBox(spanX + t, d.height, t,
-                  r.side * (L.halfW + (spanX + t) / 2), d.height / 2, zc,
-                  wallMats[sideVariant], L.bay, d.height);
+      this.addBox(spanX + t, d.height, th,
+                  r.side * (L.halfW + (spanX + t) / 2), d.height / 2, zcc,
+                  wallMat, L.bay, d.height);
     });
+
+    // THE FOURTH WALL is the corridor's own, and the corridor is painted on
+    // both of its faces. A tenant paints their side — so when a room carries
+    // its own scheme, skin the room-facing face in it: three thin panels around
+    // the doorway, a few millimetres proud so they never z-fight the wall they
+    // cover. Without this you walk into a yellow room whose fourth wall is
+    // still corridor blue.
+    if (roomPal) this.lineCorridorWall(L, r, wallMat);
 
     // One tube, in the middle of the room — the same fitting as the corridor's.
     const tube = this.addPlane(L.tubeLength, d.tubeWidth, this.m.tube);
@@ -2802,6 +2899,40 @@ AFRAME.registerComponent("corridor-root", {
 
     this.buildOpenDoor(L, r);
     this.hangImages(L, r, xMid, xFar, zNear, zFar);
+  },
+
+  // The room-facing skin of the corridor wall: the wall either side of the
+  // doorway, and the strip above it. Planes, not boxes — they only re-face
+  // something solid that is already there. UVs are metric and world-derived,
+  // exactly like the wall boxes, so the paint runs continuously across the
+  // join with the room's side walls.
+  lineCorridorWall: function (L, r, mat) {
+    const d = this.data;
+    const x = r.side * (L.halfW + L.t + 0.005);
+    const rotY = (r.side * Math.PI) / 2; // normal points into the room
+    const zA = r.z - d.roomWidth / 2;
+    const zB = r.z + d.roomWidth / 2;
+    const dz0 = r.z - d.doorWidth / 2;
+    const dz1 = r.z + d.doorWidth / 2;
+    const H = d.height;
+    const panel = (z0, z1, y0, y1) => {
+      const w = z1 - z0;
+      const h = y1 - y0;
+      if (w < 0.005 || h < 0.005) return;
+      const u0 = z0 / L.bay;
+      const u1 = z1 / L.bay;
+      const v0 = y0 / H;
+      const v1 = y1 / H;
+      // After the yaw, the plane's local +x runs toward +z on the left-hand
+      // wall and toward -z on the right-hand one, so the u pair swaps.
+      const m = this.addPlane(w, h, mat,
+        r.side < 0 ? [u0, v0, u1, v1] : [u1, v0, u0, v1]);
+      m.position.set(x, (y0 + y1) / 2, (z0 + z1) / 2);
+      m.rotation.y = rotY;
+    };
+    panel(zA, dz0, 0, H);
+    panel(dz1, zB, 0, H);
+    panel(dz0, dz1, d.doorHeight, H);
   },
 
   // The apartment's own door, standing open into the room: the same leaf and

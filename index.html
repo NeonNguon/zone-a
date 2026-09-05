@@ -395,8 +395,11 @@
            the wall, and never leaves more than seven of ten digits readable.
            The colours are a PALETTE the generator takes as an argument, so the
            same code paints any scheme — see WALL_PALETTES in
-           js/zone-a-corridor.js. Building the three wall canvases is the
-           corridor’s one real cost: ~120 ms each on a desktop, once, at load.
+           js/zone-a-corridor.js. The three apartments are painted in their own
+           schemes — colonial yellow, oxide red, faded jade — which is what
+           roomWallPalettes below does. Building the wall canvases is the
+           corridor’s one real cost: six of them at ~105 ms each on a desktop,
+           once, at load; the whole texture set is about 41 MB.
 
            TUNING ON THE HEADSET — no code edits, both on this tag: if the
            build pause is noticeable on the Quest, set wallNoiseRes to 4 (the
@@ -430,10 +433,16 @@
                                              is no lettering anywhere)
                          wallPalette "chungcu"   or "green"
                          wallPaletteOverride null   patches the named palette
-                         roomWallPalettes [null,null,null]
+                         roomWallPalettes ["yellow","red","green"]
                                              per-apartment scheme, in
-                                             roomImages order; each distinct
-                                             palette costs 3 more canvases
+                                             roomImages order — apartment 1
+                                             (left, nearest) colonial yellow,
+                                             2 (left, far) oxide red, 3 (right)
+                                             faded jade. A name indexes
+                                             WALL_PALETTES; an object patches
+                                             the corridor's palette instead.
+                                             A room uses ONE variant, so each
+                                             scheme costs one extra canvas
              lighting    tubeSpacing 4 (snapped) / tubeColor #f4f1e2
              joinery     frameWidth .07 / frameDepth .045 / frameColor #8d7f62 /
                          leafThickness .045 / doorOpenAngle 100 / floorTile .2 /
@@ -441,7 +450,11 @@
                          tubeDrop .06 / imageProud .02
              VR focus    focusDistance 1.3 / focusDimRadius 2.5
            ============================================================ -->
-      <a-entity id="zone-a-corridor" corridor-root="offset: 0 0 400; shown: false">
+      <a-entity
+        id="zone-a-corridor"
+        corridor-root='offset: 0 0 400; shown: false;
+                       roomWallPalettes: ["yellow", "red", "green"]'
+      >
         <!-- RETURN BOOTH — the way home, standing on the landing against its
              back wall with its screen facing back down the corridor, so you
              read it the moment you turn around on arrival and again as you
