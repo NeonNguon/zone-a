@@ -2013,11 +2013,30 @@ function metricBoxUVs(geo, origin, uMetric, vMetric) {
     const y = origin.y + pos.getY(i);
     const z = origin.z + pos.getZ(i);
     let u, v;
-    if (face === 0 || face === 1) {
+    // HANDEDNESS. The two faces of a pair look opposite ways, so they cannot
+    // share a u formula: whichever one is seen from the far side gets the
+    // texture mirrored, and anything with writing on it — the painted phone
+    // numbers — reads backwards there. Negating u on those two faces puts them
+    // the right way round. Which is which:
+    //   +x face is seen looking along -x, and that viewer's right is -z  -> -z
+    //   -x face is seen looking along +x, and that viewer's right is +z  -> +z
+    //   +z face is seen looking along -z, and that viewer's right is +x  -> +x
+    //   -z face is seen looking along +z, and that viewer's right is -x  -> -x
+    // The mirroring is invisible in the noise; it only ever showed in the text.
+    // Adjacent segments of one wall all present the SAME face, so they stay
+    // continuous, and the texture is periodic in u, so the bay seam still
+    // closes either way round.
+    if (face === 0) {
+      u = -z / uMetric;
+      v = y / vMetric;
+    } else if (face === 1) {
       u = z / uMetric;
       v = y / vMetric;
-    } else if (face === 4 || face === 5) {
+    } else if (face === 4) {
       u = x / uMetric;
+      v = y / vMetric;
+    } else if (face === 5) {
+      u = -x / uMetric;
       v = y / vMetric;
     } else {
       u = x / uMetric;
@@ -2709,8 +2728,12 @@ AFRAME.registerComponent("corridor-root", {
     // BACK WALL of the landing (behind you on arrival) and the corridor's END
     // WALL. Both span the full outer width so they close the corners.
     const outerW = d.width + L.t * 2;
+    // The landing's back wall takes the CALM variant: it is the first thing you
+    // see on arrival, at arm's length behind the return booth, and a painted
+    // phone number there reads as a label on the way home rather than as
+    // something on a wall.
     this.addBox(outerW, d.height, L.t, 0, d.height / 2, L.zBack + L.t / 2,
-                this.m.wall[1], L.bay, d.height);
+                this.m.wall[0], L.bay, d.height);
     this.addBox(outerW, d.height, L.t, 0, d.height / 2, L.zEnd - L.t / 2,
                 this.m.endWall, L.bay, d.height);
   },
