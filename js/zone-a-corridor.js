@@ -170,8 +170,8 @@ const CorridorTextures = {
     chungcu: {
       coats: [
         { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
-        { color: "#ba8f34", color2: "#cea43f", coverage: 0.75, opacity: 1 },
-        { color: "#3a7ea4", color2: "#4a94b9", coverage: 0.88, opacity: 0.96 },
+        { color: "#ba8f34", color2: "#cea43f", coverage: 0.78, opacity: 1 },
+        { color: "#3a7ea4", color2: "#4a94b9", coverage: 0.94, opacity: 0.96 },
         { color: "#9dbac5", color2: "#acc6ce", coverage: 0.86, opacity: 0.88 },
         { color: "#d4dcd6", color2: "#c5cfca", coverage: 0.55, opacity: 0.8 },
       ],
@@ -189,8 +189,8 @@ const CorridorTextures = {
     green: {
       coats: [
         { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
-        { color: "#ba8f34", color2: "#cea43f", coverage: 0.75, opacity: 1 },
-        { color: "#2f6b57", color2: "#3d8069", coverage: 0.88, opacity: 0.96 },
+        { color: "#ba8f34", color2: "#cea43f", coverage: 0.78, opacity: 1 },
+        { color: "#2f6b57", color2: "#3d8069", coverage: 0.94, opacity: 0.96 },
         { color: "#8fb1a2", color2: "#a2bfb1", coverage: 0.86, opacity: 0.88 },
         { color: "#d2dcd4", color2: "#c2cdc4", coverage: 0.55, opacity: 0.8 },
       ],
@@ -288,7 +288,7 @@ const CorridorTextures = {
     { name: "intact", coverBias: [0, 0.06, 0.08, 0.14, 0.22], stripe: false,
       grain: 0.85, grime: 0.65, marks: 0 },
     { name: "flaked", coverBias: [0, -0.14, -0.16, -0.26, -0.3], stripe: false,
-      grain: 1.15, grime: 1.45, marks: 2 },
+      grain: 1.15, grime: 1.15, marks: 2 },
     { name: "stripe", coverBias: [0, 0.02, 0.0, -0.04, -0.12], stripe: true,
       grain: 1.35, grime: 1.0, marks: 1 },
   ],
@@ -474,6 +474,385 @@ const CorridorTextures = {
     }
   },
 
+  // ---- PAINTED MARKS -----------------------------------------------------
+  // The service ads that are stencilled on every wall in Saigon: a phone number
+  // in bold condensed capitals, sometimes with the trade above it, sprayed
+  // through a card stencil and left to weather.
+  //
+  // WHERE IN THE STACK. A mark is painted on ONE coat — the pale wash — so it
+  // is destroyed by whatever happened to the wall afterwards, and that is what
+  // makes it read as old rather than as a decal. It is masked by the coat-index
+  // map the composite produced: full strength where the pale wash is still the
+  // surface, a ghost where a later whitewash went over it, a trace where the
+  // coat it was painted on has flaked (the pigment stays in the pits), nothing
+  // at all where the wall has gone back to plaster.
+  //
+  // NEVER A COMPLETE NUMBER. Not left to chance — three mechanisms, and the
+  // third audits the other two:
+  //   (a) the coat mask above, which is the physical one;
+  //   (b) every mark, by seed, either has a contiguous run of at least three
+  //       digits OVERPAINTED with a patch of the coat above (somebody's later
+  //       whitewash across the ad) or is placed so at least three digits run
+  //       off the edge of the bay;
+  //   (c) after drawing, each digit's ink is counted before and after masking;
+  //       any digit still carrying 40% of its ink is "legible", and if more
+  //       than seven survive, another run is overpainted until they do not.
+  // (c) is what makes the guarantee hold no matter how the noise fell.
+  //
+  // The number itself is a real Vietnamese mobile: 0 + a live prefix + seven
+  // seeded digits, grouped the way they are written on walls.
+  MARK_FONT: "Impact, 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif",
+  MARK_PREFIXES: [
+    "90", "91", "93", "97", "98", "32", "33", "34", "35", "36", "37", "38",
+    "39", "70", "76", "77", "78", "79", "81", "82", "83", "84", "85", "88",
+    "89",
+  ],
+  // The trades that paint them. UTF-8; the diacritics matter and the system
+  // stack renders them (the same assumption the info terminals make).
+  MARK_WORDS: ["KHOAN CẮT BÊ TÔNG", "HÚT HẦM CẦU", "RÚT HẦM CẦU"],
+
+  // How much of a mark survives, given which coat the wall has ended up
+  // showing at that pixel. Index 3 is the coat it was painted on.
+  markSurvival: function (idx) {
+    if (idx === 3) return 1; // the coat it was painted on is the surface
+    if (idx === 4) return 0.5; // a later wash went over it: a ghost, not gone
+    if (idx === 2) return 0.16; // its coat flaked; pigment left in the pits
+    return 0; // back to plaster: the mark went with the paint
+  },
+
+  wallMarks: function (ctx, C) {
+    const S = C.S;
+    const rand = C.rand;
+    const density = C.density;
+    if (density <= 0) return;
+
+    // How many number marks this bay carries. The "flaked" variant gets the
+    // most, "intact" none — which is also how the doorway-adjacent segments and
+    // the apartments stay clear of them (they are built from those variants).
+    const n = Math.floor(C.variant.marks * density + rand());
+    const legibleLog = [];
+    for (let i = 0; i < n; i++) {
+      legibleLog.push(this.oneNumberMark(ctx, C));
+    }
+    // 0-2 freehand brush marks, the reference-03 kind: a few big hand-painted
+    // capitals, half eaten by the wash.
+    const nb = Math.floor(rand() * (1 + density * 2));
+    for (let i = 0; i < nb; i++) this.oneBrushMark(ctx, C);
+
+    if (C.debug && legibleLog.length) {
+      console.log(
+        "[corridor] wall marks (" + C.variant.name + "): legible digits " +
+          legibleLog.join(", ") + " of 10 each"
+      );
+    }
+  },
+
+  // Mask a scratch canvas's alpha by the coat map underneath it, plus a little
+  // noise roughness, and count how much ink each digit box keeps. Returns the
+  // ImageData so the caller can go on editing it.
+  // `a255` is the mark's own painted alpha. Both ink bars are relative to it,
+  // so the audit asks "how much of this digit did the WALL take", not "how
+  // faded was the paint" — a deliberately faint ad is still a legible one.
+  maskToWall: function (sctx, C, bx, by, bw, bh, boxes, a255) {
+    const S = C.S;
+    const img = sctx.getImageData(0, 0, bw, bh);
+    const d = img.data;
+    // Ink per digit BEFORE the wall gets to it, so the audit below can say what
+    // fraction of each digit survived rather than how many pixels it has.
+    const before = boxes ? new Int32Array(boxes.length) : null;
+    if (boxes) {
+      for (let i = 0; i < boxes.length; i++) {
+        before[i] = this.boxInk(d, bw, bh, boxes[i], a255 * 0.5);
+      }
+    }
+
+    for (let y = 0; y < bh; y++) {
+      const my = by + y;
+      if (my < 0 || my >= S) {
+        for (let x = 0; x < bw; x++) d[(y * bw + x) * 4 + 3] = 0;
+        continue;
+      }
+      // the fine field, for a rough painted edge
+      const fy0 = C.ty.i0[my] * C.fw;
+      const fy1 = C.ty.i1[my] * C.fw;
+      const fwy = C.ty.w[my];
+      for (let x = 0; x < bw; x++) {
+        const q = (y * bw + x) * 4 + 3;
+        const a0 = d[q];
+        if (a0 === 0) continue;
+        const mx = bx + x;
+        if (mx < 0 || mx >= S) {
+          d[q] = 0;
+          continue;
+        }
+        const sv = this.markSurvival(C.coatIdx[my * S + mx]);
+        if (sv === 0) {
+          d[q] = 0;
+          continue;
+        }
+        const e0 = fy0 + C.tx.i0[mx];
+        const e1 = fy0 + C.tx.i1[mx];
+        const g0 = fy1 + C.tx.i0[mx];
+        const g1 = fy1 + C.tx.i1[mx];
+        const wx = C.tx.w[mx];
+        const ta = C.FF[e0] + (C.FF[e1] - C.FF[e0]) * wx;
+        const tb = C.FF[g0] + (C.FF[g1] - C.FF[g0]) * wx;
+        const rough = 0.65 + 0.35 * (ta + (tb - ta) * fwy);
+        d[q] = a0 * sv * rough;
+      }
+    }
+    if (boxes) {
+      const after = new Int32Array(boxes.length);
+      for (let i = 0; i < boxes.length; i++) {
+        after[i] = this.boxInk(d, bw, bh, boxes[i], a255 * 0.28);
+      }
+      img.inkBefore = before;
+      img.inkAfter = after;
+    }
+    return img;
+  },
+
+  // Pixels in a box whose alpha is at or above `thr`.
+  boxInk: function (d, bw, bh, b, thr) {
+    let n = 0;
+    const x0 = Math.max(0, b.x | 0);
+    const x1 = Math.min(bw, Math.ceil(b.x + b.w));
+    const y0 = Math.max(0, b.y | 0);
+    const y1 = Math.min(bh, Math.ceil(b.y + b.h));
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (d[(y * bw + x) * 4 + 3] >= thr) n++;
+      }
+    }
+    return n;
+  },
+
+  // ONE stencilled phone number.
+  oneNumberMark: function (ctx, C) {
+    const S = C.S;
+    const rand = C.rand;
+    const pal = C.pal;
+
+    // --- the number, and how it is written on the wall
+    const pre = this.MARK_PREFIXES[Math.floor(rand() * this.MARK_PREFIXES.length)];
+    let digits = "0" + pre;
+    for (let i = 0; i < 7; i++) digits += Math.floor(rand() * 10);
+    const sep = rand() < 0.5 ? " " : ".";
+    const text =
+      digits.slice(0, 4) + sep + digits.slice(4, 7) + sep + digits.slice(7);
+
+    // --- size and place it, in metres
+    const dh = (0.09 + rand() * 0.06) * C.pxY; // 9-15 cm digit height
+    const fontPx = dh / 0.72;
+    const baselineM = 1.1 + rand() * 0.8;
+    const by = S * (1 - baselineM / C.heightM);
+    const font = "700 " + fontPx.toFixed(1) + "px " + this.MARK_FONT;
+    ctx.font = font;
+    const wpx = ctx.measureText(text).width;
+    const theta = ((rand() - 0.5) * 4 * Math.PI) / 180; // ±2°
+
+    // (b) — one of the two guarantees, by seed: run it off the edge of the bay
+    // so at least three digits are simply not there, or keep it inside and
+    // overpaint a run of digits below.
+    const runOff = rand() < 0.5;
+    let x0;
+    if (runOff) {
+      // 35-65% of the string visible => at least 3 digits outside
+      const keep = 0.35 + rand() * 0.3;
+      x0 = rand() < 0.5 ? S - wpx * keep : -wpx * (1 - keep);
+    } else {
+      x0 = rand() * Math.max(1, S - wpx);
+    }
+
+    // --- per-digit boxes, in the mark's own rotated frame
+    const pad = Math.ceil(dh * 0.9);
+    const bx = Math.floor(Math.min(x0, x0 + wpx) - pad);
+    const byTop = Math.floor(by - dh * 1.45);
+    const bw = Math.ceil(wpx + pad * 2);
+    const bh = Math.ceil(dh * 2.1);
+    const sc = this.canvas(bw, bh);
+    const sctx = sc.getContext("2d");
+    sctx.font = font;
+    sctx.textBaseline = "alphabetic";
+    sctx.translate(x0 - bx, by - byTop);
+    sctx.rotate(theta);
+
+    const stencil = rand() < 0.62 ? pal.stencil.red : pal.stencil.dark;
+    const alpha =
+      stencil === pal.stencil.red ? 0.46 + rand() * 0.22 : 0.4 + rand() * 0.18;
+    sctx.fillStyle = stencil;
+    sctx.globalAlpha = alpha;
+    sctx.fillText(text, 0, 0);
+
+    // Stencil BRIDGES: the card the letters were cut from has to hold together,
+    // so every glyph carries two thin uncut gaps across it.
+    sctx.globalAlpha = 1;
+    sctx.globalCompositeOperation = "destination-out";
+    const barH = Math.max(1, dh * 0.055);
+    [0.36, 0.68].forEach((f) => {
+      sctx.fillRect(-dh, -dh * f - barH / 2, wpx + dh * 2, barH);
+    });
+    sctx.globalCompositeOperation = "source-over";
+
+    // digit boxes -> the scratch canvas's own axis-aligned frame
+    const boxes = [];
+    let cursor = 0;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const adv = sctx.measureText(ch).width;
+      if (ch >= "0" && ch <= "9") {
+        // corners of (cursor, -dh) .. (cursor+adv, 0), rotated
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        [[cursor, -dh], [cursor + adv, -dh], [cursor, 0], [cursor + adv, 0]]
+          .forEach((pt) => {
+            const rx = pt[0] * cos - pt[1] * sin + (x0 - bx);
+            const ry = pt[0] * sin + pt[1] * cos + (by - byTop);
+            if (rx < minX) minX = rx;
+            if (rx > maxX) maxX = rx;
+            if (ry < minY) minY = ry;
+            if (ry > maxY) maxY = ry;
+          });
+        boxes.push({ x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+      }
+      cursor += adv;
+    }
+
+    // --- the trade, above the number, in the same hand
+    if (C.words && rand() < 0.55) {
+      const word = this.MARK_WORDS[Math.floor(rand() * this.MARK_WORDS.length)];
+      const wfont = "700 " + (fontPx * 0.62).toFixed(1) + "px " + this.MARK_FONT;
+      sctx.save();
+      sctx.font = wfont;
+      sctx.fillStyle = stencil;
+      sctx.globalAlpha = alpha * 0.85;
+      sctx.fillText(word, 0, -dh * 1.35);
+      sctx.restore();
+    }
+
+    // --- mask it to the wall, and audit the digits
+    let img = this.maskToWall(sctx, C, bx, byTop, bw, bh, boxes, alpha * 255);
+    let legible = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      if (img.inkBefore[i] > 0 && img.inkAfter[i] / img.inkBefore[i] >= 0.4) {
+        legible++;
+      }
+    }
+
+    // (b) the overpaint half, and (c) the audit: keep covering runs of digits
+    // until at most seven are readable. Each patch is a slab of the coat above
+    // — somebody's later whitewash — with a ragged edge, painted on the WALL,
+    // so it covers the wall as well as the ad.
+    const patches = [];
+    const coverRun = () => {
+      const runLen = 3 + Math.floor(rand() * 2);
+      const start = Math.floor(rand() * Math.max(1, boxes.length - runLen));
+      let x0b = Infinity, x1b = -Infinity, y0b = Infinity, y1b = -Infinity;
+      for (let i = start; i < Math.min(boxes.length, start + runLen); i++) {
+        const b = boxes[i];
+        if (b.x < x0b) x0b = b.x;
+        if (b.x + b.w > x1b) x1b = b.x + b.w;
+        if (b.y < y0b) y0b = b.y;
+        if (b.y + b.h > y1b) y1b = b.y + b.h;
+        // and erase those digits from the mark itself
+        const px0 = Math.max(0, b.x | 0);
+        const px1 = Math.min(bw, Math.ceil(b.x + b.w));
+        const py0 = Math.max(0, (b.y - dh * 0.15) | 0);
+        const py1 = Math.min(bh, Math.ceil(b.y + b.h + dh * 0.15));
+        for (let y = py0; y < py1; y++) {
+          for (let x = px0; x < px1; x++) img.data[(y * bw + x) * 4 + 3] = 0;
+        }
+        img.inkAfter[i] = 0;
+      }
+      patches.push({
+        x: bx + x0b - dh * 0.12,
+        y: byTop + y0b - dh * 0.2,
+        w: x1b - x0b + dh * 0.24,
+        h: y1b - y0b + dh * 0.4,
+      });
+      legible = 0;
+      for (let i = 0; i < boxes.length; i++) {
+        if (img.inkBefore[i] > 0 && img.inkAfter[i] / img.inkBefore[i] >= 0.4) {
+          legible++;
+        }
+      }
+    };
+    if (!runOff) coverRun();
+    let guard = 0;
+    while (legible > 7 && guard++ < 4) coverRun();
+
+    sctx.putImageData(img, 0, 0);
+    ctx.drawImage(sc, bx, byTop);
+
+    // the whitewash patches go on last, over the ad and the wall alike
+    const top = pal.coats[pal.coats.length - 1];
+    patches.forEach((pt) => {
+      this.paintPatch(ctx, rand, pt.x, pt.y, pt.w, pt.h, top.color);
+    });
+    return legible;
+  },
+
+  // A slab of later paint: a rectangle with a hand-brushed, ragged edge.
+  paintPatch: function (ctx, rand, x, y, w, h, color) {
+    ctx.save();
+    // Translucent: a brushed-on patch of later paint, not a sticker — the wall
+    // underneath still reads through it.
+    ctx.globalAlpha = 0.5 + rand() * 0.22;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    const jx = w * 0.05;
+    const jy = h * 0.12;
+    const steps = 7;
+    ctx.moveTo(x, y);
+    for (let i = 1; i <= steps; i++) ctx.lineTo(x + (w * i) / steps, y + (rand() - 0.5) * jy);
+    for (let i = 1; i <= steps; i++) ctx.lineTo(x + w + (rand() - 0.5) * jx, y + (h * i) / steps);
+    for (let i = steps - 1; i >= 0; i--) ctx.lineTo(x + (w * i) / steps, y + h + (rand() - 0.5) * jy);
+    for (let i = steps - 1; i >= 0; i--) ctx.lineTo(x + (rand() - 0.5) * jx, y + (h * i) / steps);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  },
+
+  // A freehand painted mark in the manner of reference 03: a few big capitals
+  // in thin rounded brush strokes, heavily faded. Deliberately NOT a word.
+  oneBrushMark: function (ctx, C) {
+    const S = C.S;
+    const rand = C.rand;
+    const letters = "ABCDEĐGHIKLMNOPQRSTUVXY";
+    let text = "";
+    const n = 2 + Math.floor(rand() * 4);
+    for (let i = 0; i < n; i++) {
+      text += letters[Math.floor(rand() * letters.length)];
+    }
+    const dh = (0.16 + rand() * 0.14) * C.pxY; // 16-30 cm capitals
+    const fontPx = dh / 0.72;
+    const baselineM = 0.9 + rand() * 1.0;
+    const by = S * (1 - baselineM / C.heightM);
+    const font = "600 " + fontPx.toFixed(1) + "px 'Helvetica Neue', Helvetica, Arial, sans-serif";
+    ctx.font = font;
+    const wpx = ctx.measureText(text).width;
+    const x0 = rand() * Math.max(1, S - wpx);
+    const pad = Math.ceil(dh * 0.8);
+    const bx = Math.floor(x0 - pad);
+    const byTop = Math.floor(by - dh * 1.5);
+    const bw = Math.ceil(wpx + pad * 2);
+    const bh = Math.ceil(dh * 2.2);
+    const sc = this.canvas(bw, bh);
+    const sctx = sc.getContext("2d");
+    sctx.font = font;
+    sctx.textBaseline = "alphabetic";
+    sctx.lineJoin = "round";
+    sctx.lineCap = "round";
+    sctx.strokeStyle = C.pal.brush.color;
+    sctx.globalAlpha = 0.22 + rand() * 0.22;
+    sctx.lineWidth = Math.max(1.5, dh * 0.055);
+    sctx.strokeText(text, x0 - bx, by - byTop);
+    const img = this.maskToWall(sctx, C, bx, byTop, bw, bh, null, 0);
+    sctx.putImageData(img, 0, 0);
+    ctx.drawImage(sc, bx, byTop);
+  },
+
   // ---- WALL --------------------------------------------------------------
   // PAINT STRATIGRAPHY. One canvas covers `bay` metres of wall length by the
   // FULL wall height, so the dado band and the darkening toward the ceiling are
@@ -528,13 +907,15 @@ const CorridorTextures = {
     const flake = o.flake != null ? o.flake : 1;
     const grainAmt = o.grain != null ? o.grain : 1;
     const allowStripe = o.stripe !== false;
+    const stencils = o.stencils != null ? o.stencils : 0.6;
+    const stencilWords = o.stencilWords !== false;
     // The palette is part of the key, so two rooms with different colours never
     // share a canvas and two with the same colours always do.
     const key =
       "wall|" +
       [size, seed, variant, darken, bayM.toFixed(3), heightM.toFixed(3),
-       res, flake, grainAmt, allowStripe ? 1 : 0,
-       this.paletteKey(pal)].join("|");
+       res, flake, grainAmt, allowStripe ? 1 : 0, stencils,
+       stencilWords ? 1 : 0, this.paletteKey(pal)].join("|");
 
     return this.get(key, () => {
       const S = size;
@@ -904,6 +1285,27 @@ const CorridorTextures = {
       ctx.putImageData(img, 0, 0);
 
       // ---- 2D passes over the composite -----------------------------------
+
+      // PAINTED MARKS first, because they belong UNDER everything that came
+      // after them on a real wall — the brush grain, the blooms, the grime and
+      // the light. They are masked by the coat map so the wall destroys them.
+      this.wallMarks(ctx, {
+        S: S,
+        rand: rand,
+        pal: pal,
+        coatIdx: coatIdx,
+        FF: FF.data,
+        tx: tx,
+        ty: ty,
+        fw: fw,
+        pxX: pxX,
+        pxY: pxY,
+        heightM: heightM,
+        variant: V,
+        density: stencils,
+        words: stencilWords,
+        debug: !!o.debug,
+      });
 
       // BRUSHED VERTICALS: thin translucent strokes, the visible half of the
       // grain whose other half is already inside every mask.
@@ -1608,7 +2010,8 @@ const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
-  "wallGrain", "wallStripe", "wallPalette", "wallPaletteOverride",
+  "wallGrain", "wallStripe", "wallStencils", "wallStencilWords",
+  "wallPalette", "wallPaletteOverride",
   "roomWallPalettes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
   "floorTile", "roomTile", "tubeWidth", "tubeLength", "tubeDrop", "imageProud",
@@ -1663,6 +2066,14 @@ AFRAME.registerComponent("corridor-root", {
     //   setAttribute('corridor-root','wallPaletteOverride',
     //                {coats:[{},{color:'#7a8f5a'}]})
     // swaps the ochre coat for green and changes nothing else.
+    // The painted service ads. `wallStencils` is a density 0..1 (0 = none):
+    // it scales how many number marks a bay carries, which is 2 on the
+    // "flaked" variant, 1 on "stripe" and 0 on "intact" — and "intact" is what
+    // the segments beside an apartment doorway and the apartments themselves
+    // are built from, so the hung images never compete with an ad.
+    // `wallStencilWords` adds the trade above the number.
+    wallStencils: { type: "number", default: 0.6 },
+    wallStencilWords: { type: "boolean", default: true },
     wallPalette: { type: "string", default: "chungcu" },
     wallPaletteOverride: {
       default: null,
@@ -1753,7 +2164,8 @@ AFRAME.registerComponent("corridor-root", {
     // ?env= / ?debug. Kept after the build on purpose: it is the iteration path
     // for anyone tuning the corridor.
     const params = new URLSearchParams(window.location.search);
-    if (params.get("zonea") === "debug") {
+    this.debugMode = params.get("zonea") === "debug";
+    if (this.debugMode) {
       this.onSceneLoaded = () => this.debugEnter();
       if (this.el.sceneEl.hasLoaded) setTimeout(this.onSceneLoaded, 0);
       else this.el.sceneEl.addEventListener("loaded", this.onSceneLoaded);
@@ -2070,6 +2482,9 @@ AFRAME.registerComponent("corridor-root", {
       flake: d.wallFlake,
       grain: d.wallGrain,
       stripe: d.wallStripe,
+      stencils: d.wallStencils,
+      stencilWords: d.wallStencilWords,
+      debug: this.debugMode,
     };
     this.wopts = wopts;
     this._wallMats = {}; // palette key -> the three variant materials
@@ -2202,18 +2617,27 @@ AFRAME.registerComponent("corridor-root", {
                   this.m.wall[variant], L.bay, d.height);
     };
 
+    // Variants rotate along the run (offset by the side, so the two walls are
+    // never in step) — 16 m of corridor with no repeat you can read. The one
+    // exception: a segment that touches an APARTMENT doorway is always variant
+    // 0, the calm one, which is also the only variant that carries no painted
+    // ad. The pictures are the point there and nothing should compete with
+    // them, and forcing the variant is how that is guaranteed without a fourth
+    // canvas.
+    const rot = (i) => (i + (side < 0 ? 0 : 2)) % 3;
     list.forEach((op, i) => {
-      // Variants rotate along the run (offset by the side, so the two walls are
-      // never in step) — 16 m of corridor with no repeat you can read.
-      const variant = (i + (side < 0 ? 0 : 2)) % 3;
-      seg(cursor, op.z + op.width / 2, 0, d.height, variant);
+      const prev = i > 0 ? list[i - 1] : null;
+      const byRoom = op.open || (prev && prev.open);
+      seg(cursor, op.z + op.width / 2, 0, d.height, byRoom ? 0 : rot(i));
       // The lintel: the wall carries on above the opening.
-      seg(op.z + op.width / 2, op.z - op.width / 2, op.top, d.height, (variant + 1) % 3);
+      seg(op.z + op.width / 2, op.z - op.width / 2, op.top, d.height,
+          op.open ? 0 : rot(i + 1));
       cursor = op.z - op.width / 2;
       this.buildDoorFrame(L, side, op);
       if (!op.open) this.buildClosedDoor(L, side, op, i);
     });
-    seg(cursor, L.zLo, 0, d.height, (list.length + (side < 0 ? 0 : 2)) % 3);
+    const lastOpen = list.length > 0 && list[list.length - 1].open;
+    seg(cursor, L.zLo, 0, d.height, lastOpen ? 0 : rot(list.length));
   },
 
   // The painted timber frame standing proud of the wall's inner face: two jambs
@@ -2281,7 +2705,12 @@ AFRAME.registerComponent("corridor-root", {
     const xMid = (xNear + xFar) / 2;
     const zNear = r.z - d.roomWidth / 2; // -z wall inner face
     const zFar = r.z + d.roomWidth / 2; // +z wall inner face
-    const variant = (r.index + 1) % 3;
+    // An apartment's walls use only variants 0 ("intact", no ads) and 2
+    // ("stripe", at most one), alternating per apartment so the rooms still
+    // differ from each other — variant 1 carries up to two ads and has no
+    // business on a wall a picture hangs on.
+    const variant = r.index % 2 === 0 ? 2 : 0;
+    const sideVariant = variant === 2 ? 0 : 2;
     // This apartment's walls: the corridor's palette unless the room carries an
     // override, in which case it gets its own three canvases.
     const wallMats = r.wallPaletteOverride
@@ -2319,7 +2748,7 @@ AFRAME.registerComponent("corridor-root", {
       this.partyWalls[key] = true;
       this.addBox(spanX + t, d.height, t,
                   r.side * (L.halfW + (spanX + t) / 2), d.height / 2, zc,
-                  wallMats[(variant + 2) % 3], L.bay, d.height);
+                  wallMats[sideVariant], L.bay, d.height);
     });
 
     // One tube, in the middle of the room — the same fitting as the corridor's.
