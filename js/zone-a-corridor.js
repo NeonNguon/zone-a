@@ -72,7 +72,7 @@
 //
 //   WHAT MAKES IT PAINT. Hard edges (a dark line at the foot of every step, a
 //   light one on top, broken up by the fine field so it reads as relief and not
-//   as ink); a wear gradient that takes more off low down and at the dado line;
+//   as ink); a gentle wear gradient that takes a little more off low down;
 //   grime keyed to what is actually exposed rather than sprayed evenly; a 2 cm
 //   speckle inside every coat's body, without which the whole thing reads as a
 //   contour map.
@@ -199,7 +199,6 @@ const CorridorTextures = {
   //             opaquely it covers what is under it (the thin washes are < 1,
   //             which is what lets the coat below show through them).
   //   stripe    { color } the band of an earlier scheme in the "stripe" variant
-  //   dado      { color } the darker band over the lower wall
   //   grime     { color } the warm dark that collects in broken paint
   //   drip      { color } rust running down from the slab
   //   lichen    { color, core } the pale blooms and their dark centres
@@ -225,7 +224,6 @@ const CorridorTextures = {
         { color: "#d4dcd6", color2: "#c5cfca", coverage: 0.55, opacity: 0.8 },
       ],
       stripe: { color: "#cea43f" },
-      dado: { color: "#587885" },
       grime: { color: "#3a2e22" },
       drip: { color: "#8a5a3a" },
       lichen: { color: "#e2e2d4", core: "#3a362c" },
@@ -244,7 +242,6 @@ const CorridorTextures = {
         { color: "#d2dcd4", color2: "#c2cdc4", coverage: 0.55, opacity: 0.8 },
       ],
       stripe: { color: "#cea43f" },
-      dado: { color: "#4f7364" },
       grime: { color: "#3a2e22" },
       drip: { color: "#8a5a3a" },
       lichen: { color: "#e2e2d4", core: "#3a362c" },
@@ -920,8 +917,8 @@ const CorridorTextures = {
 
   // ---- WALL --------------------------------------------------------------
   // PAINT STRATIGRAPHY. One canvas covers `bay` metres of wall length by the
-  // FULL wall height, so the dado band and the darkening toward the ceiling are
-  // baked at their true heights and never tile vertically. Its length is one
+  // FULL wall height, so the darkening toward the ceiling is baked at its true
+  // height and never tiles vertically. Its length is one
   // lighting bay, so the pool painted down its centre lands under a ceiling
   // tube on every repeat.
   //
@@ -948,9 +945,10 @@ const CorridorTextures = {
   //   VERTICAL    every mask is modulated by a 6:1 vertically stretched field,
   //   GRAIN       and a few hundred thin translucent strokes are drawn over the
   //               top: the brushed grain that runs down all four references.
-  //   WEAR        thresholds are biased by height — more is gone low down and
-  //   GRADIENT    in a band at the dado line, where the wall gets wet and
-  //               knocked.
+  //   WEAR        thresholds are biased by height, so a little more is gone
+  //   GRADIENT    toward the floor, where the wall gets wet and kicked. Gently:
+  //               the wall is one continuous surface from ceiling to floor and
+  //               must never read as banded.
   //   GRIME       a dark warm glaze that collects where the surface is broken
   //               (masked by 1 − the pale coat's mask), not evenly.
   //
@@ -1053,23 +1051,18 @@ const CorridorTextures = {
       }
 
       mark("masks");
-      // ---- per-column tables: the dado line, the ochre stripe, the drips ---
-      // All three must be PERIODIC in x or the bay joins would show. The dado's
-      // wavering top edge is a sum of two integer harmonics (as before), the
-      // stripe's ragged edge likewise, and the drips are wrapped by hand.
-      const dadoY = new Float32Array(S);
-      const ph1 = rand() * Math.PI * 2;
-      const ph2 = rand() * Math.PI * 2;
-      const dadoBase = S * (1 - 0.3); // ~0.9 m of a 3 m wall
-      for (let x = 0; x < S; x++) {
-        const u = x / S;
-        dadoY[x] =
-          dadoBase +
-          (Math.sin(u * Math.PI * 2 + ph1) * 0.6 +
-            Math.sin(u * Math.PI * 6 + ph2) * 0.4) *
-            S *
-            0.007;
-      }
+      // ---- per-column tables: the ochre stripe, the drips ------------------
+      // Both must be PERIODIC in x or the bay joins would show: the stripe's
+      // ragged edge is jittered with integer harmonics, and the drips are
+      // wrapped by hand.
+      //
+      // There is deliberately NO DADO. An earlier version painted the lower
+      // ~0.9 m of the wall as a darker grey-blue band, which is common enough
+      // in these buildings — but it put a hard horizontal line across every
+      // wall in the corridor, and the glaze flattened all the coat detail
+      // underneath it. The wall reads far better as one continuous surface
+      // from ceiling to floor, so the band, its brushed edge and the extra
+      // wear that went with it are gone.
 
       // THE OLD COLOUR SCHEME showing as a vertical band: where it runs, coats
       // 2-4 are thresholded much harder, so the ochre underneath is what
@@ -1131,11 +1124,9 @@ const CorridorTextures = {
       const OP = coats.map((k) => (k.opacity != null ? k.opacity : 1));
       const grimeRGB = this.hexRGB(pal.grime.color);
       const dripRGB = this.hexRGB(pal.drip.color);
-      const dadoRGB = this.hexRGB(pal.dado.color);
-      const wearLow = 0.11; // extra threshold at the floor
-      const dadoBand = 0.10; // extra threshold in the band at the dado line
-      const dadoSig = S * 0.045;
-      const lipPx = Math.max(1, S * 0.006);
+      // A slight tendency to more wear low down — the wall does get wet and
+      // kicked — but gentle enough that it never reads as a band.
+      const wearLow = 0.04;
       const stripeBias = 0.34;
 
       // ROW BUFFERS. Every field is sampled bilinearly, but the vertical half of
@@ -1163,11 +1154,8 @@ const CorridorTextures = {
         const R1 = ROW[0], R2f = ROW[1], R3 = ROW[2], R4 = ROW[3];
         const RV = ROW[4], RD = ROW[5], RF = ROW[6];
         const vy = y / S;
-        // More of every coat is gone low down, and in a band at the dado line.
-        const dy = y - dadoBase;
-        const bias =
-          wearLow * vy * vy * (0.4 + 0.6 * vy) +
-          dadoBand * Math.exp(-(dy * dy) / (2 * dadoSig * dadoSig));
+        // Slightly more of every coat is gone toward the floor.
+        const bias = wearLow * vy * vy * (0.4 + 0.6 * vy);
         // The stripe fades in below the ceiling and out above the floor.
         const stripeY =
           Math.min(1, vy / 0.16) * Math.min(1, (1 - vy) / 0.22);
@@ -1265,22 +1253,6 @@ const CorridorTextures = {
             r += (grimeRGB[0] - r) * gr;
             g += (grimeRGB[1] - g) * gr;
             b += (grimeRGB[2] - b) * gr;
-          }
-
-          // DADO: a darker grey-blue glaze over the lower wall, itself worn —
-          // where the coats have flaked, the band has gone with them.
-          if (y > dadoY[x]) {
-            const wear = 0.5 + 0.5 * Math.min(1, Math.max(0, (v2 - 0.2) * 2.2));
-            const da = 0.62 * wear;
-            r += (dadoRGB[0] - r) * da;
-            g += (dadoRGB[1] - g) * da;
-            b += (dadoRGB[2] - b) * da;
-            // its lip: one coat of paint standing proud, so it casts a line
-            const ld = y - dadoY[x];
-            if (ld < lipPx) {
-              const k = 1 - ld / lipPx;
-              r *= 1 - 0.3 * k; g *= 1 - 0.3 * k; b *= 1 - 0.3 * k;
-            }
           }
 
           // DRIPS down the face, broken up by the grain field.
@@ -1488,12 +1460,14 @@ const CorridorTextures = {
         });
       }
 
-      // Grime piling up in the floor junction (unchanged).
-      const skirt = ctx.createLinearGradient(0, S - S * 0.06, 0, S);
+      // A little grime in the floor junction. Kept narrow and light: enough to
+      // sit the wall on the floor rather than have it float, not enough to read
+      // as a dark band along the bottom.
+      const skirt = ctx.createLinearGradient(0, S - S * 0.035, 0, S);
       skirt.addColorStop(0, "rgba(26,36,40,0)");
-      skirt.addColorStop(1, "rgba(26,36,40,0.55)");
+      skirt.addColorStop(1, "rgba(26,36,40,0.28)");
       ctx.fillStyle = skirt;
-      ctx.fillRect(0, S - S * 0.06, S, S * 0.06);
+      ctx.fillRect(0, S - S * 0.035, S, S * 0.035);
 
       this.grain(ctx, rand, S, S, Math.round(S * 5), 0.3);
 
