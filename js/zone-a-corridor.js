@@ -2185,7 +2185,15 @@ AFRAME.registerComponent("corridor-root", {
     // is common ground nobody has painted in decades; a room someone lives in
     // gets repainted, so its walls are the same stack of coats far less far
     // gone. 1 would make a room exactly as ruined as the corridor.
-    roomWallFlake: { type: "number", default: 0.22 },
+    //
+    // To aim it at a TOP-COAT COVERAGE instead of guessing: a coat's coverage
+    // after flaking is 1 - (1 - c) * flake, where c is the palette's coverage
+    // plus the variant's bias. The apartments run the "intact" variant over a
+    // 0.45 top coat, so c = 0.45 + 0.22 = 0.67 and
+    //     flake = (1 - target) / 0.33
+    // 0.09 is a 97% top coat: the wall is the colour it was last painted, with
+    // the coat beneath showing through in the last few percent.
+    roomWallFlake: { type: "number", default: 0.09 },
     wallGrain: { type: "number", default: 1 },
     wallStripe: { type: "boolean", default: true },
     // WHICH COLOURS the wall generator paints with. `wallPalette` names an
