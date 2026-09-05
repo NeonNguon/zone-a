@@ -136,34 +136,154 @@ const CorridorTextures = {
   },
 
   // ---- THE PAINT STACK ---------------------------------------------------
-  // The five coats of the chung cư wall, bottom to top, each with the two tones
-  // it varies between and how much of it is still there. `coverage` is read as
-  // an AREA FRACTION (see maskThreshold), so 0.65 means roughly two thirds of
-  // the wall still carries that coat.
-  // `coverage` is an area fraction, and because a pixel shows the TOPMOST coat
-  // that survives, what you actually see is the cascade: ~50% top wash, ~30%
-  // pale, ~14% blue, the rest ochre and bare plaster. That is the proportion
-  // the reference walls hold — mostly pale, with the older schemes showing
-  // through in a minority of places, not a camouflage of equal patches.
+  // WALL_PALETTES holds every colour the layer model uses, so the SAME
+  // generator paints a different scheme without a line of its code changing —
+  // exactly the relationship makeTerrazzoTexture (js/bench.js) has with
+  // tinted-floor, where one speckle generator serves the bench, the dark Zone C
+  // floor and the coral Zone B one.
   //
-  // `opacity` is what makes it read as PAINT: the old thick coats cover what is
-  // under them, but the two limewashes are thin, so where a wash is thin (near
-  // the edge of its island) the coat beneath shows through it. That is exactly
-  // the white-over-cerulean of reference 02.
-  WALL_COATS: [
-    { rgb: [148, 141, 128], rgb2: [116, 110, 99], coverage: 1.0, opacity: 1 }, // 0 plaster
-    { rgb: [186, 143, 52], rgb2: [206, 164, 63], coverage: 0.75, opacity: 1 }, // 1 ochre
-    { rgb: [58, 126, 164], rgb2: [74, 148, 185], coverage: 0.88, opacity: 0.96 }, // 2 deep blue
-    { rgb: [157, 186, 197], rgb2: [172, 198, 206], coverage: 0.86, opacity: 0.88 }, // 3 pale
-    { rgb: [212, 220, 214], rgb2: [197, 207, 202], coverage: 0.55, opacity: 0.8 }, // 4 top
-  ],
-  WALL_GRIME: [58, 46, 34], // the warm dark that collects in broken paint
-  WALL_DADO: [88, 120, 133], // the grey-blue band over the lower wall
-  WALL_DRIP: [138, 90, 58], // rust running down from the slab
+  // A palette is:
+  //   coats[5]  bottom to top — plaster, an earlier scheme, the deep coat, the
+  //             wash, the thin top wash. Each { color, color2, coverage,
+  //             opacity }: two tones it varies between, the AREA FRACTION of
+  //             the wall that still carries it (see maskThreshold), and how
+  //             opaquely it covers what is under it (the thin washes are < 1,
+  //             which is what lets the coat below show through them).
+  //   stripe    { color } the band of an earlier scheme in the "stripe" variant
+  //   dado      { color } the darker band over the lower wall
+  //   grime     { color } the warm dark that collects in broken paint
+  //   drip      { color } rust running down from the slab
+  //   lichen    { color, core } the pale blooms and their dark centres
+  //   streak    { light, dark } the brushed vertical strokes
+  //   stencil   { red, dark } the painted service ads
+  //   brush     { color } freehand painted letters
+  //
+  // TO ADD A SCHEME: copy an entry, change the colours, and set `wallPalette`
+  // on corridor-root to its name. To change ONE thing about an existing scheme,
+  // leave the name alone and pass `wallPaletteOverride` instead — it is merged
+  // over the named palette, and `coats` merges per index, so
+  //   {"coats":[{},{"color":"#7a8f5a"}]}
+  // swaps the ochre coat for green and leaves everything else as it was.
+  WALL_PALETTES: {
+    // The blue chung cư corridor: pale lime-wash over cerulean over an ochre
+    // scheme over cement plaster, which is the stack the reference walls show.
+    chungcu: {
+      coats: [
+        { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
+        { color: "#ba8f34", color2: "#cea43f", coverage: 0.75, opacity: 1 },
+        { color: "#3a7ea4", color2: "#4a94b9", coverage: 0.88, opacity: 0.96 },
+        { color: "#9dbac5", color2: "#acc6ce", coverage: 0.86, opacity: 0.88 },
+        { color: "#d4dcd6", color2: "#c5cfca", coverage: 0.55, opacity: 0.8 },
+      ],
+      stripe: { color: "#cea43f" },
+      dado: { color: "#587885" },
+      grime: { color: "#3a2e22" },
+      drip: { color: "#8a5a3a" },
+      lichen: { color: "#e2e2d4", core: "#3a362c" },
+      streak: { light: "#dbe5e2", dark: "#46565c" },
+      stencil: { red: "#c8472a", dark: "#1c2a44" },
+      brush: { color: "#c8472a" },
+    },
+    // The other colour these buildings are painted: a faded jade green over the
+    // same ochre and plaster. Proof that the generator is not about blue.
+    green: {
+      coats: [
+        { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
+        { color: "#ba8f34", color2: "#cea43f", coverage: 0.75, opacity: 1 },
+        { color: "#2f6b57", color2: "#3d8069", coverage: 0.88, opacity: 0.96 },
+        { color: "#8fb1a2", color2: "#a2bfb1", coverage: 0.86, opacity: 0.88 },
+        { color: "#d2dcd4", color2: "#c2cdc4", coverage: 0.55, opacity: 0.8 },
+      ],
+      stripe: { color: "#cea43f" },
+      dado: { color: "#4f7364" },
+      grime: { color: "#3a2e22" },
+      drip: { color: "#8a5a3a" },
+      lichen: { color: "#e2e2d4", core: "#3a362c" },
+      streak: { light: "#d8e4dd", dark: "#42574e" },
+      stencil: { red: "#c8472a", dark: "#1c2a44" },
+      brush: { color: "#c8472a" },
+    },
+  },
 
-  // The three looks handed out along the run. `coverBias` shifts each coat's
-  // coverage (positive keeps more of it), so the differences are big enough to
-  // read from the far end of the corridor rather than being a subtle reseed.
+  // "#rrggbb" -> [r,g,b]. The palette is written in hex because that is what
+  // everyone edits; the composite wants numbers.
+  hexRGB: function (hex) {
+    const h = String(hex).replace("#", "");
+    const n = parseInt(
+      h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  },
+
+  // A palette argument may be a NAME, an already-resolved palette object, or
+  // nothing at all (the default scheme).
+  resolvePalette: function (pal) {
+    if (!pal) return this.WALL_PALETTES.chungcu;
+    if (typeof pal === "string") {
+      const found = this.WALL_PALETTES[pal];
+      if (!found) {
+        console.warn("corridor: unknown wall palette '" + pal + "'; using chungcu");
+      }
+      return found || this.WALL_PALETTES.chungcu;
+    }
+    return pal;
+  },
+
+  // Merge an override over a base palette. `coats` merges per INDEX, so an
+  // override only has to name the coat it cares about; everything else is a
+  // shallow per-group merge.
+  mergePalette: function (base, over) {
+    if (!over) return base;
+    const out = {};
+    Object.keys(base).forEach((k) => {
+      out[k] = k === "coats" ? base.coats.map((c) => Object.assign({}, c))
+                             : Object.assign({}, base[k]);
+    });
+    Object.keys(over).forEach((k) => {
+      if (k === "coats" && over.coats) {
+        over.coats.forEach((c, i) => {
+          if (c && out.coats[i]) Object.assign(out.coats[i], c);
+          else if (c) out.coats[i] = Object.assign({}, c);
+        });
+      } else if (over[k] && typeof over[k] === "object") {
+        out[k] = Object.assign({}, out[k] || {}, over[k]);
+      } else if (over[k] != null) {
+        out[k] = over[k];
+      }
+    });
+    return out;
+  },
+
+  // A short stable hash of a palette, for the cache key: two rooms asking for
+  // the same colours share one canvas, two asking for different ones never do.
+  // Keys are sorted so the hash does not depend on how the object was built.
+  paletteKey: function (pal) {
+    const stable = function (v) {
+      if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+      if (v && typeof v === "object") {
+        return "{" + Object.keys(v).sort().map(
+          (k) => k + ":" + stable(v[k])).join(",") + "}";
+      }
+      return String(v);
+    };
+    const str = stable(pal);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(36);
+  },
+
+  // The three looks handed out along the run, as OVERRIDES of the behaviour
+  // knobs rather than of the colours — so a green room can still be "flaked".
+  // `coverBias` shifts each coat's coverage (positive keeps more of it), and
+  // the differences are big enough to read from the far end of the corridor
+  // rather than being a subtle reseed.
+  // COVERAGE is an area fraction, and because a pixel shows the TOPMOST coat
+  // that survives, what you see is the cascade: ~55% top wash, ~30% pale, ~10%
+  // deep coat, the rest the earlier scheme and bare plaster. That is the
+  // proportion the reference walls hold — mostly pale, with the older schemes
+  // showing through in a minority of places, not a camouflage of equal patches.
   WALL_VARIANTS: [
     { name: "intact", coverBias: [0, 0.06, 0.08, 0.14, 0.22], stripe: false,
       grain: 0.85, grime: 0.65, marks: 0 },
@@ -399,7 +519,8 @@ const CorridorTextures = {
   // `opts` carries what the canvas cannot know by itself: { bay, height } in
   // metres (so islands can be sized in centimetres and text in millimetres),
   // noiseRes, and the flake / grain / stripe knobs from corridor-root.
-  wall: function (size, seed, variant, darken, opts) {
+  wall: function (size, seed, variant, darken, palette, opts) {
+    const pal = this.resolvePalette(palette);
     const o = opts || {};
     const bayM = o.bay > 0 ? o.bay : 3.6;
     const heightM = o.height > 0 ? o.height : 3.0;
@@ -407,10 +528,13 @@ const CorridorTextures = {
     const flake = o.flake != null ? o.flake : 1;
     const grainAmt = o.grain != null ? o.grain : 1;
     const allowStripe = o.stripe !== false;
+    // The palette is part of the key, so two rooms with different colours never
+    // share a canvas and two with the same colours always do.
     const key =
       "wall|" +
       [size, seed, variant, darken, bayM.toFixed(3), heightM.toFixed(3),
-       res, flake, grainAmt, allowStripe ? 1 : 0].join("|");
+       res, flake, grainAmt, allowStripe ? 1 : 0,
+       this.paletteKey(pal)].join("|");
 
     return this.get(key, () => {
       const S = size;
@@ -418,7 +542,7 @@ const CorridorTextures = {
       const ctx = c.getContext("2d");
       const rand = this.rand(seed * 131 + variant * 17 + 3);
       const V = this.WALL_VARIANTS[((variant % 3) + 3) % 3];
-      const coats = this.WALL_COATS;
+      const coats = pal.coats;
 
       // Pixels per metre. The canvas is square but the wall it covers is not,
       // so these differ — everything sized in metres goes through them.
@@ -547,12 +671,12 @@ const CorridorTextures = {
 
       const m1 = masks[1], m2 = masks[2], m3 = masks[3], m4 = masks[4];
       const t1 = thresh[1], t2 = thresh[2], t3 = thresh[3], t4 = thresh[4];
-      const R = coats.map((k) => k.rgb);
-      const R2 = coats.map((k) => k.rgb2);
+      const R = coats.map((k) => this.hexRGB(k.color));
+      const R2 = coats.map((k) => this.hexRGB(k.color2 || k.color));
       const OP = coats.map((k) => (k.opacity != null ? k.opacity : 1));
-      const grimeRGB = this.WALL_GRIME;
-      const dripRGB = this.WALL_DRIP;
-      const dadoRGB = this.WALL_DADO;
+      const grimeRGB = this.hexRGB(pal.grime.color);
+      const dripRGB = this.hexRGB(pal.drip.color);
+      const dadoRGB = this.hexRGB(pal.dado.color);
       const wearLow = 0.11; // extra threshold at the floor
       const dadoBand = 0.10; // extra threshold in the band at the dado line
       const dadoSig = S * 0.045;
@@ -783,6 +907,8 @@ const CorridorTextures = {
 
       // BRUSHED VERTICALS: thin translucent strokes, the visible half of the
       // grain whose other half is already inside every mask.
+      const streakL = this.hexRGB(pal.streak.light);
+      const streakD = this.hexRGB(pal.streak.dark);
       const nStreak = Math.round((200 + rand() * 200) * grainAmt);
       for (let i = 0; i < nStreak; i++) {
         const y0 = rand() * S * 0.92;
@@ -791,9 +917,8 @@ const CorridorTextures = {
         const a = (0.02 + rand() * 0.055) * grainAmt * V.grain;
         const lw = 0.5 + rand();
         const lean = (rand() - 0.5) * 2;
-        ctx.strokeStyle = light
-          ? "rgba(219,229,226," + a.toFixed(3) + ")"
-          : "rgba(70,86,92," + a.toFixed(3) + ")";
+        ctx.strokeStyle =
+          "rgba(" + (light ? streakL : streakD).join(",") + "," + a.toFixed(3) + ")";
         ctx.lineWidth = lw;
         this.wrapX(S, rand() * S, (xx) => {
           ctx.beginPath();
@@ -805,6 +930,8 @@ const CorridorTextures = {
 
       // LICHEN: small pale spots with a dark centre, the crusty blooms that
       // come out on damp lime — mostly on the upper half.
+      const lichenC = this.hexRGB(pal.lichen.color);
+      const lichenK = this.hexRGB(pal.lichen.core || "#3a362c");
       const nLichen = 15 + Math.floor(rand() * 26);
       for (let i = 0; i < nLichen; i++) {
         const y = rand() < 0.72 ? rand() * S * 0.55 : rand() * S;
@@ -812,11 +939,11 @@ const CorridorTextures = {
         const a1 = 0.3 + rand() * 0.45;
         const a2 = 0.25 + rand() * 0.35;
         this.wrapX(S, rand() * S, (xx) => {
-          ctx.fillStyle = "rgba(226,226,212," + a1.toFixed(3) + ")";
+          ctx.fillStyle = "rgba(" + lichenC.join(",") + "," + a1.toFixed(3) + ")";
           ctx.beginPath();
           ctx.arc(xx, y, r1, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = "rgba(58,54,44," + a2.toFixed(3) + ")";
+          ctx.fillStyle = "rgba(" + lichenK.join(",") + "," + a2.toFixed(3) + ")";
           ctx.beginPath();
           ctx.arc(xx, y, r1 * 0.34, 0, Math.PI * 2);
           ctx.fill();
@@ -1481,7 +1608,8 @@ const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
-  "wallGrain", "wallStripe", "tubeSpacing", "tubeColor",
+  "wallGrain", "wallStripe", "wallPalette", "wallPaletteOverride",
+  "roomWallPalettes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
   "floorTile", "roomTile", "tubeWidth", "tubeLength", "tubeDrop", "imageProud",
 ];
@@ -1526,6 +1654,40 @@ AFRAME.registerComponent("corridor-root", {
     wallFlake: { type: "number", default: 1 },
     wallGrain: { type: "number", default: 1 },
     wallStripe: { type: "boolean", default: true },
+    // WHICH COLOURS the wall generator paints with. `wallPalette` names an
+    // entry in CorridorTextures.WALL_PALETTES ("chungcu" | "green");
+    // `wallPaletteOverride` patches individual keys of it without redefining
+    // the rest — an object, or the JSON string an HTML attribute carries (the
+    // same parse/stringify pattern floorplan.js uses for `rooms`). `coats`
+    // merges per index, so
+    //   setAttribute('corridor-root','wallPaletteOverride',
+    //                {coats:[{},{color:'#7a8f5a'}]})
+    // swaps the ochre coat for green and changes nothing else.
+    wallPalette: { type: "string", default: "chungcu" },
+    wallPaletteOverride: {
+      default: null,
+      parse: function (v) {
+        if (typeof v !== "string") return v || null;
+        return v ? JSON.parse(v) : null;
+      },
+      stringify: function (v) {
+        return typeof v === "string" ? v : JSON.stringify(v);
+      },
+    },
+    // PER-APARTMENT palettes: three entries, one per apartment in roomImages
+    // order (1, 2, 3), each null / a palette NAME / an override object applied
+    // over the corridor's palette. Default none — every room is painted like
+    // the corridor. Each distinct palette costs its own three wall canvases.
+    roomWallPalettes: {
+      default: [null, null, null],
+      parse: function (v) {
+        if (typeof v !== "string") return v || [null, null, null];
+        return v ? JSON.parse(v) : [null, null, null];
+      },
+      stringify: function (v) {
+        return typeof v === "string" ? v : JSON.stringify(v);
+      },
+    },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -1784,10 +1946,14 @@ AFRAME.registerComponent("corridor-root", {
     // Ordered from the END WALL back toward the mouth. `index` is the index
     // into roomImages: walking in you pass apartment 1 (left), 3 (right),
     // 2 (left), so from the far end that is 2, 3, 1.
+    // Each carries its own optional wall palette override (default none), so an
+    // apartment can be painted a different scheme from the corridor — the first
+    // real consumer of the generator's palette argument.
+    const rp = d.roomWallPalettes || [];
     const rooms = [
-      { side: -1, z: zEnd + spacing * 1, index: 1 },
-      { side: +1, z: zEnd + spacing * 2, index: 2 },
-      { side: -1, z: zEnd + spacing * 3, index: 0 },
+      { side: -1, z: zEnd + spacing * 1, index: 1, wallPaletteOverride: rp[1] || null },
+      { side: +1, z: zEnd + spacing * 2, index: 2, wallPaletteOverride: rp[2] || null },
+      { side: -1, z: zEnd + spacing * 3, index: 0, wallPaletteOverride: rp[0] || null },
     ];
 
     // CLOSED DOORS fill the rest of each wall on a regular pitch, the two walls
@@ -1906,12 +2072,10 @@ AFRAME.registerComponent("corridor-root", {
       stripe: d.wallStripe,
     };
     this.wopts = wopts;
+    this._wallMats = {}; // palette key -> the three variant materials
+    this.corridorPal = this.wallPalette();
     this.tex = {
-      wall: [
-        CorridorTextures.wall(S, d.seed, 0, 0, wopts),
-        CorridorTextures.wall(S, d.seed, 1, 0, wopts),
-        CorridorTextures.wall(S, d.seed, 2, 0, wopts),
-      ],
+      wall: this.wallTextures(this.corridorPal),
       floor: CorridorTextures.floor(S, d.seed, Math.max(2, Math.round(d.width / d.floorTile))),
       ceiling: CorridorTextures.ceiling(S, d.seed),
       door: CorridorTextures.doorAtlas(S, d.seed),
@@ -1922,7 +2086,7 @@ AFRAME.registerComponent("corridor-root", {
     // wall reuses a wall texture with the material COLOUR knocked down, which
     // is how "the wall texture, darker" costs no extra canvas.
     this.m = {
-      wall: this.tex.wall.map((tx) => this.mat({ map: tx })),
+      wall: this.wallMaterials(this.corridorPal),
       endWall: this.mat({ map: this.tex.wall[2], color: new THREE.Color("#6f7c82") }),
       floor: this.mat({ map: this.tex.floor }),
       ceiling: this.mat({ map: this.tex.ceiling }),
@@ -1955,6 +2119,39 @@ AFRAME.registerComponent("corridor-root", {
         " ms each (noiseRes " + d.wallNoiseRes + ", size " + S + ")"
     );
     this.el.emit("zoneacorridorbuilt");
+  },
+
+  // The corridor's own palette: a named entry from the texture kit, with this
+  // component's override merged over it.
+  wallPalette: function (override) {
+    const base = CorridorTextures.resolvePalette(this.data.wallPalette);
+    const merged = CorridorTextures.mergePalette(base, this.data.wallPaletteOverride);
+    // A room's override is either a palette NAME (a whole different scheme) or
+    // a patch on the corridor's.
+    if (!override) return merged;
+    if (typeof override === "string") {
+      return CorridorTextures.resolvePalette(override);
+    }
+    return CorridorTextures.mergePalette(merged, override);
+  },
+
+  // The three variant canvases for a palette. Cached by the kit, so asking
+  // twice for the same colours costs nothing.
+  wallTextures: function (pal) {
+    const S = this.data.textureSize;
+    const seed = this.data.seed;
+    return [0, 1, 2].map((v) =>
+      CorridorTextures.wall(S, seed, v, 0, pal, this.wopts));
+  },
+
+  // ...and the materials over them, one set per distinct palette. Keyed the
+  // same way the canvases are, so two rooms painted alike share both.
+  wallMaterials: function (pal) {
+    const key = CorridorTextures.paletteKey(pal);
+    if (this._wallMats[key]) return this._wallMats[key];
+    const mats = this.wallTextures(pal).map((tx) => this.mat({ map: tx }));
+    this._wallMats[key] = mats;
+    return mats;
   },
 
   // Floor, ceiling, the landing's back wall and the corridor's end wall.
@@ -2085,6 +2282,11 @@ AFRAME.registerComponent("corridor-root", {
     const zNear = r.z - d.roomWidth / 2; // -z wall inner face
     const zFar = r.z + d.roomWidth / 2; // +z wall inner face
     const variant = (r.index + 1) % 3;
+    // This apartment's walls: the corridor's palette unless the room carries an
+    // override, in which case it gets its own three canvases.
+    const wallMats = r.wallPaletteOverride
+      ? this.wallMaterials(this.wallPalette(r.wallPaletteOverride))
+      : this.m.wall;
 
     // FLOOR + CEILING. Both reach back to the corridor's own inner face rather
     // than stopping at the room side of the wall, so the doorway threshold is
@@ -2106,7 +2308,7 @@ AFRAME.registerComponent("corridor-root", {
     // BACK WALL (the one facing you as you walk in), spanning past both side
     // walls so the corners close by overlap — the floorplan's trick.
     this.addBox(t, d.height, d.roomWidth + t * 2, xFar + r.side * t / 2,
-                d.height / 2, r.z, this.m.wall[variant], L.bay, d.height);
+                d.height / 2, r.z, wallMats[variant], L.bay, d.height);
 
     // The TWO SIDE WALLS. Each runs from inside the corridor wall out past the
     // back wall. A wall at a z another apartment has already built is that
@@ -2117,7 +2319,7 @@ AFRAME.registerComponent("corridor-root", {
       this.partyWalls[key] = true;
       this.addBox(spanX + t, d.height, t,
                   r.side * (L.halfW + (spanX + t) / 2), d.height / 2, zc,
-                  this.m.wall[(variant + 2) % 3], L.bay, d.height);
+                  wallMats[(variant + 2) % 3], L.bay, d.height);
     });
 
     // One tube, in the middle of the room — the same fitting as the corridor's.
