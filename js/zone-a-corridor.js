@@ -579,8 +579,8 @@ const CorridorTextures = {
   // showing at that pixel. Index 3 is the coat it was painted on.
   markSurvival: function (idx) {
     if (idx === 3) return 1; // the coat it was painted on is the surface
-    if (idx === 4) return 0.5; // a later wash went over it: a ghost, not gone
-    if (idx === 2) return 0.16; // its coat flaked; pigment left in the pits
+    if (idx === 4) return 0.62; // a later wash went over it: a ghost, not gone
+    if (idx === 2) return 0.2; // its coat flaked; pigment left in the pits
     return 0; // back to plaster: the mark went with the paint
   },
 
@@ -656,7 +656,7 @@ const CorridorTextures = {
         const wx = C.tx.w[mx];
         const ta = C.FF[e0] + (C.FF[e1] - C.FF[e0]) * wx;
         const tb = C.FF[g0] + (C.FF[g1] - C.FF[g0]) * wx;
-        const rough = 0.65 + 0.35 * (ta + (tb - ta) * fwy);
+        const rough = 0.78 + 0.22 * (ta + (tb - ta) * fwy);
         d[q] = a0 * sv * rough;
       }
     }
@@ -740,9 +740,22 @@ const CorridorTextures = {
     sctx.rotate(theta);
 
     const stencil = rand() < 0.62 ? pal.stencil.red : pal.stencil.dark;
-    const alpha =
-      stencil === pal.stencil.red ? 0.46 + rand() * 0.22 : 0.4 + rand() * 0.18;
+    // How much pigment went on. Scaled by wallStencilInk, and capped: a mark is
+    // paint on a wall, never a decal, so it stays short of fully opaque.
+    const alpha = Math.min(
+      0.95,
+      (stencil === pal.stencil.red ? 0.66 + rand() * 0.22 : 0.58 + rand() * 0.2) *
+        C.ink
+    );
+    // Sprayed through a card, the edge of every glyph carries a little
+    // overspray. Drawn as a soft dark halo under the ink, it is also what lets
+    // the digits hold their shape against a wall this mottled.
     sctx.fillStyle = stencil;
+    sctx.globalAlpha = alpha * 0.4;
+    sctx.shadowColor = "rgba(40,20,14,0.85)";
+    sctx.shadowBlur = Math.max(2, dh * 0.11);
+    sctx.fillText(text, 0, 0);
+    sctx.shadowBlur = 0;
     sctx.globalAlpha = alpha;
     sctx.fillText(text, 0, 0);
 
@@ -921,13 +934,14 @@ const CorridorTextures = {
     const allowStripe = o.stripe !== false;
     const stencils = o.stencils != null ? o.stencils : 0.6;
     const stencilTilt = o.stencilTilt != null ? o.stencilTilt : 6;
+    const stencilInk = o.stencilInk != null ? o.stencilInk : 1;
     // The palette is part of the key, so two rooms with different colours never
     // share a canvas and two with the same colours always do.
     const key =
       "wall|" +
       [size, seed, variant, darken, bayM.toFixed(3), heightM.toFixed(3),
        res, flake, grainAmt, allowStripe ? 1 : 0, stencils,
-       stencilTilt, this.paletteKey(pal)].join("|");
+       stencilTilt, stencilInk, this.paletteKey(pal)].join("|");
 
     return this.get(key, () => {
       const S = size;
@@ -1313,6 +1327,7 @@ const CorridorTextures = {
         variant: V,
         density: stencils,
         tilt: stencilTilt,
+        ink: stencilInk,
         debug: !!o.debug,
       });
 
@@ -2031,6 +2046,7 @@ const CORRIDOR_GEOM_PROPS = [
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
+  "wallStencilInk",
   "wallPalette", "wallPaletteOverride",
   "roomWallPalettes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
@@ -2095,8 +2111,12 @@ AFRAME.registerComponent("corridor-root", {
     // (each mark takes 40-100% of it, either way up) — they are done freehand
     // off a card and none of them is level. There is deliberately no lettering
     // option: numbers only.
+    // `wallStencilInk` scales how much pigment went on — how strongly a mark
+    // reads against the wall before the wall starts taking it away. 1 is a
+    // fresh-ish coat of spray paint; below that it was thin to begin with.
     wallStencils: { type: "number", default: 0.6 },
     wallStencilTilt: { type: "number", default: 6 },
+    wallStencilInk: { type: "number", default: 1 },
     wallPalette: { type: "string", default: "chungcu" },
     wallPaletteOverride: {
       default: null,
@@ -2507,6 +2527,7 @@ AFRAME.registerComponent("corridor-root", {
       stripe: d.wallStripe,
       stencils: d.wallStencils,
       stencilTilt: d.wallStencilTilt,
+      stencilInk: d.wallStencilInk,
       debug: this.debugMode,
     };
     this.wopts = wopts;
