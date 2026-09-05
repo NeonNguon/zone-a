@@ -78,8 +78,8 @@
 //   contour map.
 //
 //   VARIANTS. Three, handed out along the run and deliberately far apart:
-//   "intact" (calm, no painted ads — and the one forced onto every segment
-//   beside an apartment doorway, and onto the apartments themselves), "flaked"
+//   "plain" (no painted ads — the one forced onto every segment beside an
+//   apartment doorway, and onto the apartments themselves), "flaked"
 //   (top washes largely gone, big blue islands, heavy grime, two ads) and
 //   "stripe" (intact plus a ragged vertical band of the earlier ochre scheme,
 //   one ad). They are behaviour presets — coverage biases, stripe on/off,
@@ -397,8 +397,14 @@ const CorridorTextures = {
   // proportion the reference walls hold — mostly pale, with the older schemes
   // showing through in a minority of places, not a camouflage of equal patches.
   WALL_VARIANTS: [
-    { name: "intact", coverBias: [0, 0.06, 0.08, 0.14, 0.22], stripe: false,
-      grain: 0.85, grime: 0.65, marks: 0 },
+    // "plain" is the one WITHOUT painted ads, not the one that is clean. Every
+    // wall segment beside an apartment doorway is forced to it so no phone
+    // number lands next to a hanging picture — and while its coverBias also
+    // made it far less weathered than the other two, that turned the whole
+    // apartment stretch into a conspicuously scrubbed patch of corridor. It is
+    // now weathered like the rest; only the ads are missing.
+    { name: "plain", coverBias: [0, 0.03, 0.02, 0.0, -0.04], stripe: false,
+      grain: 1.0, grime: 0.95, marks: 0 },
     { name: "flaked", coverBias: [0, -0.14, -0.16, -0.26, -0.3], stripe: false,
       grain: 1.15, grime: 1.15, marks: 2 },
     { name: "stripe", coverBias: [0, 0.02, 0.0, -0.04, -0.12], stripe: true,
@@ -2188,12 +2194,12 @@ AFRAME.registerComponent("corridor-root", {
     //
     // To aim it at a TOP-COAT COVERAGE instead of guessing: a coat's coverage
     // after flaking is 1 - (1 - c) * flake, where c is the palette's coverage
-    // plus the variant's bias. The apartments run the "intact" variant over a
-    // 0.45 top coat, so c = 0.45 + 0.22 = 0.67 and
-    //     flake = (1 - target) / 0.33
-    // 0.09 is a 97% top coat: the wall is the colour it was last painted, with
+    // plus the variant's bias. The apartments run the "plain" variant over a
+    // 0.45 top coat, so c = 0.45 - 0.04 = 0.41 and
+    //     flake = (1 - target) / 0.59
+    // 0.051 is a 97% top coat: the wall is the colour it was last painted, with
     // the coat beneath showing through in the last few percent.
-    roomWallFlake: { type: "number", default: 0.09 },
+    roomWallFlake: { type: "number", default: 0.051 },
     wallGrain: { type: "number", default: 1 },
     wallStripe: { type: "boolean", default: true },
     // WHICH COLOURS the wall generator paints with. `wallPalette` names an
@@ -2874,7 +2880,7 @@ AFRAME.registerComponent("corridor-root", {
     const xMid = (xNear + xFar) / 2;
     const zNear = r.z - d.roomWidth / 2; // -z wall inner face
     const zFar = r.z + d.roomWidth / 2; // +z wall inner face
-    // An apartment uses ONE variant, and it is 0 ("intact"): no painted ads on
+    // An apartment uses ONE variant, and it is 0 ("plain"): no painted ads on
     // a wall a picture hangs on, and no ochre stripe — the stripe is a fine
     // thing once along a 16 m corridor and far too much four times over in a
     // 3.2 m room. The apartments differ from each other by COLOUR now, which
