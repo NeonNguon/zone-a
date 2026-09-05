@@ -240,12 +240,17 @@ const CorridorTextures = {
     // differently from the corridor and they are what make a room read as its
     // colour rather than as a white room with a tint:
     //
-    //   The COVERAGE BALANCE is shifted down the stack. In the corridor the
-    //   near-white top wash holds ~55% of the wall and the colour underneath
-    //   ~30%, which is right for a passage nobody has repainted in decades.
-    //   In a room the top wash is dropped to ~45% and the coloured wash raised
-    //   to ~88%, so the room's own colour is the biggest thing in it and the
-    //   off-white reads as the later, thinner coat over it.
+    //   THE TOP COAT CARRIES THE COLOUR. In the corridor the newest coat is a
+    //   near-white wash over the blue, because nobody has painted a corridor in
+    //   decades and what is left up there is old limewash. A room is different:
+    //   somebody lives in it, so the last time it was painted it was painted
+    //   its colour. So an apartment's top coat is the scheme itself, the coat
+    //   under it a deeper version, and the saturated original below that.
+    //
+    //   That is also what lets roomWallFlake work. Turning the decay down means
+    //   more of the top coat survives; if the top coat were near-white the room
+    //   would simply go pale as it got calmer, which is exactly what it did
+    //   before these colours were re-cut.
     //
     //   The WHOLE STACK is keyed to the scheme: the deep coat is a saturated
     //   version of it, the wash is that colour let down, the top wash is an
@@ -264,8 +269,8 @@ const CorridorTextures = {
         { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
         { color: "#a2593a", color2: "#b56b48", coverage: 0.78, opacity: 1 },
         { color: "#cf9a2e", color2: "#dfab42", coverage: 0.94, opacity: 0.96 },
-        { color: "#dcc274", color2: "#e6cf8c", coverage: 0.88, opacity: 0.88 },
-        { color: "#efe6cd", color2: "#e3d8bd", coverage: 0.45, opacity: 0.8 },
+        { color: "#d9c07a", color2: "#e3cc8f", coverage: 0.88, opacity: 0.88 },
+        { color: "#e9dab0", color2: "#ddcda2", coverage: 0.45, opacity: 0.8 },
       ],
       stripe: { color: "#b56b48" },
       grime: { color: "#3a2c1c" },
@@ -282,8 +287,8 @@ const CorridorTextures = {
         { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
         { color: "#ba8f34", color2: "#cea43f", coverage: 0.78, opacity: 1 },
         { color: "#9e3a2c", color2: "#b5493a", coverage: 0.94, opacity: 0.96 },
-        { color: "#c47f6c", color2: "#d1907e", coverage: 0.88, opacity: 0.88 },
-        { color: "#ecdcd4", color2: "#dfcec6", coverage: 0.45, opacity: 0.8 },
+        { color: "#c98d7c", color2: "#d59e8e", coverage: 0.88, opacity: 0.88 },
+        { color: "#dfbdb2", color2: "#d3aea3", coverage: 0.45, opacity: 0.8 },
       ],
       stripe: { color: "#cea43f" },
       grime: { color: "#3a2820" },
@@ -300,8 +305,8 @@ const CorridorTextures = {
         { color: "#948d80", color2: "#746e63", coverage: 1.0, opacity: 1 },
         { color: "#ba8f34", color2: "#cea43f", coverage: 0.78, opacity: 1 },
         { color: "#2f6b57", color2: "#3d8069", coverage: 0.94, opacity: 0.96 },
-        { color: "#86ad9b", color2: "#99bcab", coverage: 0.88, opacity: 0.88 },
-        { color: "#d8e0d8", color2: "#c8d2c9", coverage: 0.45, opacity: 0.8 },
+        { color: "#93b5a4", color2: "#a3c2b2", coverage: 0.88, opacity: 0.88 },
+        { color: "#bdcfc4", color2: "#aec1b6", coverage: 0.45, opacity: 0.8 },
       ],
       stripe: { color: "#cea43f" },
       grime: { color: "#3a2e22" },
@@ -1118,7 +1123,7 @@ const CorridorTextures = {
       const dripAmt = new Float32Array(S);
       const dripTop = new Float32Array(S);
       const dripLen = new Float32Array(S);
-      const nDrips = 3 + Math.floor(rand() * 4);
+      const nDrips = Math.round((3 + Math.floor(rand() * 4)) * Math.min(1.5, flake));
       for (let i = 0; i < nDrips; i++) {
         const cx = rand() * S;
         const w = (0.01 + rand() * 0.035) * pxX; // 1-4.5 cm wide
@@ -1422,7 +1427,7 @@ const CorridorTextures = {
       // come out on damp lime — mostly on the upper half.
       const lichenC = this.hexRGB(pal.lichen.color);
       const lichenK = this.hexRGB(pal.lichen.core || "#3a362c");
-      const nLichen = 15 + Math.floor(rand() * 26);
+      const nLichen = Math.round((15 + Math.floor(rand() * 26)) * Math.min(1.5, flake));
       for (let i = 0; i < nLichen; i++) {
         const y = rand() < 0.72 ? rand() * S * 0.55 : rand() * S;
         const r1 = 2 + rand() * 5;
@@ -2127,7 +2132,7 @@ const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSpacing",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
-  "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
+  "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
   "wallPalette", "wallPaletteOverride",
   "roomWallPalettes", "tubeSpacing", "tubeColor",
@@ -2165,14 +2170,22 @@ AFRAME.registerComponent("corridor-root", {
     // thresholded after the interpolation, not before.
     wallNoiseRes: { type: "number", default: 2 },
     // The wall's weathering, as three knobs over the whole stack of coats:
-    //   wallFlake   0..1+ — a global multiplier on how much of each coat is
-    //               GONE. 0 repaints the corridor (every coat intact), 1 is the
-    //               reference walls, above 1 strips it further.
+    //   wallFlake   0..1+ — how weathered the wall is. Primarily a multiplier
+    //               on how much of each coat is GONE, and with it the number of
+    //               lichen blooms and rust runs, so 0 really is a repainted
+    //               wall rather than an unflaked one covered in stains. 1 is
+    //               the reference walls; above 1 strips it further. (Nail holes
+    //               and scrawls are NOT scaled: they are occupancy, not decay.)
     //   wallGrain   0..1+ — the strength of the vertical brushed streaking,
     //               both inside the coat masks and as strokes over them.
     //   wallStripe  allow the "stripe" variant to show its ragged band of an
     //               earlier ochre scheme. Off makes that variant a plain wall.
     wallFlake: { type: "number", default: 1 },
+    // ...and how weathered an APARTMENT is, as a fraction of that. The corridor
+    // is common ground nobody has painted in decades; a room someone lives in
+    // gets repainted, so its walls are the same stack of coats far less far
+    // gone. 1 would make a room exactly as ruined as the corridor.
+    roomWallFlake: { type: "number", default: 0.45 },
     wallGrain: { type: "number", default: 1 },
     wallStripe: { type: "boolean", default: true },
     // WHICH COLOURS the wall generator paints with. `wallPalette` names an
@@ -2613,6 +2626,12 @@ AFRAME.registerComponent("corridor-root", {
       debug: this.debugMode,
     };
     this.wopts = wopts;
+    // The apartments' own weathering: the same options with the flake turned
+    // down. A separate object rather than a flag, so it flows through the
+    // texture cache key like everything else.
+    this.roomWopts = Object.assign({}, wopts, {
+      flake: d.wallFlake * d.roomWallFlake,
+    });
     this._wallMats = {}; // palette key -> the three variant materials
     this.corridorPal = this.wallPalette();
     this.tex = {
@@ -2688,12 +2707,15 @@ AFRAME.registerComponent("corridor-root", {
   // ONE variant's material for a palette, built on demand and cached by
   // palette + variant. Lazy on purpose: an apartment uses a single variant, so
   // giving it its own scheme costs ONE extra canvas rather than three.
-  wallMaterial: function (pal, variant) {
-    const key = CorridorTextures.paletteKey(pal) + "|" + variant;
+  wallMaterial: function (pal, variant, opts) {
+    const o = opts || this.wopts;
+    // The flake is part of the key: the corridor and an apartment can share a
+    // palette and a variant and still be weathered differently.
+    const key = CorridorTextures.paletteKey(pal) + "|" + variant + "|" + o.flake;
     if (this._wallMats[key]) return this._wallMats[key];
     const m = this.mat({
       map: CorridorTextures.wall(this.data.textureSize, this.data.seed,
-                                 variant, 0, pal, this.wopts),
+                                 variant, 0, pal, o),
     });
     this._wallMats[key] = m;
     return m;
@@ -2851,12 +2873,13 @@ AFRAME.registerComponent("corridor-root", {
     // is a stronger difference than a variant ever was. One variant also means
     // giving a room its own scheme costs one canvas, not three.
     const variant = 0;
+    // An apartment is weathered by roomWallFlake whether or not it carries its
+    // own colours — a room somebody lives in has been painted more recently
+    // than the corridor either way.
     const roomPal = r.wallPaletteOverride
       ? this.wallPalette(r.wallPaletteOverride)
-      : null;
-    const wallMat = roomPal
-      ? this.wallMaterial(roomPal, variant)
-      : this.m.wall[variant];
+      : this.corridorPal;
+    const wallMat = this.wallMaterial(roomPal, variant, this.roomWopts);
 
     // FLOOR + CEILING. Both reach back to the corridor's own inner face rather
     // than stopping at the room side of the wall, so the doorway threshold is
@@ -2928,7 +2951,7 @@ AFRAME.registerComponent("corridor-root", {
     // the doorway, a few millimetres proud so they never z-fight the wall they
     // cover. Without this you walk into a yellow room whose fourth wall is
     // still corridor blue.
-    if (roomPal) this.lineCorridorWall(L, r, wallMat);
+    this.lineCorridorWall(L, r, wallMat);
 
     // One tube, in the middle of the room — the same fitting as the corridor's.
     const tube = this.addPlane(L.tubeLength, d.tubeWidth, this.m.tube);

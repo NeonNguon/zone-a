@@ -423,8 +423,14 @@
              apartments  roomWidth 3.2 / roomDepth 4 / roomSpacing 0 (auto)
              fabric      wallThickness 0.15 / textureSize 1024 / seed 1
              the walls   wallNoiseRes 2      noise resolution divisor
-                         wallFlake 1         how much of each coat is GONE
+                         wallFlake 1         how weathered the wall is — how
+                                             much of each coat is GONE, and
+                                             with it the blooms and rust runs
                                              (0 repaints the corridor)
+                         roomWallFlake .45   an APARTMENT's share of that. The
+                                             corridor is common ground nobody
+                                             has painted in decades; a room
+                                             someone lives in gets repainted
                          wallGrain 1         vertical brush streaking
                          wallStripe true     allow the ochre band variant
                          wallStencils 0.6    painted-ad density (0 = none)
