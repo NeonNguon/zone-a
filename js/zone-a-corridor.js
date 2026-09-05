@@ -2842,6 +2842,11 @@ AFRAME.registerComponent("corridor-root", {
     // exactly at the corridor face with no overlap to z-fight.
     const spanX = d.roomDepth + t;
     const xPlate = r.side * (L.halfW + spanX / 2);
+    // Where the room's own side walls start and stop (see the note on them
+    // below): from the corridor wall's centreline out to the back wall's outer
+    // face, so both ends are buried and neither shows on a surface you can see.
+    const sideStartX = L.halfW + t / 2;
+    const sideLen = L.halfW + t + d.roomDepth + t - sideStartX;
     const tile = d.roomTile * 4; // the gạch bông canvas is a 4×4 tile block
     const floor = this.addPlane(spanX, d.roomWidth, this.m.roomFloor,
                                 [0, 0, spanX / tile, d.roomWidth / tile]);
@@ -2858,7 +2863,17 @@ AFRAME.registerComponent("corridor-root", {
                 d.height / 2, r.z, wallMat, L.bay, d.height);
 
     // The TWO SIDE WALLS. Each runs from inside the corridor wall out past the
-    // back wall.
+    // back wall — but only HALF WAY into it, never through it.
+    //
+    // A room wall must not reach the corridor wall's INNER face. That face is
+    // the corridor's own surface, so a room wall ending flush with it shows its
+    // end there, as a stripe the thickness of the wall. While everything was
+    // painted alike that was invisible; the moment the apartments got their own
+    // schemes it became a yellow and a red band on the corridor's blue wall,
+    // side by side where two apartments share a party wall. Starting at the
+    // corridor wall's CENTRELINE instead leaves half a thickness of corridor in
+    // front of every room wall's end, and is still deep enough that no corner
+    // can open a gap.
     //
     // A PARTY WALL — one plane with an apartment on either side of it — is
     // built as TWO half-thickness leaves rather than one box, so each
@@ -2879,8 +2894,8 @@ AFRAME.registerComponent("corridor-root", {
       const key = r.side + "@" + zcc.toFixed(4);
       if (this.partyWalls[key]) return;
       this.partyWalls[key] = true;
-      this.addBox(spanX + t, d.height, th,
-                  r.side * (L.halfW + (spanX + t) / 2), d.height / 2, zcc,
+      this.addBox(sideLen, d.height, th,
+                  r.side * (sideStartX + sideLen / 2), d.height / 2, zcc,
                   wallMat, L.bay, d.height);
     });
 
