@@ -402,6 +402,29 @@
            once, at load; the whole texture set is about 59 MB (24 MB of it the
            walls, 18 MB the four skyline PNGs).
 
+           EVERY DOOR IS THREE THINGS. The painted two-leaf door itself, from
+           an atlas of four; a row of pierced bông gió concrete blocks in the
+           wall ABOVE its frame; and a folding steel scissor gate (cửa kéo)
+           standing 5 cm off the wall in front of it. The vent row is a REAL
+           hole — the lintel is built as a band, the row and a band with
+           nothing behind it, and the apartments cut the same hole in the skin
+           they paint on their side of the wall — so from inside a flat you see
+           corridor light coming through the blocks over your own door. The
+           gate is stretched across and padlocked on some of the closed doors
+           and folded into a stack against the jamb on the rest, ~30% locked,
+           decided per door from the corridor's seed so the same corridor
+           always locks the same doors; the three apartment doorways are always
+           folded open, their pictures being the point. The apartments' doors
+           also carry a PAINTED BACK now — plainer than the front, no number
+           plate, a bolt at handle height, grime up the bottom third — because
+           the side you stand next to is the one inside the room.
+
+           None of it is expensive. The vent blocks are two geometries and up
+           to four materials for the whole corridor, drawn as InstancedMeshes;
+           the gates are 40 bars each but two shared geometries, so all seven
+           gates plus their tracks and padlocks are FOUR draw calls however
+           long the corridor gets.
+
            THE WINDOW at the far end is what the run is walking toward. A
            2.8 × 1.5 m opening in the dead-end wall, a welded security grille
            over it, Saigon in the haze behind it and a patch of sun on the floor
@@ -459,6 +482,32 @@
                          mixed (one of the three per door, seeded from the same
                          number its paint colour comes from)
                          ventColor #bfb8a8 / ventGrime .5
+             gates       gate true   the scissor gate (cửa kéo) outside every
+                         door, on the corridor side, standing off the wall
+                         gateLockedRatio .3   how many of the CLOSED doors are
+                         stretched across and padlocked rather than folded into
+                         a stack beside the jamb. Seeded PER DOOR from the same
+                         number the door's paint colour and vent pattern come
+                         from, so the same corridor always locks the same doors
+                         and changing `seed` reshuffles the whole run at once.
+                         The three apartment doorways are ALWAYS folded
+                         gateBar .012 / gateBarThick .004   a flat bar, on edge
+                         gateStack .32   the folded stack's width
+                         gateCells 7   diamonds across the extended span; the
+                         ROW count derives from it so the straps land near 60
+                         degrees and the lattice closes on both rails
+                         gateColor #35373a / gateRust .4   the steel, drawn by
+                         the window grille's own iron recipe
+                         gateTrackDepth .05   how far the gate, its top channel
+                         and its floor rail stand off the wall face. Clears the
+                         .045 frame by 5 mm and sits well inside the collider's
+                         .25 m player radius, so the gates need no collider
+                         change at all
+                         gatePark "seed"   which side the stack parks —
+                         "hinge" (the +z jamb) | "far" | "seed". Whichever is
+                         asked for, a stack that would hit a neighbouring
+                         frame parks the other way instead
+                         gateHeight is NOT a tunable: doorHeight − .05
              apartments  roomWidth 3.2 / roomDepth 4   the DEFAULT size, w
                          ALONG the corridor and d away from it
                          roomSizes [{},{},{}]   per-apartment { w, d }

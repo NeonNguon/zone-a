@@ -27,6 +27,44 @@
 //                     the return booth on the corridor's landing, wired to each
 //                     other through glitch-masked jumps.
 //
+// EVERY DOOR IS THREE THINGS, and only one of them is a door.
+//
+//   THE LEAF        a painted two-leaf door from an atlas of four, picked by
+//                   doorPick from where it stands. The three apartments' doors
+//                   stand open, and an open leaf carries a SECOND atlas on its
+//                   other side (doorAtlasBack): the same door, same colour by
+//                   construction — front and back share doorPalette(i) and
+//                   doorCellUV(pick) — but plainer, no number plate, a bolt at
+//                   handle height, grime up the bottom third. The side you
+//                   stand next to inside a flat is the back, so it is the one
+//                   that had to stop being bare timber. A CLOSED door gets no
+//                   back: it is buried in the wall and cannot be seen.
+//   THE VENT ROW    pierced bông gió concrete blocks in the wall ABOVE the
+//                   frame, on every opening, closed door and apartment doorway
+//                   alike — which is how a chung cư ventilates a shut flat.
+//                   A REAL hole: buildSideWall splits the lintel into a band,
+//                   the row and a band with nothing behind it, and
+//                   lineCorridorWall cuts the SAME hole in the skin an
+//                   apartment paints on its side of that wall, from the same
+//                   ventRow() answer. The piercing itself is cut out of the
+//                   blocks' two faces by ALPHA rather than modelled — see the
+//                   long note on CorridorTextures.ventFace, including why it
+//                   is the canvas's own alpha channel and not an alphaMap.
+//   THE GATE        a folding steel scissor gate (cửa kéo) standing
+//                   gateTrackDepth off the wall in front of the door, with its
+//                   top channel and floor rail. Stretched across the opening
+//                   with a padlock, or folded into a stack against the jamb —
+//                   ~gateLockedRatio of the CLOSED doors locked, decided per
+//                   door from the corridor's seed; the apartments always
+//                   folded, their pictures being the point. Two shared
+//                   geometries and InstancedMesh put every gate in the
+//                   corridor into four draw calls. See buildGateMeshes.
+//
+// None of the three costs what it looks like it costs: the vent blocks are two
+// geometries and at most four materials for the whole run, the gates two more
+// and one, and both are instanced — so a longer corridor adds blocks and gates
+// without adding a single draw call.
+//
 // THE WINDOW. The corridor's dead end is not dead: it carries a barred window
 // with Saigon behind it, so the whole run reads as an approach to that view
 // rather than as a passage to three doors. Five pieces, all children of the
