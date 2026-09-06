@@ -1950,12 +1950,24 @@ const CorridorTextures = {
   //
   // So the shape is lifted into a canvas and filled WHITE through source-in.
   // White multiplies to whatever the material's colour is, which means one
-  // canvas serves any number of layers at any haze colour and opacity — the two
-  // depth layers here share it.
+  // canvas serves any number of layers at any haze colour and opacity — three
+  // canvases cover both depth bands and all eighteen of their panels.
   //
-  // The image loads asynchronously; the canvas starts blank and the texture is
-  // flagged for upload when it arrives. The corridor is hidden until the
-  // visitor teleports in, so it is always ready by the time it is looked at.
+  // THE PLACEHOLDER HAS TO BE THROWN AWAY, not merely re-flagged. The image
+  // loads asynchronously, so the texture is built around a tiny blank canvas
+  // and the real picture is drawn into it later. On WebGL2 three allocates
+  // IMMUTABLE storage (texStorage2D) at whatever size it first uploads — so
+  // once the 4x4 placeholder has gone up, growing the canvas to 1456x816 and
+  // setting needsUpdate CANNOT work: the re-upload fails down in the driver
+  // ("glCopySubTextureCHROMIUM: Offset overflows texture dimensions", a console
+  // warning and nothing else) and the layer stays fully transparent for good.
+  //
+  // Whether that happened came down to a race. If the PNG arrived before the
+  // corridor's first frame the storage was allocated at the right size and the
+  // city appeared; if it arrived after, the city was silently missing and only
+  // the sky showed through the window. dispose() on load drops the GL texture
+  // so the next frame allocates it afresh at the real size — the cost is one
+  // throwaway 4x4 allocation, once, per image.
   silhouette: function (src) {
     const key = "silhouette|" + src;
     if (this.cache.has(key)) {
@@ -1980,6 +1992,7 @@ const CorridorTextures = {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, c.width, c.height);
       ctx.globalCompositeOperation = "source-over";
+      tex.dispose(); // see the note above: the placeholder's storage is immutable
       tex.needsUpdate = true;
     };
     img.onerror = () => {
@@ -1987,6 +2000,128 @@ const CorridorTextures = {
     };
     img.src = src;
     return tex;
+  },
+
+  // ---- THE DAYLIGHT PATCH ------------------------------------------------
+  // What the window throws on the floor: one canvas, WHITE with the light in
+  // its ALPHA channel, exactly like ContactCue.makeTexture — the material
+  // supplies the colour and the strength, this supplies the shape.
+  //
+  // The canvas is in the patch's own space, not in metres: u runs across the
+  // patch (0..1, and the patch is a trapezoid, so a constant u is a straight
+  // line that flares with it) and v runs 1 at the wall to 0 at the far edge.
+  // That is what lets the shadows be drawn as plain stripes.
+  //
+  // THE SHADOWS. The bar positions come in as FRACTIONS of the opening, taken
+  // from grilleLattice() — the same numbers the bars themselves were built
+  // from, so the two can never drift apart. The verticals map straight across
+  // (u), and the horizontals map the opening's HEIGHT onto the patch's DEPTH:
+  // a raked sun lays the window's height out along the floor, so the bar
+  // nearest the sill lands nearest the wall and the head of the frame lands at
+  // the far edge. Both get a penumbra that widens and washes out with depth,
+  // which is the difference between a shadow and a decal.
+  daylight: function (size, s) {
+    const key = "daylight|" + size + "|" + JSON.stringify(s);
+    return this.get(key, () => {
+      const S = size;
+      const c = this.canvas(S, S);
+      const ctx = c.getContext("2d");
+
+      // 1. THE LIGHT: full at the wall, dying away across the depth.
+      const g = ctx.createLinearGradient(0, 0, 0, S);
+      const STOPS = 24;
+      for (let i = 0; i <= STOPS; i++) {
+        const t = i / STOPS; // 0 at the wall, 1 at the far edge
+        const a = Math.pow(1 - t, 1.3);
+        g.addColorStop(t, "rgba(255,255,255," + a.toFixed(4) + ")");
+      }
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, S, S);
+
+      // Everything from here on REMOVES light: destination-out multiplies the
+      // alpha already there by (1 - what is drawn), so the order of the
+      // shadows and the edge fade against each other does not matter.
+      ctx.globalCompositeOperation = "destination-out";
+
+      // PENUMBRA, as a fraction of the BAR PITCH rather than as a count of
+      // pixels — that is the whole trick here. A grille is mostly hole: the
+      // bars are a tenth of their spacing, so their shadows have to stay a
+      // small part of theirs too. Give the penumbra a fixed pixel size instead
+      // and a close-set lattice turns into a grid of bright dots on a dark
+      // floor, which is a shadow of a grating rather than of a grille.
+      //
+      // It still widens and washes out with depth, because that is the
+      // difference between a shadow and a decal — just never past the point
+      // where neighbouring shadows would meet.
+      const pitchX = S / (s.xs.length + 1);
+      const pitchY = S / (s.ys.length + 1);
+      const pen = (t, pitch) => pitch * (0.04 + 0.34 * s.soft * t);
+      const dark = (t) => 0.8 * (1 - 0.55 * t);
+
+      // A soft-edged stripe: a plateau at full strength with a penumbra either
+      // side of it. `across` true = a vertical bar (constant u), false = a
+      // horizontal one (constant depth).
+      const stripe = (centre, half, soft, a, across, y0, y1) => {
+        const hw = half + soft;
+        if (hw <= 0 || a <= 0) return;
+        const core = Math.max(0.02, Math.min(0.48, (half / hw) * 0.5));
+        const grad = across
+          ? ctx.createLinearGradient(centre - hw, 0, centre + hw, 0)
+          : ctx.createLinearGradient(0, centre - hw, 0, centre + hw);
+        grad.addColorStop(0, "rgba(0,0,0,0)");
+        grad.addColorStop(0.5 - core, "rgba(0,0,0," + a.toFixed(4) + ")");
+        grad.addColorStop(0.5 + core, "rgba(0,0,0," + a.toFixed(4) + ")");
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = grad;
+        if (across) ctx.fillRect(centre - hw, y0, hw * 2, y1 - y0);
+        else ctx.fillRect(0, centre - hw, S, hw * 2);
+      };
+
+      // VERTICAL bars. Their penumbra has to grow along the patch, so each is
+      // laid down in bands of depth rather than as one stripe.
+      const BANDS = 40;
+      const bandH = S / BANDS;
+      const verticals = s.xs.concat([s.fx / 2, 1 - s.fx / 2]);
+      const vWidth = s.xs.map(() => s.bx).concat([s.fx, s.fx]);
+      verticals.forEach((u, i) => {
+        const x = u * S;
+        for (let b = 0; b < BANDS; b++) {
+          const t = (b + 0.5) / BANDS;
+          stripe(x, (vWidth[i] * S) / 2, pen(t, pitchX), dark(t), true,
+                 b * bandH, (b + 1) * bandH + 1);
+        }
+      });
+
+      // HORIZONTAL bars. Each sits at one depth, so one stripe does it.
+      const horizontals = s.ys.concat([s.fy / 2, 1 - s.fy / 2]);
+      const hWidth = s.ys.map(() => s.by).concat([s.fy, s.fy]);
+      horizontals.forEach((t, i) => {
+        stripe(t * S, (hWidth[i] * S) / 2, pen(t, pitchY), dark(t), false,
+               0, S);
+      });
+
+      // 2. THE EDGES of the patch, where the wall either side of the opening
+      // cuts the light off. Soft, because the reveal is thick and the sun is
+      // not a point.
+      const m = Math.max(0.02, 0.05 + 0.16 * s.soft);
+      [[0, m], [1, -m]].forEach((e) => {
+        const grad = ctx.createLinearGradient(e[0] * S, 0,
+                                              (e[0] + e[1]) * S, 0);
+        grad.addColorStop(0, "rgba(0,0,0,1)");
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(Math.min(e[0], e[0] + e[1]) * S, 0, Math.abs(e[1]) * S, S);
+      });
+      // ...and the far edge, so the patch ends in nothing rather than in a line.
+      const gf = ctx.createLinearGradient(0, S, 0, S * 0.7);
+      gf.addColorStop(0, "rgba(0,0,0,1)");
+      gf.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gf;
+      ctx.fillRect(0, S * 0.7, S, S * 0.3);
+
+      ctx.globalCompositeOperation = "source-over";
+      return c;
+    });
   },
 
   // ---- GRILLE IRON -------------------------------------------------------
@@ -2365,9 +2500,12 @@ const CORRIDOR_GEOM_PROPS = [
   "grilleColor", "grilleRust", "grilleInset", "grilleTile",
   "viewSkyTop", "viewSkyHorizon", "viewSkyDistance", "viewSkyWidth",
   "viewSkyHeight", "viewClearance", "viewEyeY", "viewLayers",
-  "viewSilhouetteSrc", "viewSilhouetteSrc2", "viewDistance", "viewWidth",
+  "viewSilhouetteSrc", "viewSilhouetteSrc2", "viewSilhouetteSrcL",
+  "viewSilhouetteSrcR", "viewPanelsMax", "viewDistance", "viewWidth",
   "viewBottom", "viewHaze", "viewHazeOpacity", "viewDistance2", "viewWidth2",
   "viewHaze2", "viewHazeOpacity2", "viewCrop",
+  "daylight", "daylightDepth", "daylightOpacity", "daylightColor",
+  "daylightSkew", "daylightSoftness",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
@@ -2578,9 +2716,27 @@ AFRAME.registerComponent("corridor-root", {
     viewClearance: { type: "number", default: 0.25 }, // closest eye to the wall
     viewEyeY: { type: "number", default: 1.6 },
 
+    // THE CITY RUNS OFF BOTH SIDES. One skyline plane is not enough: walk up
+    // to the window and the cone of sight through it opens out fast — at the
+    // sill you can see nearly 80 degrees off axis through the far edge of the
+    // opening — and a single panel simply ENDS out there, with sky where the
+    // town should be. So each depth layer is a BAND of panels butted edge to
+    // edge, as many as the cone at that distance actually needs
+    // (viewCoverage), and every panel is one quad sharing one of three
+    // textures. viewPanelsMax caps how many each side, for a device that
+    // cannot spare the draw calls.
+    //
+    // Neighbours are never the same picture: the centre panel is
+    // viewSilhouetteSrc, and going outward the sources alternate L, R, L...
+    // one way and R, L, R... the other. Panels left of centre are also
+    // MIRRORED (u runs 1 -> 0), which costs nothing and breaks up the repeat
+    // further out where the same image does come round again.
     viewLayers: { type: "number", default: 2 },
     viewSilhouetteSrc: { type: "string", default: "assets/saigon2.png" },
-    viewSilhouetteSrc2: { type: "string", default: "assets/saigon3.png" },
+    viewSilhouetteSrcL: { type: "string", default: "assets/saigon1.png" },
+    viewSilhouetteSrcR: { type: "string", default: "assets/saigon3.png" },
+    viewSilhouetteSrc2: { type: "string", default: "assets/saigon4.png" },
+    viewPanelsMax: { type: "number", default: 4 },
     viewDistance: { type: "number", default: 22 },
     viewWidth: { type: "number", default: 48 },
     viewBottom: { type: "number", default: -4 },
@@ -2591,6 +2747,27 @@ AFRAME.registerComponent("corridor-root", {
     viewHaze2: { type: "color", default: "#7d8a94" },
     viewHazeOpacity2: { type: "number", default: 0.75 },
     viewCrop: { type: "number", default: 0.06 },
+
+    // ---- THE DAYLIGHT the window lets in --------------------------------
+    // A patch of sun on the floor in front of the window with the grille's
+    // shadow in it. It is what makes the view read as OUTSIDE rather than as a
+    // picture hung at the end of the corridor: the light gets in.
+    //
+    // It is one quad and one canvas, unlit and additive, and it is the only
+    // thing in the corridor that pretends there is a sun — everything else here
+    // is flat-shaded (see the LIGHTING note at the top of the file), so this
+    // has to carry the whole suggestion on its own.
+    //
+    //   daylightDepth     how far out from the wall the patch reaches
+    //   daylightSkew      how much wider it gets over that depth, in metres —
+    //                     a window's patch splays, it is not a rectangle
+    //   daylightSoftness  0 = hard-edged shadows, 1 = a wide penumbra
+    daylight: { type: "boolean", default: true },
+    daylightDepth: { type: "number", default: 2.6 },
+    daylightOpacity: { type: "number", default: 0.28 },
+    daylightColor: { type: "color", default: "#fff6dc" },
+    daylightSkew: { type: "number", default: 0.25 },
+    daylightSoftness: { type: "number", default: 0.6 },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -3270,6 +3447,81 @@ AFRAME.registerComponent("corridor-root", {
     this.buildWindowTrim(L, w);
     this.buildGrille(L, w);
     this.buildView(L, w);
+    this.buildDaylight(L, w);
+  },
+
+  // ---------------------------------------------------------------
+  // THE DAYLIGHT PATCH: the sun through the window, on the floor.
+  //
+  // A trapezoid — four vertices, two triangles — starting at the wall as wide
+  // as the opening and splaying as it comes toward you. The canvas does the
+  // rest (see CorridorTextures.daylight).
+  //
+  // The MATERIAL is the exhibition's shared contact-cue material, in its glow
+  // mode: ContactCue.makeMaterial + tuneMaterial give exactly what is wanted
+  // here — additive blending, depthWrite off and a polygon offset so it cannot
+  // fight the floor it lies on — and every other soft floor mark in the
+  // exhibition is made the same way. Only the texture and the quad differ.
+  // ---------------------------------------------------------------
+  buildDaylight: function (L, w) {
+    const d = this.data;
+    if (!d.daylight || d.daylightDepth <= 0 || d.daylightOpacity <= 0) return;
+
+    // Never let the patch run past the landing, however it is tuned.
+    const depth = Math.min(d.daylightDepth, L.run - 0.2);
+    if (depth <= 0.05) return;
+    const flare = d.daylightSkew * depth; // extra WIDTH over that depth
+
+    // The shadows are described to the canvas as fractions of the opening,
+    // taken from the same lattice the bars were built from.
+    const lat = this.grilleLattice(w);
+    const tex = CorridorTextures.daylight(256, {
+      xs: lat.xs.map((x) => +((x - w.x0) / w.w).toFixed(4)),
+      ys: lat.ys.map((y) => +((y - w.y0) / w.h).toFixed(4)),
+      bx: +(d.grilleBar / w.w).toFixed(4),
+      by: +(d.grilleBar / w.h).toFixed(4),
+      fx: +(d.grilleFrame / w.w).toFixed(4),
+      fy: +(d.grilleFrame / w.h).toFixed(4),
+      soft: d.daylightSoftness,
+    });
+    // The UVs run 0..1 exactly and the patch fades out at its own edges, but
+    // clamp anyway: a repeating wrap can bleed the bright wall edge into the
+    // dead far edge through bilinear filtering.
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+
+    const cue = { opacity: d.daylightOpacity, color: d.daylightColor,
+                  mode: "glow" };
+    const mat = ContactCue.makeMaterial(cue, tex);
+    ContactCue.tuneMaterial(mat, cue, null); // null profile -> the cue's own mode
+    this.materials.push(mat);
+
+    // THE QUAD, laid out exactly like a PlaneGeometry rotated flat: v = 1 at
+    // the wall (smaller z, the corridor runs toward +z), v = 0 at the far edge.
+    const y = 0.012;
+    const zWall = L.zEnd + 0.002;
+    const zOut = L.zEnd + depth;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
+      w.x0, y, zWall,
+      w.x1, y, zWall,
+      w.x0 - flare / 2, y, zOut,
+      w.x1 + flare / 2, y, zOut,
+    ]), 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
+      0, 1, 1, 1, 0, 0, 1, 0,
+    ]), 2));
+    geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array([
+      0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
+    ]), 3));
+    geo.setIndex([0, 2, 1, 2, 3, 1]);
+    this.geometries.push(geo);
+    this.group.add(new THREE.Mesh(geo, mat));
+
+    this.daylightInfo = {
+      depth: +depth.toFixed(2), flare: +flare.toFixed(2),
+      wallWidth: +w.w.toFixed(2), farWidth: +(w.w + flare).toFixed(2),
+      shadowsX: lat.xs.length + 2, shadowsY: lat.ys.length + 2,
+    };
   },
 
   // ---------------------------------------------------------------
@@ -3328,16 +3580,25 @@ AFRAME.registerComponent("corridor-root", {
       skyTop: skyTop, skyBottom: skyBottom, layers: 0,
     };
 
-    // --- THE CITY, far layer first so the near one draws over it.
-    const layer = (src, dist, width, haze, opacity, order) => {
-      const tex = CorridorTextures.silhouette(src);
-      const mat = this.mat({
-        map: tex,
-        color: new THREE.Color(haze),
-        transparent: true,
-        opacity: opacity,
-        depthWrite: false, // two transparent layers, no depth fighting
-      });
+    // --- THE CITY, far band first so the near one draws over it.
+    const band = (src, dist, width, haze, opacity, order) => {
+      // ONE material per source per band: the panels differ in their UVs, not
+      // in their material, so the whole band is three materials however many
+      // panels it takes — and three textures for the entire view.
+      const mats = {};
+      const matFor = (from) => {
+        if (!mats[from]) {
+          mats[from] = this.mat({
+            map: CorridorTextures.silhouette(from),
+            color: new THREE.Color(haze),
+            transparent: true,
+            opacity: opacity,
+            depthWrite: false, // several transparent layers, no depth fighting
+          });
+        }
+        return mats[from];
+      };
+
       // The PNG's own aspect, minus the bottom band viewCrop trims off.
       const ASPECT = 816 / 1456;
       const pngH = width * ASPECT * (1 - d.viewCrop);
@@ -3346,27 +3607,49 @@ AFRAME.registerComponent("corridor-root", {
       // the sky under the town. The UVs run below v = 0 for it, and the
       // texture clamps, so the skirt is the image's own solid base row
       // continued downward — no seam, no second mesh.
-      const c2 = this.viewCoverage(L, w, dist);
-      const skirt = Math.max(0, d.viewBottom - c2.bottom);
+      const cov = this.viewCoverage(L, w, dist);
+      const skirt = Math.max(0, d.viewBottom - cov.bottom);
       const vPerM = 1 / (width * ASPECT);
-      const m = this.addPlane(width, pngH + skirt, mat,
-                              [0, d.viewCrop - skirt * vPerM, 1, 1]);
-      m.position.set(w.x, d.viewBottom + pngH / 2 - skirt / 2,
-                     L.zEnd - dist);
-      m.renderOrder = order;
+      const v0 = d.viewCrop - skirt * vPerM;
+      const y = d.viewBottom + pngH / 2 - skirt / 2;
+
+      // HOW WIDE THE BAND HAS TO BE: the same cone the sky is sized from, so
+      // the city ends exactly where nobody can see it end.
+      const need = Math.max(0, cov.halfW - width / 2);
+      const side = Math.min(d.viewPanelsMax, Math.ceil(need / width));
+      const srcL = d.viewSilhouetteSrcL || src;
+      const srcR = d.viewSilhouetteSrcR || src;
+
+      for (let i = -side; i <= side; i++) {
+        let from = src;
+        if (i !== 0) {
+          const odd = Math.abs(i) % 2 === 1;
+          if (i < 0) from = odd ? srcL : srcR;
+          else from = odd ? srcR : srcL;
+        }
+        // Mirror everything left of centre: same picture, other way round.
+        const flip = i < 0;
+        const m = this.addPlane(width, pngH + skirt, matFor(from),
+                                flip ? [1, v0, 0, 1] : [0, v0, 1, 1]);
+        m.position.set(w.x + i * width, y, L.zEnd - dist);
+        m.renderOrder = order;
+      }
+
       this.viewInfo.layers++;
       this.viewInfo["layer" + order] = {
         dist: dist, w: width, h: +(pngH + skirt).toFixed(1),
-        skirt: +skirt.toFixed(1),
+        skirt: +skirt.toFixed(1), panels: side * 2 + 1,
+        bandW: +(width * (side * 2 + 1)).toFixed(0),
+        needed: +(cov.halfW * 2).toFixed(0),
       };
     };
     if (d.viewLayers >= 2) {
-      layer(d.viewSilhouetteSrc2, d.viewDistance2, d.viewWidth2,
-            d.viewHaze2, d.viewHazeOpacity2, -1);
+      band(d.viewSilhouetteSrc2, d.viewDistance2, d.viewWidth2,
+           d.viewHaze2, d.viewHazeOpacity2, -1);
     }
     if (d.viewLayers >= 1) {
-      layer(d.viewSilhouetteSrc, d.viewDistance, d.viewWidth,
-            d.viewHaze, d.viewHazeOpacity, 0);
+      band(d.viewSilhouetteSrc, d.viewDistance, d.viewWidth,
+           d.viewHaze, d.viewHazeOpacity, 0);
     }
   },
 
@@ -3420,29 +3703,40 @@ AFRAME.registerComponent("corridor-root", {
     bar(w.x, w.y0 + f / 2, w.w, f, f, false);
     bar(w.x, w.y1 - f / 2, w.w, f, f, false);
 
-    // LATTICE, spaced evenly INSIDE the frame so the pattern is symmetric in
-    // the opening rather than starting from one edge and leaving a runt gap at
-    // the other.
-    const ix0 = w.x0 + f;
-    const ix1 = w.x1 - f;
-    const iy0 = w.y0 + f;
-    const iy1 = w.y1 - f;
-    const spanX = ix1 - ix0;
-    const spanY = iy1 - iy0;
-    const nx = Math.max(0, Math.round(spanX / d.grilleSpacingX) - 1);
-    const ny = Math.max(0, Math.round(spanY / d.grilleSpacingY) - 1);
-    for (let k = 1; k <= nx; k++) {
-      bar(ix0 + (spanX * k) / (nx + 1), (w.y0 + w.y1) / 2, b, w.h - f, b, true);
-    }
-    for (let k = 1; k <= ny; k++) {
-      bar(w.x, iy0 + (spanY * k) / (ny + 1), w.w - f, b, b, false);
-    }
+    // LATTICE.
+    const lat = this.grilleLattice(w);
+    lat.xs.forEach((x) => bar(x, (w.y0 + w.y1) / 2, b, w.h - f, b, true));
+    lat.ys.forEach((y) => bar(w.x, y, w.w - f, b, b, false));
 
     const geo = mergeGeometries(parts);
     this.geometries.push(geo);
     const mesh = new THREE.Mesh(geo, this.m.grille);
     this.group.add(mesh);
-    this.grilleBars = { nx: nx, ny: ny, total: parts.length };
+    this.grilleBars = { nx: lat.xs.length, ny: lat.ys.length,
+                        total: parts.length };
+  },
+
+  // WHERE THE LATTICE BARS GO, as world coordinates: spaced evenly INSIDE the
+  // frame so the pattern is symmetric in the opening rather than starting from
+  // one edge and leaving a runt gap at the other.
+  //
+  // Its own method because the daylight patch needs the same answer to put the
+  // shadows in the right places, and two copies of this arithmetic would drift
+  // apart the first time anyone touched grilleSpacingX.
+  grilleLattice: function (w) {
+    const d = this.data;
+    const f = d.grilleFrame;
+    const run = (lo, hi, pitch) => {
+      const span = hi - lo;
+      const n = Math.max(0, Math.round(span / pitch) - 1);
+      const out = [];
+      for (let k = 1; k <= n; k++) out.push(lo + (span * k) / (n + 1));
+      return out;
+    };
+    return {
+      xs: run(w.x0 + f, w.x1 - f, d.grilleSpacingX),
+      ys: run(w.y0 + f, w.y1 - f, d.grilleSpacingY),
+    };
   },
 
   // The sill, and optionally a painted reveal.
