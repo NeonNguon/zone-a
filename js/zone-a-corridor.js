@@ -1881,6 +1881,114 @@ const CorridorTextures = {
     });
   },
 
+  // ---- THE VIEW: SKY --------------------------------------------------
+  // A vertical gradient, generated in ANGULAR space rather than in metres.
+  //
+  // The sky plane has to be enormous (see viewCoverage) so that no sightline
+  // through the window can miss it. Ramp the colours linearly up such a plane
+  // and the whole gradient collapses into a sliver around the horizon: at 40 m
+  // out, 45 degrees of elevation is 40 m up a plane 90 m tall. So each canvas
+  // row is converted to the ELEVATION it will be seen at and coloured from
+  // that, which makes the sky look the same whatever size the plane is.
+  //
+  // Below the horizon it goes to a deeper haze, not to more sky: that region is
+  // what you see through the window when you look down past the city's base,
+  // and it should read as more distance, not as a hole.
+  skyGradient: function (h, topColor, horizonColor, dist, yBottom, yTop, eyeY) {
+    const key = ["sky", h, topColor, horizonColor, dist.toFixed(1),
+                 yBottom.toFixed(1), yTop.toFixed(1), eyeY.toFixed(2)].join("|");
+    return this.get(key, () => {
+      const c = this.canvas(4, h);
+      const ctx = c.getContext("2d");
+      const top = this.hexRGB(topColor);
+      const hor = this.hexRGB(horizonColor);
+      const mix = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
+      for (let y = 0; y < h; y++) {
+        const v = 1 - y / (h - 1); // 0 at the canvas bottom, 1 at the top
+        const worldY = yBottom + v * (yTop - yBottom);
+        const elev = Math.atan2(worldY - eyeY, dist); // radians
+        let r, g, b;
+        if (elev >= 0) {
+          // Up from the horizon: the pale warm haze gives way to cooler grey
+          // over the first 50 degrees or so.
+          const t = Math.min(1, elev / (Math.PI * 0.28));
+          const e = t * t * (3 - 2 * t); // ease, so the horizon band is wide
+          r = mix(hor[0], top[0], e);
+          g = mix(hor[1], top[1], e);
+          b = mix(hor[2], top[2], e);
+          // ...and a brighter band sitting right on the horizon, which is what
+          // makes a hazy tropical sky read as hot rather than merely pale.
+          const glow = Math.max(0, 1 - elev / (Math.PI * 0.045));
+          r = mix(r, 255, glow * 0.22);
+          g = mix(g, 252, glow * 0.2);
+          b = mix(b, 236, glow * 0.16);
+        } else {
+          // Below it: deeper, warmer, greyer — distance, not sky.
+          const t = Math.min(1, -elev / (Math.PI * 0.2));
+          r = mix(hor[0], hor[0] * 0.62, t);
+          g = mix(hor[1], hor[1] * 0.62, t);
+          b = mix(hor[2], hor[2] * 0.66, t);
+        }
+        ctx.fillStyle =
+          "rgb(" + Math.round(r) + "," + Math.round(g) + "," + Math.round(b) + ")";
+        ctx.fillRect(0, y, 4, 1);
+      }
+      return c;
+    });
+  },
+
+  // ---- THE VIEW: SILHOUETTE -------------------------------------------
+  // The city, from one of the exhibition's existing Saigon PNGs.
+  //
+  // THE PNGs ARE BLACK ON TRANSPARENT, and that rules out two obvious
+  // approaches. Used as `map`, no material colour can lighten them — a tint
+  // MULTIPLIES, and anything times black is black, so a distant hazy skyline is
+  // impossible. Used as `alphaMap`, they vanish: THREE samples an alpha map's
+  // GREEN channel, and these files are greyscale-plus-alpha with green 0
+  // everywhere (measured: max green anywhere = 0), so every pixel would come
+  // out fully transparent.
+  //
+  // So the shape is lifted into a canvas and filled WHITE through source-in.
+  // White multiplies to whatever the material's colour is, which means one
+  // canvas serves any number of layers at any haze colour and opacity — the two
+  // depth layers here share it.
+  //
+  // The image loads asynchronously; the canvas starts blank and the texture is
+  // flagged for upload when it arrives. The corridor is hidden until the
+  // visitor teleports in, so it is always ready by the time it is looked at.
+  silhouette: function (src) {
+    const key = "silhouette|" + src;
+    if (this.cache.has(key)) {
+      if (!(key in this.timings)) this.timings[key] = 0;
+      return this.cache.get(key);
+    }
+    const c = this.canvas(4, 4);
+    const tex = this.texture(c);
+    // The plane runs its UVs BELOW v = 0 to make a skirt under the city; clamp
+    // so that region repeats the image's solid bottom row instead of wrapping
+    // the sky back in at the bottom.
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    this.cache.set(key, tex);
+    this.timings[key] = 0;
+    const img = new Image();
+    img.onload = () => {
+      c.width = img.width;
+      c.height = img.height;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.globalCompositeOperation = "source-over";
+      tex.needsUpdate = true;
+    };
+    img.onerror = () => {
+      console.warn("[corridor] skyline image failed to load: " + src);
+    };
+    img.src = src;
+    return tex;
+  },
+
   // ---- GRILLE IRON -------------------------------------------------------
   // The bars of the window grille: black paint going to rust, drawn once and
   // tiled ALONG every bar's length. u runs along the bar, v across its square
@@ -2255,6 +2363,11 @@ const CORRIDOR_GEOM_PROPS = [
   "windowRevealColor", "windowSillColor",
   "grilleBar", "grilleSpacingX", "grilleSpacingY", "grilleFrame",
   "grilleColor", "grilleRust", "grilleInset", "grilleTile",
+  "viewSkyTop", "viewSkyHorizon", "viewSkyDistance", "viewSkyWidth",
+  "viewSkyHeight", "viewClearance", "viewEyeY", "viewLayers",
+  "viewSilhouetteSrc", "viewSilhouetteSrc2", "viewDistance", "viewWidth",
+  "viewBottom", "viewHaze", "viewHazeOpacity", "viewDistance2", "viewWidth2",
+  "viewHaze2", "viewHazeOpacity2", "viewCrop",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
@@ -2440,6 +2553,44 @@ AFRAME.registerComponent("corridor-root", {
     grilleRust: { type: "number", default: 0.35 },
     grilleInset: { type: "number", default: 0.03 },
     grilleTile: { type: "number", default: 0.5 }, // metres of bar per texture repeat
+
+    // ---- THE VIEW through the window -----------------------------------
+    // Saigon at a distance: a haze sky with the city in two silhouette layers
+    // in front of it. All of it sits OUTSIDE the end wall, is unlit, and is
+    // reachable only by eye — there is no floor out there and no way to get to
+    // it. viewLayers 1 drops the far layer, 0 drops the city altogether.
+    //
+    // viewSkyWidth / viewSkyHeight are 0 = AUTO, and should stay that way. The
+    // sky must cover every ray that can leave the window from anywhere a
+    // visitor can stand, and those rays fan out hard: from the far side of a
+    // 4.4 m corridor, one metre back, looking through the opposite edge of the
+    // opening, the sightline is over 70 degrees off axis. A fixed size that
+    // looks generous (120 x 60, say) leaves the scene's black background
+    // showing at exactly the angles someone will try. viewCoverage() derives
+    // the size from the aperture, the reveal's depth and viewClearance
+    // instead — a plane is two triangles, so the size costs nothing, and the
+    // gradient is generated in angular space so it does not stretch.
+    viewSkyTop: { type: "color", default: "#c9d4dc" },
+    viewSkyHorizon: { type: "color", default: "#efe9dc" },
+    viewSkyDistance: { type: "number", default: 40 },
+    viewSkyWidth: { type: "number", default: 0 },
+    viewSkyHeight: { type: "number", default: 0 },
+    viewClearance: { type: "number", default: 0.25 }, // closest eye to the wall
+    viewEyeY: { type: "number", default: 1.6 },
+
+    viewLayers: { type: "number", default: 2 },
+    viewSilhouetteSrc: { type: "string", default: "assets/saigon2.png" },
+    viewSilhouetteSrc2: { type: "string", default: "assets/saigon3.png" },
+    viewDistance: { type: "number", default: 22 },
+    viewWidth: { type: "number", default: 48 },
+    viewBottom: { type: "number", default: -4 },
+    viewHaze: { type: "color", default: "#3d4a55" },
+    viewHazeOpacity: { type: "number", default: 0.92 },
+    viewDistance2: { type: "number", default: 34 },
+    viewWidth2: { type: "number", default: 70 },
+    viewHaze2: { type: "color", default: "#7d8a94" },
+    viewHazeOpacity2: { type: "number", default: 0.75 },
+    viewCrop: { type: "number", default: 0.06 },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -3118,6 +3269,105 @@ AFRAME.registerComponent("corridor-root", {
     piece(w.x1, outerW / 2, w.y0, w.y1);                  // right of it
     this.buildWindowTrim(L, w);
     this.buildGrille(L, w);
+    this.buildView(L, w);
+  },
+
+  // ---------------------------------------------------------------
+  // THE CONE OF SIGHT through the window, at a given distance beyond the wall.
+  //
+  // A ray only gets out if it clears BOTH faces of the opening — the inner one
+  // and, `wallThickness` further on, the outer one — so the reveal itself is
+  // what bounds how steeply anyone can look out. The worst case is an eye as
+  // close to the wall as the collider allows, as far to one side of the
+  // corridor as it allows, looking through the far edge of the opening.
+  //
+  // Returns the half-width and the top and bottom the backdrop needs at that
+  // distance for the visitor never to see past it.
+  // ---------------------------------------------------------------
+  viewCoverage: function (L, w, dist) {
+    const d = this.data;
+    const throwZ = d.viewClearance + L.t; // eye to the OUTER face of the wall
+    const eyeY = d.viewEyeY;
+    // the eye can stand anywhere across the corridor
+    const sx = Math.max(w.x1 + L.halfW, L.halfW - w.x0) / throwZ;
+    const syUp = Math.max(0, w.y1 - eyeY) / throwZ;
+    const syDn = Math.max(0, eyeY - w.y0) / throwZ;
+    const D = dist + d.viewClearance; // eye to the plane
+    return {
+      halfW: sx * D + Math.abs(w.x),
+      top: eyeY + syUp * D,
+      bottom: eyeY - syDn * D,
+    };
+  },
+
+  // ---------------------------------------------------------------
+  // THE VIEW itself: sky, then the city in one or two layers. Everything here
+  // is a child of the corridor group, so it rides `offset` and disappears with
+  // `shown` like the rest of the corridor.
+  // ---------------------------------------------------------------
+  buildView: function (L, w) {
+    const d = this.data;
+
+    // --- SKY. Sized to cover every sightline (see viewCoverage), with the
+    // gradient generated in angular space so the size does not stretch it.
+    const cov = this.viewCoverage(L, w, d.viewSkyDistance);
+    const skyW = d.viewSkyWidth > 0 ? d.viewSkyWidth : cov.halfW * 2;
+    const skyTop = d.viewSkyHeight > 0
+      ? d.viewEyeY + d.viewSkyHeight / 2 : cov.top;
+    const skyBottom = d.viewSkyHeight > 0
+      ? d.viewEyeY - d.viewSkyHeight / 2 : cov.bottom;
+    const skyTex = CorridorTextures.skyGradient(
+      512, d.viewSkyTop, d.viewSkyHorizon, d.viewSkyDistance,
+      skyBottom, skyTop, d.viewEyeY);
+    this.m.sky = this.mat({ map: skyTex, fog: false });
+    const sky = this.addPlane(skyW, skyTop - skyBottom, this.m.sky);
+    sky.position.set(w.x, (skyTop + skyBottom) / 2, L.zEnd - d.viewSkyDistance);
+    sky.renderOrder = -2;
+    this.viewInfo = {
+      skyW: skyW, skyH: skyTop - skyBottom,
+      skyTop: skyTop, skyBottom: skyBottom, layers: 0,
+    };
+
+    // --- THE CITY, far layer first so the near one draws over it.
+    const layer = (src, dist, width, haze, opacity, order) => {
+      const tex = CorridorTextures.silhouette(src);
+      const mat = this.mat({
+        map: tex,
+        color: new THREE.Color(haze),
+        transparent: true,
+        opacity: opacity,
+        depthWrite: false, // two transparent layers, no depth fighting
+      });
+      // The PNG's own aspect, minus the bottom band viewCrop trims off.
+      const ASPECT = 816 / 1456;
+      const pngH = width * ASPECT * (1 - d.viewCrop);
+      // A SKIRT below the city, down to the lowest sightline: looking down
+      // through the window must never find the bottom edge of the plane and
+      // the sky under the town. The UVs run below v = 0 for it, and the
+      // texture clamps, so the skirt is the image's own solid base row
+      // continued downward — no seam, no second mesh.
+      const c2 = this.viewCoverage(L, w, dist);
+      const skirt = Math.max(0, d.viewBottom - c2.bottom);
+      const vPerM = 1 / (width * ASPECT);
+      const m = this.addPlane(width, pngH + skirt, mat,
+                              [0, d.viewCrop - skirt * vPerM, 1, 1]);
+      m.position.set(w.x, d.viewBottom + pngH / 2 - skirt / 2,
+                     L.zEnd - dist);
+      m.renderOrder = order;
+      this.viewInfo.layers++;
+      this.viewInfo["layer" + order] = {
+        dist: dist, w: width, h: +(pngH + skirt).toFixed(1),
+        skirt: +skirt.toFixed(1),
+      };
+    };
+    if (d.viewLayers >= 2) {
+      layer(d.viewSilhouetteSrc2, d.viewDistance2, d.viewWidth2,
+            d.viewHaze2, d.viewHazeOpacity2, -1);
+    }
+    if (d.viewLayers >= 1) {
+      layer(d.viewSilhouetteSrc, d.viewDistance, d.viewWidth,
+            d.viewHaze, d.viewHazeOpacity, 0);
+    }
   },
 
   // ---------------------------------------------------------------
