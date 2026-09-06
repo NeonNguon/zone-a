@@ -3637,6 +3637,7 @@ AFRAME.registerComponent("corridor-root", {
     // them back through group.userData.dispose(), so they are tracked
     // separately from this component's own lists.
     this.props = [];
+    this.furniturePos = {}; // where buildFurniture put each prop, root-local
     this.stencilCount = 0;
     // Textures this component made itself (the props' shared floor mark).
     // Everything else it draws lives in CorridorTextures' own cache, which
@@ -5186,7 +5187,14 @@ AFRAME.registerComponent("corridor-root", {
     ContactCue.tuneMaterial(cueMat, cue, null);
     this.materials.push(cueMat);
 
+    // WHERE EACH PROP ENDED UP, root-local, published for anyone who needs to
+    // put something else at the same spot without re-deriving it. The corridor
+    // ambience hangs its emitter on the bicycle (js/corridor-audio.js), and a
+    // second copy of furnitureLayout's arithmetic living over there is exactly
+    // the drift this file keeps avoiding.
+    this.furniturePos = {};
     this.furnitureLayout(L, true).forEach((p) => {
+      this.furniturePos[p.key] = { x: p.x, y: 0, z: p.z };
       const g = make[p.key](p.opts);
       g.position.set(p.x, 0, p.z);
       g.rotation.y = p.yaw;
@@ -6168,6 +6176,7 @@ AFRAME.registerComponent("corridor-root", {
       if (g.userData && g.userData.dispose) g.userData.dispose();
     });
     this.props = [];
+    this.furniturePos = {};
     this.stencilCount = 0;
     this.textures.forEach(function (t) {
       t.dispose();
@@ -6405,6 +6414,18 @@ AFRAME.registerComponent("zone-a-teleport", {
         );
       }
       this.corridorEl.setAttribute("corridor-root", "shown", out);
+
+      // THE SOUND, started and stopped from INSIDE this click. That matters:
+      // an AudioContext created outside a user gesture starts suspended on
+      // Quest and mobile and never makes a sound, and this cut IS the gesture
+      // that brings the visitor into the corridor. corridor-audio.start()
+      // calls AudioKit.resume() before it plays anything, for the same reason.
+      const ca =
+        this.corridorEl.components && this.corridorEl.components["corridor-audio"];
+      if (ca) {
+        if (out) ca.start();
+        else ca.stop();
+      }
 
       // The clamp STAYS ON both ways round (unlike the map jump): the corridor
       // registers its own walkable rectangles with rig-collision, so it is

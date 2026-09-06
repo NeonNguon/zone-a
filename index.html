@@ -78,6 +78,12 @@
          first: teleport-terminal + TerminalKit (booth furniture), TeleportRig +
          transition-glitch (the masked jump), floorplan (the Zone A room centre)
          and rig-collision (the walkable-region registry it adds itself to). -->
+    <!-- The corridor's field recordings: the flat's television on the
+         bicycle, the two Saigon streets behind the window. AFTER zone-c.js
+         (it shares the AudioListener that file's cinema first needed, now
+         owned by AudioKit in js/audio.js) and BEFORE zone-a-corridor.js,
+         whose teleport starts and stops it from inside the arrival click. -->
+    <script src="js/corridor-audio.js"></script>
     <script src="js/zone-a-corridor.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
@@ -734,11 +740,123 @@
                          tubeDrop .06 / imageProud .02
              VR focus    focusDistance 1.3 / focusDimRadius 2.5
            ============================================================ -->
+      <!-- ============================================================
+           THE CORRIDOR'S SOUND — three field recordings made in Ho Chi Minh
+           City in 2026, played where they were recorded from. See
+           js/corridor-audio.js.
+
+           WHAT PLAYS WHERE:
+             THE FLAT     Cư Xá Thanh Đa at six in the evening — a television
+                          running a Vietnamese film, music somewhere, a child a
+                          long way off. It LOOPS, and its emitter hangs on the
+                          BICYCLE, so the sound has a source in the corridor
+                          rather than being a wash: it is loudest at somebody's
+                          front door and it carries into the apartments the way
+                          a neighbour's television does. Starts on arrival,
+                          stops on the way home.
+             THE STREET   Đồng Khởi at 8pm and the Nguyễn Tri Phương six-way at
+                          7pm, ALTERNATING — one, then the other, then the
+                          first — from a point two metres beyond the window in
+                          the end wall. They take turns twice over: at the end
+                          of each file, AND at the door, so a second visit
+                          opens on the other recording. A track runs a minute
+                          and a half to two minutes, and without that second
+                          rule a visitor who does not stand at the window for
+                          that long would only ever hear Đồng Khởi.
+
+           THE HARD EDGE. The street is on a LINEAR distance model, which is
+           the only one that reaches exactly zero at a distance you can name:
+           inverse and exponential are asymptotic, they get quiet but never
+           stop. refDistance 1, rolloffFactor 1, maxDistance = streetRange, so
+           the city is FULL near the glass and NOTHING past the range. The flat
+           is on `inverse` instead, because that is the model that behaves like
+           a room.
+
+           streetRange is a radius from the SOURCE, and the source sits
+           streetOffset from the window — two metres beyond the end wall and
+           1.75 m above eye height — so the sphere always reaches rather less
+           down the corridor than the number reads. At 16 it gets about 13.9 m
+           back, which leaves the LANDING silent (19.1 m out) and covers
+           everything else.
+
+           THE TWO LAYERS OVERLAP DOWN THE MIDDLE, which is what these numbers
+           are for. Measured on the centreline at eye height, and at the centre
+           of each apartment:
+
+                                   street   flat
+             at the glass           0.73     0.43
+             4 m back               0.55     0.58
+             mid corridor           0.33     0.92
+             at the bicycle         0.06     0.95
+             the landing            0.00     0.95
+             apartment 1            0.36     0.66
+             apartment 2            0.57     0.47
+             apartment 3            0.47     0.50
+
+           So the flat carries the whole run, the traffic is in all three
+           rooms, and they cross in the middle — while the walk toward the
+           window still brings the city up out of nothing, because the landing
+           is past the street's range.
+
+           STREAMED, NOT DECODED — the one real engineering choice here. Every
+           source is an HTMLAudioElement handed to
+           THREE.PositionalAudio.setMediaElementSource, never an AudioBuffer
+           from THREE.AudioLoader. The three files are 5.4 MB of mp3; DECODED
+           into AudioBuffers they are float32 stereo at 44.1 kHz — 46 MB each
+           for the two long ones, ~124 MB for the set, resident, on a Quest,
+           for ambience. As media elements they stay compressed and decode as
+           they play. Nothing is even fetched until the first teleport in.
+
+           THE LISTENER IS SHARED, not a second one: AudioKit (js/audio.js)
+           owns the page's one THREE.AudioListener on #camera, and Zone C's
+           cinema — which used to build its own — now asks for the same object.
+           Two listeners means two AudioContexts and two sets of ears in one
+           head. Its resume() rides the teleport click, because an AudioContext
+           made outside a user gesture starts suspended on Quest and stays
+           silent however much you play into it.
+
+           CREDITS — the recordings' own filenames, which name the building,
+           the block, the floor, the hour and what you can hear:
+             Cư Xá Thanh Đa_Lô A-Lầu 3-6h Chiều-Tiếng Tivi Mở Phim Việt Nam-
+             Tiếng Nhạc-Tiếng Em Bé Vọng Từ Xa_TP.HCM 2026            (2:11)
+             Đường Đồng Khởi Q1 (đối diện Vincom), 8pm_Tp.Hcm 2026    (1:29)
+             Đường phố_Ngã sáu Nguyễn Tri Phương, 7pm_Tp.Hcm 2026     (2:11)
+           They are in audio/ under ASCII names a URL can carry; the originals
+           are kept verbatim in the manifest (CorridorAudio.TRACKS) as `title`
+           and `originalFile`, and in the git history.
+
+           WHAT TO TUNE BY EAR, in this order:
+             corridorRefDistance 5 / corridorRolloff .8   TOGETHER these decide
+                          how much of the neighbour's television reaches inside
+                          an apartment. refDistance is a PLATEAU — full volume
+                          everywhere within it — and at 5 that covers the
+                          landing, 4.6 m from the bicycle, so you arrive INTO
+                          the television rather than walking up to it. Drop it
+                          to ~3.5 to make the arrival quieter; raise rolloff to
+                          keep it out of the rooms
+             streetRange 16           how far the city carries. Under about 8
+                          it stops before the middle of the run and the two
+                          layers never meet; over about 20 it reaches the
+                          landing and the window stops being a reveal
+             corridorVolume .95 / streetVolume .85   the balance between them
+             crossfade 1.5            the overlap between the two street tracks
+             duckWhileMemory .3       how far both drop under a spoken memory
+             enabled                  false silences the layer without removing
+                          it from this tag
+           ============================================================ -->
       <a-entity
         id="zone-a-corridor"
         corridor-root='offset: 0 0 400; shown: false; width: 4.4;
                        roomSizes: [{"w": 4.8, "d": 6.0}, {}, {"w": 6.4}];
                        roomWallPalettes: ["yellow", "red", "green"]'
+        corridor-audio='enabled: true;
+                        corridorVolume: 0.95; corridorRefDistance: 5;
+                        corridorRolloff: 0.8; corridorMaxDistance: 30;
+                        corridorAnchor: bike; anchorOffset: 0 1.4 0;
+                        streetVolume: 0.85; streetRange: 16;
+                        streetOffset: 0 1.6 -2;
+                        fadeIn: 1.5; fadeOut: 1.0; crossfade: 1.5;
+                        duckWhileMemory: 0.3'
       >
         <!-- RETURN BOOTH — the way home, standing on the landing against its
              back wall with its screen facing back down the corridor, so you
