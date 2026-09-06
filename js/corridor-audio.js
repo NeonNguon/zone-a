@@ -116,6 +116,15 @@ AFRAME.registerComponent("corridor-audio", {
     // there near the window and NOT there down the corridor. With
     // refDistance 1, rolloffFactor 1 and maxDistance = streetRange, the gain
     // is 1 at a metre and 0 at streetRange exactly.
+    //
+    // streetRange IS A RADIUS FROM THE SOURCE, NOT A DISTANCE ALONG THE FLOOR,
+    // and the difference is worth knowing before tuning it. The source sits
+    // streetOffset away from the window — two metres beyond the end wall and
+    // 1.75 m above eye height at the default — so a 6 m radius only reaches
+    // about 3.7 m back down the corridor. Measured at the shipped settings, on
+    // the centreline at eye height: 0.59 at the glass, 0.33 two metres back,
+    // and silent from 3.7 m. For six metres of WALKING distance, ask for about
+    // 8.2.
     streetVolume: { type: "number", default: 0.7 },
     streetRange: { type: "number", default: 6 },
     // Root-local, relative to the WINDOW'S CENTRE. The default puts it two
