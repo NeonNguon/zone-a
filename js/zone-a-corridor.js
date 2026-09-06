@@ -2130,6 +2130,8 @@ const roomImages = [
 //                                     overrides that pair's HALF step
 //   wallThickness 0.15                every wall, exactly like the floorplan
 //   textureSize 1024 / seed 1         the canvases: resolution + which corridor
+//   endWallShade 0.92                 the dead end, as a linear multiplier of
+//                                     the side walls (1 = identical)
 //   tubeSpacing 4 / tubeColor #f4f1e2 the ceiling lights (spacing is SNAPPED)
 //   frameWidth .07 / frameDepth .045  the door frames' face + how proud
 //   frameColor #8d7f62                painted timber frames
@@ -2146,7 +2148,7 @@ const roomImages = [
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSizes",
-  "roomOffsets", "roomSpacing",
+  "roomOffsets", "roomSpacing", "endWallShade",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
@@ -2296,6 +2298,11 @@ AFRAME.registerComponent("corridor-root", {
         return typeof v === "string" ? v : JSON.stringify(v);
       },
     },
+
+    // How much darker the corridor's dead-end wall is than the side walls, as a
+    // straight linear multiplier: 1 is identical, and the default is a hint of
+    // recession you would not notice unless you looked for it.
+    endWallShade: { type: "number", default: 0.92 },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -2753,7 +2760,22 @@ AFRAME.registerComponent("corridor-root", {
     // is how "the wall texture, darker" costs no extra canvas.
     this.m = {
       wall: this.wallMaterials(this.corridorPal),
-      endWall: this.mat({ map: this.tex.wall[2], color: new THREE.Color("#6f7c82") }),
+      // The corridor's dead end. It reuses a wall canvas and knocks the
+      // brightness down a little, so the far end recedes — but only a little.
+      //
+      // setScalar, NOT a hex colour. THREE's colour management is on, so
+      // new THREE.Color("#rrggbb") reads the hex as sRGB and converts it to the
+      // linear working space before it multiplies the map. The old "#6f7c82"
+      // looked like a 45% knock-down and actually landed at (0.16, 0.20, 0.22)
+      // — a fifth of the brightness of every other wall, and blue-shifted with
+      // it, because the conversion is not uniform across the channels. That is
+      // why the end wall read as a different, colder surface instead of the
+      // same wall further away. setScalar writes the working space directly, so
+      // endWallShade means exactly what it says.
+      endWall: this.mat({
+        map: this.tex.wall[2],
+        color: new THREE.Color().setScalar(d.endWallShade),
+      }),
       floor: this.mat({ map: this.tex.floor }),
       ceiling: this.mat({ map: this.tex.ceiling }),
       door: this.mat({ map: this.tex.door }),
