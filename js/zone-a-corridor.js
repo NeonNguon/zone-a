@@ -1785,6 +1785,33 @@ const CorridorTextures = {
   // setPlaneUVs). Three are the cream/yellow of the reference corridors, one is
   // the faded green that turns up every few doors; each carries its own seeded
   // three-digit number on a small dark plate.
+  //
+  // There are TWO atlases, front (doorAtlas) and back (doorAtlasBack), and cell
+  // i of one is the same door as cell i of the other: the colour comes from
+  // doorPalette(i) and the seed from doorRand(seed, i, salt) in both, so a
+  // door's two faces cannot disagree about what colour it was painted. The
+  // back stream takes a different salt so its wear is its own and not a mirror
+  // of the front's.
+  DOOR_PALETTES: [
+    { face: "#d8c78a", wear: "#b09a5a", edge: "#8e7a41" },
+    { face: "#cfbc7e", wear: "#a89152", edge: "#87733c" },
+    { face: "#6f8f7a", wear: "#547059", edge: "#425c47" }, // faded green
+    { face: "#d3c184", wear: "#ab9455", edge: "#8a763e" },
+  ],
+  doorPalette: function (i) {
+    return this.DOOR_PALETTES[i % this.DOOR_PALETTES.length];
+  },
+  doorRand: function (seed, i, salt) {
+    return this.rand(seed * 401 + i * 97 + 5 + (salt || 0) * 1009);
+  },
+  // The atlas cell a door with `pick` (0..3) samples, as [u0, v0, u1, v1] for
+  // setPlaneUVs — the same rectangle on both atlases.
+  doorCellUV: function (pick) {
+    const u0 = (pick % 2) * 0.5;
+    const v0 = 1 - (Math.floor(pick / 2) + 1) * 0.5;
+    return [u0, v0, u0 + 0.5, v0 + 0.5];
+  },
+
   doorAtlas: function (size, seed) {
     const key = "door|" + size + "|" + seed;
     return this.get(key, () => {
@@ -1792,17 +1819,11 @@ const CorridorTextures = {
       const ctx = c.getContext("2d");
       const S = size;
       const cell = S / 2;
-      const palettes = [
-        { face: "#d8c78a", wear: "#b09a5a", edge: "#8e7a41" },
-        { face: "#cfbc7e", wear: "#a89152", edge: "#87733c" },
-        { face: "#6f8f7a", wear: "#547059", edge: "#425c47" }, // faded green
-        { face: "#d3c184", wear: "#ab9455", edge: "#8a763e" },
-      ];
       for (let i = 0; i < 4; i++) {
-        const rand = this.rand(seed * 401 + i * 97 + 5);
+        const rand = this.doorRand(seed, i, 0);
         const ox = (i % 2) * cell;
         const oy = Math.floor(i / 2) * cell;
-        const p = palettes[i];
+        const p = this.doorPalette(i);
         ctx.save();
         ctx.translate(ox, oy);
         ctx.beginPath();
@@ -1883,6 +1904,172 @@ const CorridorTextures = {
         lit.addColorStop(0, "rgba(255,250,230,0.16)");
         lit.addColorStop(0.45, "rgba(255,250,230,0)");
         lit.addColorStop(1, "rgba(10,8,6,0.22)");
+        ctx.fillStyle = lit;
+        ctx.fillRect(0, 0, cell, cell);
+        ctx.restore();
+      }
+      return c;
+    });
+  },
+
+  // ---- DOOR ATLAS, THE BACKS ----------------------------------------------
+  // The same four doors seen from inside the apartment. A door's back is the
+  // plain side: the same paint (doorPalette, by cell index), but flat panels
+  // in a simple rail-and-stile layout, no number plate, a dark bolt plate at
+  // handle height, and it is the side that gets kicked and leaned on, so more
+  // grime low down, scuffs, and a few drips. The paint is duller — it was
+  // painted the same day as the front, then never again. Same size, same 2×2
+  // cells, same texel density, so an open leaf reads the same up close from
+  // either side.
+  doorAtlasBack: function (size, seed) {
+    const key = "doorBack|" + size + "|" + seed;
+    return this.get(key, () => {
+      const c = this.canvas(size, size);
+      const ctx = c.getContext("2d");
+      const S = size;
+      const cell = S / 2;
+      for (let i = 0; i < 4; i++) {
+        const rand = this.doorRand(seed, i, 1);
+        const ox = (i % 2) * cell;
+        const oy = Math.floor(i / 2) * cell;
+        const p = this.doorPalette(i);
+        ctx.save();
+        ctx.translate(ox, oy);
+        ctx.beginPath();
+        ctx.rect(0, 0, cell, cell);
+        ctx.clip();
+
+        // The face colour, let down toward grey: duller than the front.
+        ctx.fillStyle = p.face;
+        ctx.fillRect(0, 0, cell, cell);
+        ctx.fillStyle = "rgba(96,92,84,0.22)";
+        ctx.fillRect(0, 0, cell, cell);
+
+        // Brushed paint, coarser than the front: nobody took care on this side.
+        for (let k = 0; k < 70; k++) {
+          ctx.fillStyle =
+            rand() < 0.5
+              ? "rgba(255,255,255," + (rand() * 0.05).toFixed(3) + ")"
+              : "rgba(0,0,0," + (rand() * 0.06).toFixed(3) + ")";
+          ctx.fillRect(rand() * cell, 0, 1 + rand() * 4, cell);
+        }
+
+        // TWO LEAVES, the gap between them, and on each a simple frame of
+        // stiles and rails with FLAT panels between — a back has no mouldings.
+        const gap = cell * 0.012;
+        ctx.fillStyle = "rgba(38,30,20,0.85)";
+        ctx.fillRect(cell / 2 - gap / 2, 0, gap, cell);
+        const stile = cell * 0.075;
+        const rail = cell * 0.07;
+        const railsY = [0.0, 0.47, 0.93]; // top, lock rail, bottom (as a fraction)
+        for (let leaf = 0; leaf < 2; leaf++) {
+          const lx = leaf * cell / 2;
+          const lw = cell / 2;
+          // The panels sit BEHIND the frame: a step down into each one, drawn
+          // as a dark line under the frame's lower/right edges and a lit one
+          // along its upper/left, in the paint's own tones.
+          ctx.fillStyle = "rgba(0,0,0,0.07)";
+          for (let r = 0; r < railsY.length - 1; r++) {
+            const py = cell * railsY[r] + rail;
+            const ph = cell * railsY[r + 1] - py;
+            ctx.fillRect(lx + stile, py, lw - stile * 2, ph);
+          }
+          ctx.lineWidth = Math.max(1.5, S / 400);
+          for (let r = 0; r < railsY.length - 1; r++) {
+            const py = cell * railsY[r] + rail;
+            const py1 = cell * railsY[r + 1];
+            const px = lx + stile;
+            const px1 = lx + lw - stile;
+            ctx.strokeStyle = "rgba(30,24,16,0.5)"; // shadow at the top/left
+            ctx.beginPath();
+            ctx.moveTo(px, py1);
+            ctx.lineTo(px, py);
+            ctx.lineTo(px1, py);
+            ctx.stroke();
+            ctx.strokeStyle = "rgba(255,250,232,0.22)"; // lit bottom/right
+            ctx.beginPath();
+            ctx.moveTo(px1, py);
+            ctx.lineTo(px1, py1);
+            ctx.lineTo(px, py1);
+            ctx.stroke();
+          }
+        }
+
+        // The BOLT PLATE at handle height on the meeting stile — a dark iron
+        // plate with a sliding bolt across the gap — and, above it, the dark
+        // rectangle where a chain hangs from a staple.
+        // 1.0 m up a 2.1 m door is 52% of the way down the cell.
+        const hy = cell * (1 - 1.0 / 2.1);
+        const plateW = cell * 0.13;
+        const plateH = cell * 0.05;
+        const plateX = cell / 2 - plateW * 0.72; // mostly on the left leaf
+        ctx.fillStyle = "rgba(34,34,36,0.95)";
+        ctx.fillRect(plateX, hy - plateH / 2, plateW, plateH);
+        ctx.fillStyle = "rgba(80,80,84,0.9)"; // the bolt itself
+        ctx.fillRect(plateX + plateW * 0.15, hy - plateH * 0.16, plateW * 1.05,
+                     plateH * 0.32);
+        ctx.fillStyle = "rgba(120,118,112,0.8)"; // its knob
+        ctx.fillRect(plateX + plateW * 0.45, hy - plateH * 0.42, plateW * 0.12,
+                     plateH * 0.84);
+        // Rust bleeding down from the plate.
+        const bleed = ctx.createLinearGradient(0, hy + plateH / 2, 0,
+                                               hy + plateH * 3);
+        bleed.addColorStop(0, "rgba(110,66,36,0.45)");
+        bleed.addColorStop(1, "rgba(110,66,36,0)");
+        ctx.fillStyle = bleed;
+        ctx.fillRect(plateX, hy + plateH / 2, plateW, plateH * 2.5);
+
+        // Wear. Grime climbs the bottom third — this is where the mop and the
+        // rain and the feet arrive — and scuffs sit in it.
+        const bottom = ctx.createLinearGradient(0, cell * 0.62, 0, cell);
+        bottom.addColorStop(0, "rgba(0,0,0,0)");
+        bottom.addColorStop(0.6, "rgba(48,36,22,0.32)");
+        bottom.addColorStop(1, "rgba(40,30,18,0.7)");
+        ctx.fillStyle = bottom;
+        ctx.fillRect(0, cell * 0.62, cell, cell * 0.38);
+        for (let k = 0; k < 34; k++) {
+          ctx.fillStyle = p.wear;
+          ctx.globalAlpha = 0.25 + rand() * 0.5;
+          const y = rand() < 0.7 ? cell * (0.66 + rand() * 0.34) : rand() * cell;
+          const x = rand() * cell;
+          this.blob(ctx, rand, x, y, cell * (0.015 + rand() * 0.06),
+                    cell * (0.008 + rand() * 0.03), 9);
+          ctx.globalAlpha = 1;
+        }
+        // Scuffs: short dark strokes low down, at the angle a shoe leaves.
+        for (let k = 0; k < 22; k++) {
+          ctx.strokeStyle = "rgba(28,22,16," + (0.2 + rand() * 0.45).toFixed(3) + ")";
+          ctx.lineWidth = 1 + rand() * (S / 350);
+          const x = rand() * cell;
+          const y = cell * (0.72 + rand() * 0.27);
+          const len = cell * (0.02 + rand() * 0.08);
+          const a = (rand() - 0.5) * 0.9;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+          ctx.stroke();
+        }
+        // A few drips: thin dark runs from somewhere on the door downward.
+        for (let k = 0; k < 5; k++) {
+          const x = rand() * cell;
+          const y0 = rand() * cell * 0.6;
+          const len = cell * (0.08 + rand() * 0.3);
+          const g = ctx.createLinearGradient(0, y0, 0, y0 + len);
+          g.addColorStop(0, "rgba(60,44,28,0.35)");
+          g.addColorStop(1, "rgba(60,44,28,0)");
+          ctx.fillStyle = g;
+          ctx.fillRect(x, y0, Math.max(1, S / 500) * (1 + rand()), len);
+        }
+        ctx.strokeStyle = p.edge;
+        ctx.lineWidth = Math.max(2, S / 260);
+        ctx.strokeRect(1, 1, cell - 2, cell - 2);
+
+        // Baked light: the room's own tube is above and behind the leaf, so
+        // the back is lit from above like the front, a little less.
+        const lit = ctx.createLinearGradient(0, 0, 0, cell);
+        lit.addColorStop(0, "rgba(255,250,230,0.1)");
+        lit.addColorStop(0.45, "rgba(255,250,230,0)");
+        lit.addColorStop(1, "rgba(10,8,6,0.26)");
         ctx.fillStyle = lit;
         ctx.fillRect(0, 0, cell, cell);
         ctx.restore();
@@ -3304,6 +3491,7 @@ AFRAME.registerComponent("corridor-root", {
       floor: CorridorTextures.floor(S, d.seed, Math.max(2, Math.round(d.width / d.floorTile))),
       ceiling: CorridorTextures.ceiling(S, d.seed),
       door: CorridorTextures.doorAtlas(S, d.seed),
+      doorBack: CorridorTextures.doorAtlasBack(S, d.seed),
       transom: CorridorTextures.transom(S, d.seed, 9),
       roomFloor: CorridorTextures.roomFloor(S, d.seed, 4),
     };
@@ -3331,6 +3519,10 @@ AFRAME.registerComponent("corridor-root", {
       floor: this.mat({ map: this.tex.floor }),
       ceiling: this.mat({ map: this.tex.ceiling }),
       door: this.mat({ map: this.tex.door }),
+      // The other side of an OPEN leaf, seen from inside its apartment. One
+      // material, shared by the three open doors; a closed door's back is
+      // buried in the wall and never built.
+      doorBack: this.mat({ map: this.tex.doorBack }),
       doorEdge: this.mat({ color: new THREE.Color("#4a3f2c") }),
       transom: this.mat({ map: this.tex.transom }),
       frame: this.mat({ color: new THREE.Color(d.frameColor) }),
@@ -3878,6 +4070,19 @@ AFRAME.registerComponent("corridor-root", {
     seg(cursor, L.zLo, 0, d.height, lastOpen ? 0 : rot(list.length));
   },
 
+  // WHICH DOOR a given opening is: an integer key seeded from where it stands
+  // (z, side) and the corridor's seed, so the same corridor always has the same
+  // doors and neighbours differ. Everything per-door derives from it — the
+  // atlas cell (doorPick), and later the vent pattern and the gate's state —
+  // so one door's choices all travel together when the seed changes.
+  doorKey: function (z, side) {
+    return Math.abs(Math.round(z * 7 + (side + 1) * 3 + this.data.seed));
+  },
+  // The atlas cell (0..3) that door's two faces sample — front and back alike.
+  doorPick: function (z, side) {
+    return this.doorKey(z, side) % 4;
+  },
+
   // The painted timber frame standing proud of the wall's inner face: two jambs
   // and a head, around every opening (closed door or apartment doorway).
   buildDoorFrame: function (L, side, op) {
@@ -3904,14 +4109,14 @@ AFRAME.registerComponent("corridor-root", {
 
     // Which of the four doors in the atlas this one is. Seeded by position, so
     // the same corridor always has the same doors, and neighbours differ.
-    const pick = Math.abs(Math.round(op.z * 7 + (side + 1) * 3 + this.data.seed)) % 4;
-    const u0 = (pick % 2) * 0.5;
-    const v0 = 1 - (Math.floor(pick / 2) + 1) * 0.5;
+    const pick = this.doorPick(op.z, side);
     const faceX = side * (L.halfW + L.t / 2 - d.leafThickness / 2 - 0.004);
     const face = this.addPlane(op.width, d.doorHeight, this.m.door,
-                               [u0, v0, u0 + 0.5, v0 + 0.5]);
+                               CorridorTextures.doorCellUV(pick));
     face.position.set(faceX, d.doorHeight / 2, op.z);
     face.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
+    // No back face: a closed door's other side is buried in the wall segment
+    // behind it and cannot be seen from anywhere.
 
     // TRANSOM: the louvre above the leaf, tiled metrically along the width.
     const tr = this.addPlane(op.width, d.transomHeight, this.m.transom,
@@ -4141,19 +4346,30 @@ AFRAME.registerComponent("corridor-root", {
     leaf.position.set(0, d.doorHeight / 2, -d.doorWidth / 2);
     pivot.add(leaf);
 
-    // The door's face. Its atlas cell is picked the same way a closed door's
-    // is, so the apartments' doors belong to the same set of four.
-    const pick = Math.abs(Math.round(r.z * 7 + (r.side + 1) * 3 + d.seed)) % 4;
-    const u0 = (pick % 2) * 0.5;
-    const v0 = 1 - (Math.floor(pick / 2) + 1) * 0.5;
-    const fgeo = new THREE.PlaneGeometry(d.doorWidth, d.doorHeight);
-    setPlaneUVs(fgeo, u0, v0, u0 + 0.5, v0 + 0.5);
-    this.geometries.push(fgeo);
-    const face = new THREE.Mesh(fgeo, this.m.door);
-    face.position.set(-r.side * (d.leafThickness / 2 + 0.004), d.doorHeight / 2,
-                      -d.doorWidth / 2);
-    face.rotation.y = r.side < 0 ? Math.PI / 2 : -Math.PI / 2;
-    pivot.add(face);
+    // The door's two faces. Its atlas cell is picked the same way a closed
+    // door's is, so the apartments' doors belong to the same set of four; the
+    // FRONT (corridor side, on the leaf's outer face) samples the front atlas
+    // and the BACK, on the other side of the same leaf, samples the same cell
+    // of the back atlas. Both planes are children of the pivot, so they swing
+    // with the leaf. Yawed opposite ways so each looks out of its own side;
+    // that also mirrors the back's picture relative to the front, which is
+    // exactly what walking round a door does.
+    const pick = this.doorPick(r.z, r.side);
+    const uv = CorridorTextures.doorCellUV(pick);
+    const faceFor = (material, sign) => {
+      const fgeo = new THREE.PlaneGeometry(d.doorWidth, d.doorHeight);
+      setPlaneUVs(fgeo, uv[0], uv[1], uv[2], uv[3]);
+      this.geometries.push(fgeo);
+      const face = new THREE.Mesh(fgeo, material);
+      face.position.set(sign * (d.leafThickness / 2 + 0.004), d.doorHeight / 2,
+                        -d.doorWidth / 2);
+      // A plane looks along its local +z; yaw it so that is the sign's way.
+      face.rotation.y = sign < 0 ? -Math.PI / 2 : Math.PI / 2;
+      pivot.add(face);
+      return face;
+    };
+    faceFor(this.m.door, -r.side);     // toward the corridor (before the swing)
+    faceFor(this.m.doorBack, r.side);  // toward the room
   },
 
   // THE PICTURES. Three per apartment, on its LEFT, BACK and RIGHT walls as you
