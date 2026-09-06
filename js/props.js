@@ -552,6 +552,9 @@ const PropKit = {
   // the hubs. It was 2.4, which drew a stretched cruiser.
   BIKE: {
     wheelbase: 1.95, // x wheel
+    headTop: 2.05, // x radius, where the down tube and the top tube meet
+    crown: 1.6, // x radius, the fork crown — clear above the tyre
+    barRise: 0.62, // x radius, the handlebar ABOVE headTop
     seatTop: 2.24, // x radius, to the top of the saddle
     bar: 0.36, // x wheel, half the handlebar
     grip: 0.04, // x wheel, how far a grip stands proud of the bar's end
@@ -567,7 +570,14 @@ const PropKit = {
     const lean = ((o.lean != null ? o.lean : 12) * Math.PI) / 180;
     const bar = wheel * this.BIKE.bar;
     const barOuter = wheel * (this.BIKE.bar + this.BIKE.grip);
-    const top = (wheel / 2) * this.BIKE.seatTop + wheel * 0.06;
+    // The HIGHEST point, whichever it is. On a child's bike the bars sit above
+    // the saddle, and it is this that the lean swings toward the wall — so
+    // raising the bars has to move the whole machine off the wall, not just
+    // look different.
+    const top =
+      (wheel / 2) *
+        Math.max(this.BIKE.seatTop, this.BIKE.headTop + this.BIKE.barRise) +
+      wheel * 0.06;
     const reach = barOuter * Math.cos(lean) + top * Math.sin(lean);
     return {
       wheel: wheel,
@@ -586,7 +596,7 @@ const PropKit = {
   //   INTO the wall when the bike is placed facing the room), seed 1,
   //   unlit false
   // @returns {THREE.Group} origin on the floor midway between the tyres,
-  //   length along x (front wheel at +x), seen from +z. 23 meshes, one texture.
+  //   length along x (front wheel at +x), seen from +z. 24 meshes, one texture.
   // ======================================================================
   childBike: function (o) {
     o = o || {};
@@ -620,8 +630,12 @@ const PropKit = {
     const B = [wb / 2, R, 0]; // front hub
     const BB = [-wb * 0.06, R * 0.6, 0]; // bottom bracket
     const ST = [-wb * 0.24, R * 1.95, 0]; // seat top
-    const HT = [wb * 0.36, R * 1.9, 0]; // head tube top
-    const HB = [wb * 0.44, R * 1.1, 0]; // head tube bottom / fork crown
+    const HT = [wb * 0.37, R * this.BIKE.headTop, 0]; // head tube top
+    // THE FORK CROWN, clear above the tyre. It used to sit at R * 1.1 — barely
+    // above the hub — which left a 16 cm gap between it and the head tube top
+    // with NO TUBE IN IT, and a fork stub 5 cm long. The front of the frame
+    // simply stopped above the wheel.
+    const HB = [wb * 0.44, R * this.BIKE.crown, 0];
 
     // WHEELS: tyre torus + spoke disc, both wheels sharing both geometries'
     // recipe but not their instances (a torus is 200 triangles; sharing would
@@ -644,13 +658,25 @@ const PropKit = {
       this.add(ctx, hubG, rimMat, hub[0], hub[1], hub[2], Math.PI / 2, 0, 0);
     });
 
-    // THE FRAME: six tubes between the joints above.
+    // THE STAYS AND THE FORK STRADDLE THE WHEEL — so they are drawn on the NEAR
+    // side of it, not in its plane. Everything else here sits on z = 0, and so
+    // do the spoke disc and the tyre; a chain stay at z = 0 is coplanar with a
+    // 15 cm disc and loses the argument, which is why the frame came out
+    // interrupted at both wheels. They splay from just off the frame at their
+    // own end to the hub's outer face at the other, which is where a dropout
+    // actually bolts on.
+    const NEAR = wheel * 0.085; // at the hub — the hub is wheel * 0.16 long
+    const IN = wheel * 0.03; // where they leave the frame
+    const at = (p, z) => [p[0], p[1], z];
+
+    // THE FRAME: seven tubes between the joints above.
     this.tube(ctx, frameMat, BB, HT, TUBE, 7); // down tube
     this.tube(ctx, frameMat, ST, HT, TUBE * 0.85, 7); // top tube, low: step-through
     this.tube(ctx, frameMat, BB, ST, TUBE, 7); // seat tube
-    this.tube(ctx, frameMat, BB, A, TUBE * 0.8, 6); // chain stay
-    this.tube(ctx, frameMat, ST, A, TUBE * 0.7, 6); // seat stay
-    this.tube(ctx, frameMat, HB, B, TUBE * 0.8, 7); // fork
+    this.tube(ctx, frameMat, HT, HB, TUBE * 1.1, 7); // head tube
+    this.tube(ctx, frameMat, at(BB, IN), at(A, NEAR), TUBE * 0.8, 6); // chain stay
+    this.tube(ctx, frameMat, at(ST, IN), at(A, NEAR), TUBE * 0.7, 6); // seat stay
+    this.tube(ctx, frameMat, at(HB, IN), at(B, NEAR), TUBE * 0.8, 7); // fork
 
     // SADDLE, a small box with its nose down, on a short post.
     this.tube(ctx, rimMat, ST, [ST[0], ST[1] + R * 0.28, 0], TUBE * 0.6, 6);
@@ -661,7 +687,7 @@ const PropKit = {
 
     // HANDLEBAR: a stem up from the head tube, the bar across it, and two red
     // grips — the one flash of colour the reference bike has at that height.
-    const barY = HT[1] + R * 0.34;
+    const barY = HT[1] + R * this.BIKE.barRise;
     this.tube(ctx, rimMat, HT, [HT[0], barY, 0], TUBE * 0.7, 6);
     const halfBar = m.bar;
     this.tube(ctx, darkMat, [HT[0], barY, -halfBar], [HT[0], barY, halfBar],
