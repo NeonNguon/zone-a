@@ -2008,9 +2008,10 @@ const CorridorTextures = {
   // supplies the colour and the strength, this supplies the shape.
   //
   // The canvas is in the patch's own space, not in metres: u runs across the
-  // patch (0..1, and the patch is a trapezoid, so a constant u is a straight
-  // line that flares with it) and v runs 1 at the wall to 0 at the far edge.
-  // That is what lets the shadows be drawn as plain stripes.
+  // patch (0..1) and v runs 1 at the wall to 0 at the far edge. The patch is a
+  // parallelogram, so a line of constant u is straight and parallel to every
+  // other — which is exactly what parallel sunlight through a grille draws,
+  // and what lets the shadows be plain stripes on a canvas.
   //
   // THE SHADOWS. The bar positions come in as FRACTIONS of the opening, taken
   // from grilleLattice() — the same numbers the bars themselves were built
@@ -2759,8 +2760,10 @@ AFRAME.registerComponent("corridor-root", {
     // has to carry the whole suggestion on its own.
     //
     //   daylightDepth     how far out from the wall the patch reaches
-    //   daylightSkew      how much wider it gets over that depth, in metres —
-    //                     a window's patch splays, it is not a rectangle
+    //   daylightSkew      how far it LEANS sideways per metre of that depth,
+    //                     which is where the sun is: 0 puts it square in front
+    //                     of the window, 0.25 is about 14 degrees off. It is a
+    //                     lean, never a widening — see buildDaylight
     //   daylightSoftness  0 = hard-edged shadows, 1 = a wide penumbra
     daylight: { type: "boolean", default: true },
     daylightDepth: { type: "number", default: 2.6 },
@@ -3453,9 +3456,19 @@ AFRAME.registerComponent("corridor-root", {
   // ---------------------------------------------------------------
   // THE DAYLIGHT PATCH: the sun through the window, on the floor.
   //
-  // A trapezoid — four vertices, two triangles — starting at the wall as wide
-  // as the opening and splaying as it comes toward you. The canvas does the
-  // rest (see CorridorTextures.daylight).
+  // A PARALLELOGRAM — four vertices, two triangles — as wide as the opening,
+  // leaning sideways as it comes toward you by daylightSkew per metre of
+  // depth. The canvas does the rest (see CorridorTextures.daylight).
+  //
+  // It leans; it must NOT splay. Sunlight arrives as parallel rays, so the
+  // grille lays a grid of PARALLEL lines on the floor — the bar shadows keep
+  // the bars' own spacing, they only slide sideways. Widen the far edge
+  // instead and the lines of constant u fan out from a point behind the
+  // window, and the whole patch reads as a lamp standing in the opening
+  // rather than as the sun. (It was built that way first, and that is exactly
+  // what it looked like: the shadows appeared to twist.) On screen they still
+  // converge toward the far end, of course — that is the camera's
+  // perspective, and it is right.
   //
   // The MATERIAL is the exhibition's shared contact-cue material, in its glow
   // mode: ContactCue.makeMaterial + tuneMaterial give exactly what is wanted
@@ -3470,7 +3483,7 @@ AFRAME.registerComponent("corridor-root", {
     // Never let the patch run past the landing, however it is tuned.
     const depth = Math.min(d.daylightDepth, L.run - 0.2);
     if (depth <= 0.05) return;
-    const flare = d.daylightSkew * depth; // extra WIDTH over that depth
+    const shear = d.daylightSkew * depth; // sideways LEAN over that depth
 
     // The shadows are described to the canvas as fractions of the opening,
     // taken from the same lattice the bars were built from.
@@ -3504,8 +3517,8 @@ AFRAME.registerComponent("corridor-root", {
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
       w.x0, y, zWall,
       w.x1, y, zWall,
-      w.x0 - flare / 2, y, zOut,
-      w.x1 + flare / 2, y, zOut,
+      w.x0 + shear, y, zOut,
+      w.x1 + shear, y, zOut,
     ]), 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
       0, 1, 1, 1, 0, 0, 1, 0,
@@ -3518,8 +3531,9 @@ AFRAME.registerComponent("corridor-root", {
     this.group.add(new THREE.Mesh(geo, mat));
 
     this.daylightInfo = {
-      depth: +depth.toFixed(2), flare: +flare.toFixed(2),
-      wallWidth: +w.w.toFixed(2), farWidth: +(w.w + flare).toFixed(2),
+      depth: +depth.toFixed(2), shear: +shear.toFixed(2),
+      width: +w.w.toFixed(2),
+      lean: +((Math.atan2(shear, depth) * 180) / Math.PI).toFixed(1),
       shadowsX: lat.xs.length + 2, shadowsY: lat.ys.length + 2,
     };
   },
