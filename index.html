@@ -43,6 +43,13 @@
     <!-- Reusable đá mài terrazzo park bench (primitives + runtime canvas
          texture, zone-agnostic — instances are placed per zone). -->
     <script src="js/bench.js"></script>
+    <!-- PropKit — the small furniture (seat row, low table, child's bike,
+         plastic bag), primitives + runtime canvases like the bench, but as
+         plain BUILDERS returning a THREE.Group rather than as components:
+         corridor-root puts them inside its own group so they ride its offset,
+         hide with its `shown` and go in its teardown. AFTER bench.js (same
+         family, same rules) and BEFORE zone-a-corridor.js, which calls it. -->
+    <script src="js/props.js"></script>
     <!-- Local tinted-terrazzo floor patches (per-room/-hallway colourways over
          the shared global floor). AFTER bench.js: reuses makeTerrazzoTexture.
          Used by Zone C (dark) and Zone B (soft coral). See js/tinted-floor.js. -->
