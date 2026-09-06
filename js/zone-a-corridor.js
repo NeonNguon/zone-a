@@ -27,6 +27,50 @@
 //                     the return booth on the corridor's landing, wired to each
 //                     other through glitch-masked jumps.
 //
+// THE WINDOW. The corridor's dead end is not dead: it carries a barred window
+// with Saigon behind it, so the whole run reads as an approach to that view
+// rather than as a passage to three doors. Five pieces, all children of the
+// corridor root — so they ride `offset` and vanish with `shown` like everything
+// else — and all of them derived from the opening in layout().win:
+//
+//   THE OPENING   the end wall becomes four boxes around the hole instead of
+//                 one, the way a side wall is already built around a doorway.
+//                 metricBoxUVs takes every face's UVs from its WORLD position,
+//                 so the paint runs on across all four with no seam and no
+//                 restart. Plus a concrete sill standing proud of the face.
+//   THE GRILLE    a welded frame and lattice of square bar, ~30 bars merged
+//                 into ONE geometry and one draw call. Each bar's u comes from
+//                 its own position along its length, so the iron runs
+//                 continuously through it and no two bars are rusted alike.
+//                 grilleLattice() says where the bars go, and the daylight
+//                 patch asks the same method, so the shadows cannot drift.
+//   THE SKY       one plane, sized from viewCoverage() rather than from a
+//                 number: the cone of sight through BOTH faces of the opening
+//                 fans out hard (nearly 80 degrees off axis from the sill), and
+//                 any fixed size shows the scene background at exactly the
+//                 angles someone will try. The gradient is generated in ANGULAR
+//                 space so the size never stretches it.
+//   THE CITY      two depth bands of silhouette panels in front of it. A band
+//                 is as many panels wide as that cone actually needs, butted
+//                 edge to edge, because a single panel simply ENDS out at the
+//                 sides with sky where the town should be. Neighbours are never
+//                 the same picture. Each panel carries a UV skirt below v = 0
+//                 so looking down never finds the image's bottom edge.
+//   THE DAYLIGHT  a parallelogram on the floor with the grille's shadow in it,
+//                 on the exhibition's shared ContactCue material in glow mode.
+//                 It LEANS with the sun; it never splays — see buildDaylight.
+//
+// None of it is walkable or reachable: it is all outside the wall, there is no
+// floor out there, and it adds nothing to walkableRects (verified: the collider
+// returns byte-identical rectangles with `window` true and false).
+//
+// TWO THINGS THAT WILL BITE THE NEXT PERSON, both learned the hard way and both
+// written up where they happened: THREE samples an alphaMap's GREEN channel,
+// which is 0 everywhere in these PNGs (CorridorTextures.silhouette); and a
+// canvas texture built around a placeholder while its image loads can never be
+// re-uploaded on WebGL2, because the storage is immutable at the first upload's
+// size (same place — it needs a dispose()).
+//
 // LIGHTING — read this before touching a material. Everything here is
 // `shader: flat` (MeshBasicMaterial, unlit). The gallery's void preset lights
 // its rooms with global directionals + a hemisphere + per-room point lamps that
@@ -97,11 +141,16 @@
 //   with `wallPaletteOverride`, and can give each apartment its own with
 //   `roomWallPalettes`. See the comment on WALL_PALETTES for the schema.
 //
-// ELEVEN canvases as the corridor ships, cached by their full parameter key —
+// EIGHTEEN canvases as the corridor ships, cached by their full parameter key —
 // which includes a hash of the palette — so a rebuild (or a second corridor)
 // reuses them: 3 corridor wall variants, ONE wall canvas for each of the three
 // apartments' own schemes, floor, ceiling, door atlas, room floor, all
-// textureSize², plus one small transom strip. About 41 MB, 55 MB with mipmaps.
+// textureSize², plus one small transom strip; and for the window, the four
+// skyline PNGs lifted into canvases (1456×816 each, 4.5 MB, 18.1 MB together),
+// the sky gradient (4×512, a rounding error) and the daylight patch
+// (256²). About 59 MB, 79 MB with mipmaps — of which the walls are 24 MB and
+// the skylines 18 MB, so textureSize and viewLayers are the two levers if a
+// device is short of texture memory.
 // A palette costs one canvas per VARIANT it is actually used with, which is why
 // an apartment (one variant) is cheap and the corridor (three) is not.
 // On this desktop a wall canvas takes ~105 ms at the defaults (1024²,

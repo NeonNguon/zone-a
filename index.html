@@ -399,7 +399,28 @@
            schemes — colonial yellow, oxide red, faded jade — which is what
            roomWallPalettes below does. Building the wall canvases is the
            corridor’s one real cost: six of them at ~105 ms each on a desktop,
-           once, at load; the whole texture set is about 41 MB.
+           once, at load; the whole texture set is about 59 MB (24 MB of it the
+           walls, 18 MB the four skyline PNGs).
+
+           THE WINDOW at the far end is what the run is walking toward. A
+           2.8 × 1.5 m opening in the dead-end wall, a welded security grille
+           over it, Saigon in the haze behind it and a patch of sun on the floor
+           in front of it carrying the grille’s shadow. The end wall is built as
+           four boxes around the hole so the paint runs on across it unbroken;
+           the ~30 grille bars are merged into ONE draw call; the city is
+           silhouette panels standing outside the wall, and the sky behind them
+           is sized from the actual cone of sight through the opening rather
+           than from a guess — at the sill you can see nearly 80 degrees off
+           axis, and anything smaller shows the scene background at exactly the
+           angles a visitor will try. Nothing out there is reachable: it adds no
+           walkable rectangles at all, and hides with the rest of the corridor.
+           The whole window group is +26 meshes and +19 draw calls.
+
+           WHAT TO TUNE BY EYE FIRST, in this order: daylightOpacity (the patch
+           is clear up close and faint from 5 m back, which is the trade),
+           viewBottom (how far down you look on the city — it decides whether
+           you are on a high floor or a low one), viewDistance, and viewPanelsMax
+           if 18 skyline panels is too many draw calls on the headset.
 
            TUNING ON THE HEADSET — no code edits, both on this tag: if the
            build pause is noticeable on the Quest, set wallNoiseRes to 4 (the
@@ -445,6 +466,14 @@
                          either of their doors. The closed doors fill whatever
                          corridor is left in front of the stretch.
              fabric      wallThickness 0.15 / textureSize 1024 / seed 1
+                         endWallShade .92    how much darker the dead-end wall
+                                             is than the sides, as a LINEAR
+                                             multiplier — 1 is identical. Not a
+                                             colour: a hex here would be
+                                             converted sRGB → linear and come
+                                             out at about a fifth of what you
+                                             asked for, which is exactly the
+                                             bug this replaced
              the walls   wallNoiseRes 2      noise resolution divisor
                          wallFlake 1         how weathered the wall is — how
                                              much of each coat is GONE, and
@@ -463,6 +492,9 @@
                          wallStencilTilt 6   degrees off level they are
                                              painted at (numbers only — there
                                              is no lettering anywhere)
+                         wallStencilInk 1    how much pigment went on: how
+                                             strongly a mark reads before the
+                                             wall starts taking it away
                          wallPalette "chungcu"   or "green"
                          wallPaletteOverride null   patches the named palette
                          roomWallPalettes ["yellow","red","green"]
@@ -475,6 +507,73 @@
                                              the corridor's palette instead.
                                              A room uses ONE variant, so each
                                              scheme costs one extra canvas
+             the window  window true         false restores a solid dead end
+                                             and takes the grille, the view and
+                                             the daylight with it
+                         windowWidth 2.8 / windowHeight 1.5 / windowSill 1
+                         windowX 0           along the wall, 0 = centreline.
+                                             The opening is clamped to leave
+                                             0.3 m of wall each side and 0.25 m
+                                             above, with a console warning if
+                                             it had to be
+                         windowRevealColor ""    "" leaves the reveals in the
+                                             wall's own paint, which is what a
+                                             hole knocked through one looks
+                                             like; a colour paints them
+                         windowSillColor #b9b3a6
+             the grille  grilleBar .014      square bar, the lattice
+                         grilleSpacingX .14 / grilleSpacingY .16
+                         grilleFrame .04     the four edge bars, thicker
+                         grilleColor #2a2b2e / grilleRust .35
+                         grilleInset .03     how far behind the wall face it
+                                             sits, inside the reveal — and far
+                                             enough back that the camera's near
+                                             plane cannot reach it
+                         grilleTile .5       metres of bar per texture repeat
+             the view    viewSkyTop #c9d4dc / viewSkyHorizon #efe9dc
+                         viewSkyDistance 40
+                         viewSkyWidth 0 / viewSkyHeight 0    0 = AUTO, and they
+                                             should stay 0: the size is derived
+                                             from the aperture and viewClearance
+                         viewClearance .25   closest an eye can get to the wall
+                         viewEyeY 1.6
+                         viewLayers 2        2 depth bands, 1 drops the far one,
+                                             0 drops the city and leaves sky
+                         viewSilhouetteSrc  assets/saigon2.png   band centre
+                         viewSilhouetteSrcL assets/saigon1.png   the sides,
+                         viewSilhouetteSrcR assets/saigon3.png   alternating
+                                             outward so neighbours never match
+                         viewSilhouetteSrc2 assets/saigon4.png   far band centre
+                         viewPanelsMax 4     panels each side of centre. Each
+                                             band takes as many as the cone of
+                                             sight needs and no more — 9 and 9
+                                             here, covering 432 m and 630 m
+                                             against the 401 m and 617 m asked
+                                             for. Lower it to save draw calls;
+                                             the town then ends at the extreme
+                                             angles
+                         viewDistance 22 / viewWidth 48 / viewHaze #3d4a55 /
+                         viewHazeOpacity .92                     the near band
+                         viewDistance2 34 / viewWidth2 70 / viewHaze2 #7d8a94 /
+                         viewHazeOpacity2 .75                    the far band
+                         viewBottom -4       where the city's base sits. This is
+                                             the storey you are on
+                         viewCrop .06        trims the PNGs' bottom band
+             the sun     daylight true
+                         daylightDepth 2.6   how far the patch reaches out
+                         daylightOpacity .28
+                         daylightColor #fff6dc
+                         daylightSkew .25    how far it LEANS sideways per metre
+                                             of depth — where the sun is, about
+                                             14 degrees off square. A lean, not
+                                             a widening: widen it and the bar
+                                             shadows fan out from a point and
+                                             the light reads as a lamp standing
+                                             in the window
+                         daylightSoftness .6   0 = hard shadows, 1 = wide
+                                             penumbra. The penumbra is scaled to
+                                             the bar PITCH, so a closer lattice
+                                             does not go solid dark
              lighting    tubeSpacing 4 (snapped) / tubeColor #f4f1e2
              joinery     frameWidth .07 / frameDepth .045 / frameColor #8d7f62 /
                          leafThickness .045 / doorOpenAngle 100 / floorTile .2 /
