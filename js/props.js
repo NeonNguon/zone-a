@@ -552,9 +552,15 @@ const PropKit = {
   // the hubs. It was 2.4, which drew a stretched cruiser.
   BIKE: {
     wheelbase: 1.95, // x wheel
-    headTop: 2.05, // x radius, where the down tube and the top tube meet
-    crown: 1.6, // x radius, the fork crown — clear above the tyre
-    barRise: 0.62, // x radius, the handlebar ABOVE headTop
+    headTop: 2.4, // x radius, where the down tube and the top tube meet
+    // THE FORK CROWN HAS TO CLEAR THE TYRE, and 2.05 is what does it: the
+    // front tyre's outer edge reaches R * 1.97 at the crown's own x. Below
+    // that the crown is INSIDE the wheel, and then the head tube above it has
+    // to cross the tyre to reach it — where it is hidden outright, because the
+    // tyre is a solid torus standing R * 0.105 proud of the frame's plane.
+    // That is what made the front of the frame look cut off.
+    crown: 2.05, // x radius, the fork crown — just clear of the tyre
+    barRise: 0.42, // x radius, the handlebar ABOVE headTop
     seatTop: 2.24, // x radius, to the top of the saddle
     bar: 0.36, // x wheel, half the handlebar
     grip: 0.04, // x wheel, how far a grip stands proud of the bar's end
@@ -650,7 +656,7 @@ const PropKit = {
     // discs parked beside it. Only the hub turns: a cylinder is born along +y,
     // and Rx(90) is what lays it down the z axis.
     [A, B].forEach((hub) => {
-      const tyre = new THREE.TorusGeometry(R * 0.87, R * 0.13, 8, 20);
+      const tyre = new THREE.TorusGeometry(R * 0.885, R * 0.105, 8, 20);
       this.add(ctx, tyre, darkMat, hub[0], hub[1], hub[2]);
       const disc = new THREE.CircleGeometry(R * 0.8, 20);
       this.add(ctx, disc, spokeMat, hub[0], hub[1], hub[2]);
@@ -665,8 +671,12 @@ const PropKit = {
     // interrupted at both wheels. They splay from just off the frame at their
     // own end to the hub's outer face at the other, which is where a dropout
     // actually bolts on.
-    const NEAR = wheel * 0.085; // at the hub — the hub is wheel * 0.16 long
-    const IN = wheel * 0.03; // where they leave the frame
+    // Far enough out to be IN FRONT of the tyre where they cross it, not just
+    // in front of the spoke disc: the tyre stands R * 0.105 (wheel * 0.0525)
+    // proud of z = 0, and a tube whose centre sits inside that is a tube the
+    // wheel eats.
+    const NEAR = wheel * 0.09; // at the hub — the hub is wheel * 0.16 long
+    const IN = wheel * 0.045; // where they leave the frame
     const at = (p, z) => [p[0], p[1], z];
 
     // THE FRAME: seven tubes between the joints above.
@@ -676,7 +686,11 @@ const PropKit = {
     this.tube(ctx, frameMat, HT, HB, TUBE * 1.1, 7); // head tube
     this.tube(ctx, frameMat, at(BB, IN), at(A, NEAR), TUBE * 0.8, 6); // chain stay
     this.tube(ctx, frameMat, at(ST, IN), at(A, NEAR), TUBE * 0.7, 6); // seat stay
-    this.tube(ctx, frameMat, at(HB, IN), at(B, NEAR), TUBE * 0.8, 7); // fork
+    // The FORK takes NEAR at BOTH ends rather than splaying: it crosses the
+    // tyre right at the crown, where a splay would still have it half buried.
+    // The step that leaves at the crown is above the wheel, in clear air, and
+    // is what a fork blade standing off its steerer looks like anyway.
+    this.tube(ctx, frameMat, at(HB, NEAR), at(B, NEAR), TUBE * 0.8, 7); // fork
 
     // SADDLE, a small box with its nose down, on a short post.
     this.tube(ctx, rimMat, ST, [ST[0], ST[1] + R * 0.28, 0], TUBE * 0.6, 6);
