@@ -1881,6 +1881,69 @@ const CorridorTextures = {
     });
   },
 
+  // ---- GRILLE IRON -------------------------------------------------------
+  // The bars of the window grille: black paint going to rust, drawn once and
+  // tiled ALONG every bar's length. u runs along the bar, v across its square
+  // section, which is what lets a flat-shaded bar read as solid: a light line
+  // at one v edge and a dark one at the other is the whole of the "lighting".
+  //
+  // Bars take their u from their WORLD position (see buildGrille), so every bar
+  // samples a different phase of the tile and no two are rusted alike, without
+  // a texture or a draw call each.
+  grilleIron: function (size, seed, rust, base) {
+    const key = "grille|" + size + "|" + seed + "|" + rust + "|" + base;
+    return this.get(key, () => {
+      const w = size;
+      const h = Math.max(16, Math.round(size / 6));
+      const c = this.canvas(w, h);
+      const ctx = c.getContext("2d");
+      const rand = this.rand(seed * 349 + 17);
+
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, w, h);
+
+      // Brush marks and unevenness in the paint, along the bar.
+      for (let i = 0; i < 90; i++) {
+        const a = 0.04 + rand() * 0.12;
+        ctx.fillStyle =
+          rand() > 0.5 ? "rgba(255,255,255," + a.toFixed(3) + ")"
+                       : "rgba(0,0,0," + a.toFixed(3) + ")";
+        ctx.fillRect(rand() * w, rand() * h, 2 + rand() * 40, 1 + rand() * 3);
+      }
+
+      // RUST breaking through: elongated along the bar, heavier toward the
+      // bottom edge of the section where water sits.
+      const n = Math.round(70 * rust);
+      for (let i = 0; i < n; i++) {
+        const y = rand() < 0.62 ? h * (0.55 + rand() * 0.45) : rand() * h;
+        const rw = 3 + rand() * 26;
+        const rh = 1 + rand() * (h * 0.35);
+        const a = (0.25 + rand() * 0.5) * rust;
+        const g = ctx.createLinearGradient(0, y - rh, 0, y + rh);
+        g.addColorStop(0, "rgba(122,74,42,0)");
+        g.addColorStop(0.5, "rgba(122,74,42," + a.toFixed(3) + ")");
+        g.addColorStop(1, "rgba(122,74,42,0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(rand() * w, y - rh, rw, rh * 2);
+      }
+      for (let i = 0; i < Math.round(26 * rust); i++) {
+        ctx.fillStyle =
+          "rgba(138,90,48," + (0.3 + rand() * 0.5).toFixed(3) + ")";
+        this.blob(ctx, rand, rand() * w, rand() * h, 2 + rand() * 7,
+                  1 + rand() * (h * 0.3), 9);
+      }
+
+      // The two section edges: a lit one at v = 1 and a dark one at v = 0. On
+      // the face you actually look at, that is the difference between a stripe
+      // and a bar.
+      ctx.fillStyle = "rgba(196,198,203,0.5)";
+      ctx.fillRect(0, 0, w, Math.max(1, h * 0.09));
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, h - Math.max(1, h * 0.13), w, Math.max(1, h * 0.13));
+      return c;
+    });
+  },
+
   // ---- ROOM FLOOR (gạch bông) -------------------------------------------
   // The patterned encaustic tiles inside the apartments: a 4×4 block of 0.2 m
   // tiles that tiles onward, in the muted green / ochre / cream / rust of the
@@ -2058,6 +2121,45 @@ function metricBoxUVs(geo, origin, uMetric, vMetric) {
   uv.needsUpdate = true;
 }
 
+// Merge a list of indexed BufferGeometries into ONE, and dispose the parts. The
+// grille is ~40 bars; as separate meshes that is 40 draw calls for something
+// the eye reads as a single object, so it is built as one geometry instead.
+// The inputs are already positioned in the corridor's frame, so there is no
+// per-part transform to apply here.
+function mergeGeometries(list) {
+  let vCount = 0;
+  let iCount = 0;
+  list.forEach((g) => {
+    vCount += g.attributes.position.count;
+    iCount += g.index.count;
+  });
+  const pos = new Float32Array(vCount * 3);
+  const uv = new Float32Array(vCount * 2);
+  const nor = new Float32Array(vCount * 3);
+  const idx = new Uint32Array(iCount);
+  let vo = 0;
+  let io = 0;
+  list.forEach((g) => {
+    const p = g.attributes.position;
+    const u = g.attributes.uv;
+    const n = g.attributes.normal;
+    const ix = g.index;
+    pos.set(p.array, vo * 3);
+    uv.set(u.array, vo * 2);
+    if (n) nor.set(n.array, vo * 3);
+    for (let k = 0; k < ix.count; k++) idx[io + k] = ix.getX(k) + vo;
+    vo += p.count;
+    io += ix.count;
+    g.dispose();
+  });
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  out.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+
 // Point a PlaneGeometry's four UVs at an explicit rectangle of the texture —
 // used for the door atlas (pick one of the four doors) and for tiling a strip
 // (u1 > 1 repeats). PlaneGeometry vertex order is TL, TR, BL, BR.
@@ -2151,6 +2253,8 @@ const CORRIDOR_GEOM_PROPS = [
   "roomOffsets", "roomSpacing", "endWallShade",
   "window", "windowWidth", "windowHeight", "windowSill", "windowX",
   "windowRevealColor", "windowSillColor",
+  "grilleBar", "grilleSpacingX", "grilleSpacingY", "grilleFrame",
+  "grilleColor", "grilleRust", "grilleInset", "grilleTile",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
@@ -2322,6 +2426,20 @@ AFRAME.registerComponent("corridor-root", {
     windowX: { type: "number", default: 0 },
     windowRevealColor: { type: "color", default: "" },
     windowSillColor: { type: "color", default: "#b9b3a6" },
+
+    // ---- THE SECURITY GRILLE over that window --------------------------
+    // Welded square bar, a frame and a lattice. `grilleInset` sits it behind
+    // the wall's inner face, inside the reveal, where a grille actually goes —
+    // and far enough back that the camera's near plane cannot reach it from the
+    // closest spot the collider allows.
+    grilleBar: { type: "number", default: 0.014 },
+    grilleSpacingX: { type: "number", default: 0.14 },
+    grilleSpacingY: { type: "number", default: 0.16 },
+    grilleFrame: { type: "number", default: 0.04 },
+    grilleColor: { type: "color", default: "#2a2b2e" },
+    grilleRust: { type: "number", default: 0.35 },
+    grilleInset: { type: "number", default: 0.03 },
+    grilleTile: { type: "number", default: 0.5 }, // metres of bar per texture repeat
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -2847,6 +2965,9 @@ AFRAME.registerComponent("corridor-root", {
         color: new THREE.Color(d.windowRevealColor || "#b9b3a6"),
         side: THREE.DoubleSide,
       }),
+      grille: this.mat({
+        map: CorridorTextures.grilleIron(256, d.seed, d.grilleRust, d.grilleColor),
+      }),
       roomFloor: this.mat({ map: this.tex.roomFloor }),
       tube: this.mat({ color: new THREE.Color(d.tubeColor), fog: false }),
     };
@@ -2996,6 +3117,82 @@ AFRAME.registerComponent("corridor-root", {
     piece(-outerW / 2, w.x0, w.y0, w.y1);                 // left of the opening
     piece(w.x1, outerW / 2, w.y0, w.y1);                  // right of it
     this.buildWindowTrim(L, w);
+    this.buildGrille(L, w);
+  },
+
+  // ---------------------------------------------------------------
+  // THE GRILLE: a welded frame and lattice of square bar across the opening,
+  // built as ONE merged geometry — one draw call for about forty bars.
+  //
+  // Every bar's u comes from its world position along its own length, so the
+  // iron texture runs continuously through a bar and each bar starts at a
+  // different phase of it: no two are rusted the same way, at no cost.
+  // ---------------------------------------------------------------
+  buildGrille: function (L, w) {
+    const d = this.data;
+    const b = d.grilleBar;
+    const f = d.grilleFrame;
+    const tile = d.grilleTile;
+    const parts = [];
+    // The bars' near faces all sit at the same depth, inside the reveal.
+    const zNear = L.zEnd - d.grilleInset;
+
+    // One bar. `alongY` picks which axis is its length, and with it which way
+    // the texture runs: u along the bar, v across its section.
+    const bar = (cx, cy, sx, sy, sz, alongY) => {
+      const g = new THREE.BoxGeometry(sx, sy, sz);
+      const pos = g.attributes.position;
+      const uvs = g.attributes.uv;
+      const cz = zNear - sz / 2;
+      for (let i = 0; i < pos.count; i++) {
+        const face = Math.floor(i / 4); // 0:+x 1:-x 2:+y 3:-y 4:+z 5:-z
+        const lx = pos.getX(i);
+        const ly = pos.getY(i);
+        const lz = pos.getZ(i);
+        let u;
+        let v;
+        if (alongY) {
+          u = (cy + ly) / tile;
+          v = face === 4 || face === 5 ? lx / sx + 0.5 : lz / sz + 0.5;
+        } else {
+          u = (cx + lx) / tile;
+          v = face === 4 || face === 5 ? ly / sy + 0.5 : lz / sz + 0.5;
+        }
+        uvs.setXY(i, u, v);
+      }
+      g.translate(cx, cy, cz);
+      parts.push(g);
+    };
+
+    // FRAME: four flat bars just inside the opening's edges.
+    bar(w.x0 + f / 2, (w.y0 + w.y1) / 2, f, w.h, f, true);
+    bar(w.x1 - f / 2, (w.y0 + w.y1) / 2, f, w.h, f, true);
+    bar(w.x, w.y0 + f / 2, w.w, f, f, false);
+    bar(w.x, w.y1 - f / 2, w.w, f, f, false);
+
+    // LATTICE, spaced evenly INSIDE the frame so the pattern is symmetric in
+    // the opening rather than starting from one edge and leaving a runt gap at
+    // the other.
+    const ix0 = w.x0 + f;
+    const ix1 = w.x1 - f;
+    const iy0 = w.y0 + f;
+    const iy1 = w.y1 - f;
+    const spanX = ix1 - ix0;
+    const spanY = iy1 - iy0;
+    const nx = Math.max(0, Math.round(spanX / d.grilleSpacingX) - 1);
+    const ny = Math.max(0, Math.round(spanY / d.grilleSpacingY) - 1);
+    for (let k = 1; k <= nx; k++) {
+      bar(ix0 + (spanX * k) / (nx + 1), (w.y0 + w.y1) / 2, b, w.h - f, b, true);
+    }
+    for (let k = 1; k <= ny; k++) {
+      bar(w.x, iy0 + (spanY * k) / (ny + 1), w.w - f, b, b, false);
+    }
+
+    const geo = mergeGeometries(parts);
+    this.geometries.push(geo);
+    const mesh = new THREE.Mesh(geo, this.m.grille);
+    this.group.add(mesh);
+    this.grilleBars = { nx: nx, ny: ny, total: parts.length };
   },
 
   // The sill, and optionally a painted reveal.
