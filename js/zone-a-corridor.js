@@ -27,6 +27,31 @@
 //                     the return booth on the corridor's landing, wired to each
 //                     other through glitch-masked jumps.
 //
+// THE FURNITURE. Four props stand in the run — a three-seat row of brown vinyl
+// cinema chairs with a peeling black oval table in front of them on the right,
+// a child's bike leaning on the left wall with a stuffed bag beside it. They
+// are built by PropKit (js/props.js, loaded before this file) and added to this
+// component's own group, so they ride `offset`, hide with `shown` and go in
+// teardown() like everything else.
+//
+// WHERE THEY GO IS DERIVED, not typed: furnitureLayout() reads L.openings and
+// puts the seats between the corridor's mouth and the first closed door on the
+// right, and the bike between the first two closed doors on the left. Change
+// doorPitch and the furniture moves with the doors. That function is PURE and
+// takes no part in the build, because walkableRects() needs the same answer and
+// rig-collision calls it whenever it likes — including before the corridor has
+// ever been built.
+//
+// AND THEY ARE SOLID BY SUBTRACTION. The collider takes the UNION of walkable
+// rectangles, so a prop is not something added to the world — it is a hole cut
+// in the floor you are allowed to stand on. See rectMinus() and the note above
+// walkableRects.
+//
+// They are also the only LIT things out here (MeshLambertMaterial): a small
+// object with real curvature is worth handing to the gallery's global lights,
+// which do reach 400 m out even though its room lamps do not. `furnitureUnlit`
+// bakes that shading into vertex colours instead — see the header of props.js.
+//
 // EVERY DOOR IS THREE THINGS, and only one of them is a door.
 //
 //   THE LEAF        a painted two-leaf door from an atlas of four, picked by
