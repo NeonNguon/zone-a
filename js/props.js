@@ -588,16 +588,22 @@ const PropKit = {
     // WHEELS: tyre torus + spoke disc, both wheels sharing both geometries'
     // recipe but not their instances (a torus is 200 triangles; sharing would
     // save nothing worth the indirection).
+    //
+    // A WHEEL TURNS IN THE BIKE'S OWN PLANE, which here is x-y: x is forward
+    // and y is up, so a wheel is a circle in x-y and its axle is the ONLY part
+    // of it that points across, along z. A TorusGeometry and a CircleGeometry
+    // are both born in x-y already, so they need no rotation at all — an
+    // earlier version yawed both a quarter turn "to stand them in y-z" and put
+    // the wheels broadside to the frame, so the bike read as a frame with two
+    // discs parked beside it. Only the hub turns: a cylinder is born along +y,
+    // and Rx(90) is what lays it down the z axis.
     [A, B].forEach((hub) => {
       const tyre = new THREE.TorusGeometry(R * 0.87, R * 0.13, 8, 20);
-      const t = this.add(ctx, tyre, darkMat, hub[0], hub[1], hub[2]);
-      t.rotation.y = Math.PI / 2; // a torus is born in x-y; stand it in y-z
+      this.add(ctx, tyre, darkMat, hub[0], hub[1], hub[2]);
       const disc = new THREE.CircleGeometry(R * 0.8, 20);
-      const dm = this.add(ctx, disc, spokeMat, hub[0], hub[1], hub[2]);
-      dm.rotation.y = Math.PI / 2;
+      this.add(ctx, disc, spokeMat, hub[0], hub[1], hub[2]);
       const hubG = new THREE.CylinderGeometry(R * 0.09, R * 0.09, wheel * 0.16, 8);
-      const hm = this.add(ctx, hubG, rimMat, hub[0], hub[1], hub[2]);
-      hm.rotation.z = Math.PI / 2;
+      this.add(ctx, hubG, rimMat, hub[0], hub[1], hub[2], Math.PI / 2, 0, 0);
     });
 
     // THE FRAME: six tubes between the joints above.
