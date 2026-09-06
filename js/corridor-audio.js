@@ -92,15 +92,24 @@ AFRAME.registerComponent("corridor-audio", {
     // ---- the flat, on the bicycle -------------------------------------
     // "inverse" is the model that behaves like a real room: loud at the
     // source, falling away smoothly, still faintly there at the far end.
-    //   corridorRefDistance  the radius inside which it is at full volume
-    //   corridorRolloff      how fast it falls away past that. This and
+    //   corridorRefDistance  the PLATEAU: it is at full volume everywhere
+    //                        within this of the bicycle. At 5 that covers the
+    //                        landing, which is 4.6 m from it — so you arrive
+    //                        into the television rather than walking up to it.
+    //                        Drop it to ~3.5 if the arrival should be quieter.
+    //   corridorRolloff      how fast it falls away past the plateau. This and
     //                        refDistance TOGETHER decide how much of the
     //                        neighbour's television reaches the apartments,
     //                        which is the thing to tune by ear first.
     //   corridorMaxDistance  where the falloff stops being computed
-    corridorVolume: { type: "number", default: 0.8 },
-    corridorRefDistance: { type: "number", default: 3 },
-    corridorRolloff: { type: "number", default: 1.2 },
+    //
+    // 5 / 0.8 rather than the 3 / 1.2 this shipped with: the flat now carries
+    // the length of the run instead of dying in the middle of it. Measured on
+    // the centreline at eye height — 0.95 at the bicycle, 0.92 mid-corridor,
+    // 0.43 at the window, and 0.47-0.66 inside the three apartments.
+    corridorVolume: { type: "number", default: 0.95 },
+    corridorRefDistance: { type: "number", default: 5 },
+    corridorRolloff: { type: "number", default: 0.8 },
     corridorMaxDistance: { type: "number", default: 30 },
     // WHERE it hangs. "bike" reads the bicycle's derived position straight
     // out of corridor-root (furniturePos.bike) rather than re-deriving it;
@@ -117,16 +126,23 @@ AFRAME.registerComponent("corridor-audio", {
     // refDistance 1, rolloffFactor 1 and maxDistance = streetRange, the gain
     // is 1 at a metre and 0 at streetRange exactly.
     //
-    // streetRange IS A RADIUS FROM THE SOURCE, NOT A DISTANCE ALONG THE FLOOR,
-    // and the difference is worth knowing before tuning it. The source sits
-    // streetOffset away from the window — two metres beyond the end wall and
-    // 1.75 m above eye height at the default — so a 6 m radius only reaches
-    // about 3.7 m back down the corridor. Measured at the shipped settings, on
-    // the centreline at eye height: 0.59 at the glass, 0.33 two metres back,
-    // and silent from 3.7 m. For six metres of WALKING distance, ask for about
-    // 8.2.
-    streetVolume: { type: "number", default: 0.7 },
-    streetRange: { type: "number", default: 6 },
+    // streetRange IS A RADIUS FROM THE SOURCE, NOT A DISTANCE ALONG THE FLOOR.
+    // The source sits streetOffset from the window — two metres beyond the end
+    // wall and 1.75 m above eye height — so the sphere always reaches rather
+    // less down the corridor than the number reads. At 16 it reaches about
+    // 13.9 m back.
+    //
+    // 16 rather than the 6 this shipped with. At 6 the city stopped 3.7 m from
+    // the glass, which made it a detail you had to put your face to; the two
+    // layers were never audible together and the apartments never heard the
+    // street at all. At 16 they overlap down the middle of the run and the
+    // traffic is in all three rooms — and the LANDING is still silent (19.1 m
+    // out, past the range), so walking toward the window still reveals the
+    // city, which is the whole point of it. Measured on the centreline:
+    // 0.73 at the glass, 0.55 four metres back, 0.33 mid-corridor, 0.06 at the
+    // bicycle, 0 on the landing; 0.36-0.57 inside the apartments.
+    streetVolume: { type: "number", default: 0.85 },
+    streetRange: { type: "number", default: 16 },
     // Root-local, relative to the WINDOW'S CENTRE. The default puts it two
     // metres beyond the end wall and above the opening — outside, across the
     // street, rather than in the reveal.
@@ -148,6 +164,7 @@ AFRAME.registerComponent("corridor-audio", {
     this.duck = 1; // 1, or duckWhileMemory while a memory speaks
     this.street = []; // [{ el, audio, track }]
     this.streetIndex = 0; // which street track is the active one
+    this.arrived = false; // has the visitor been in here before this session
     this.handingOver = false; // a crossfade is in flight
     this.corridor = null; // { el, audio }
     this.anchor = null; // THREE.Object3D holding both street emitters
@@ -339,6 +356,19 @@ AFRAME.registerComponent("corridor-audio", {
     AudioKit.resume();
     if (!this.build()) return;
     this.running = true;
+    // THE TWO STREETS TAKE TURNS AT THE DOOR, not only at the end of a file.
+    // A track runs 1:29 or 2:11, so a visitor who does not stand at the window
+    // for that long only ever hears whichever one happens to be up — and
+    // without this, that is Đồng Khởi every single time, because a visit
+    // resumes where the last one stopped. Advancing on ARRIVAL means the
+    // second visit opens on Nguyễn Tri Phương, the third on Đồng Khởi again.
+    //
+    // It advances the INDEX, not the position: each track still resumes from
+    // its own currentTime, so neither of them restarts from the top.
+    if (this.arrived && this.street.length > 1) {
+      this.streetIndex = (this.streetIndex + 1) % this.street.length;
+    }
+    this.arrived = true;
     this.playEl(this.corridor.el);
     this.playEl(this.street[this.streetIndex].el);
     this.applyGains(this.data.fadeIn);
