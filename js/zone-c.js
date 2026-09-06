@@ -923,10 +923,17 @@ AFRAME.registerComponent("zone-c-root", {
       console.warn("zone-c: no #camera entity; skipping positional audio");
       return;
     }
-    this.listener = new THREE.AudioListener();
-    cameraEl.object3D.add(this.listener);
-    if (this.listener.context.state === "suspended") {
-      this.listener.context.resume();
+    // THE PAGE'S ONE LISTENER, not a second set of ears. This used to build
+    // its own AudioListener on the camera; the corridor's field recordings now
+    // want spatial audio too, and two listeners means two AudioContexts, two
+    // sets of ears in the same place, and sound panning against itself. It
+    // lives in AudioKit (js/audio.js) instead. Same object, same camera, same
+    // gesture-driven resume — the only difference is that whoever asks second
+    // gets the one that already exists.
+    this.listener = AudioKit.resume();
+    if (!this.listener) {
+      console.warn("zone-c: no AudioListener available; skipping positional audio");
+      return;
     }
 
     const audio = new THREE.PositionalAudio(this.listener);
@@ -950,9 +957,9 @@ AFRAME.registerComponent("zone-c-root", {
       this.audio.disconnect();
       this.screenEl.object3D.remove(this.audio);
     }
-    if (this.listener && this.listener.parent) {
-      this.listener.parent.remove(this.listener);
-    }
+    // The listener is NOT removed: it is AudioKit's, shared with the corridor,
+    // and it lives for the life of the page. Tearing it down here would take
+    // the ears out from under anything else still playing.
     this.screenEl.removeEventListener("click", this.onScreenClick);
     this.screenEl.removeEventListener("mouseenter", this.onScreenEnter);
     this.playBtn.removeEventListener("click", this.onPlayClick);

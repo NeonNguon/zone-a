@@ -11,8 +11,71 @@
 // Both focus views (desktop overlay + in-scene VR) drive this same module, so
 // play-on-open, stop-on-close, stop-on-switch and replay behave identically
 // in and out of the headset.
+//
+// This file also carries AudioKit — the page's ONE THREE.AudioListener, shared
+// by everything that wants spatial sound. See the block above it.
 // ================================================================
 window.ZoneA = window.ZoneA || {};
+
+// ================================================================
+// AudioKit — the page's single AudioListener, and the resume that unlocks it.
+//
+// THERE MUST ONLY EVER BE ONE. A THREE.AudioListener is the ears: it owns an
+// AudioContext and every PositionalAudio in the scene mixes into it. Two of
+// them means two AudioContexts, two sets of ears at the same place, and sound
+// that pans against itself — and browsers cap how many contexts a page may
+// open, so the second one can simply fail. Zone C's cinema built one for the
+// film; the corridor's field recordings need the same one, not another.
+//
+// So the listener lives here, on #camera, for the life of the page. It is
+// NEVER removed: a component that tore it down on its own remove() would take
+// the ears out from under everything else still playing. Whoever asks first
+// creates it; everyone after gets the same object. getListener() also ADOPTS a
+// listener already parented to the camera, so it stays correct if something
+// attaches one before this is called.
+//
+// THE RESUME NEEDS A USER GESTURE. An AudioContext created outside one starts
+// suspended on Quest and mobile and stays silent however much you play into
+// it. So resume() is called from inside the click that brings the visitor
+// somewhere with sound: Zone C's play button, and the corridor's teleport cut.
+// ================================================================
+window.AudioKit = (function () {
+  let listener = null;
+
+  return {
+    getListener: function () {
+      if (listener) return listener;
+      if (typeof THREE === "undefined") return null;
+      const cam = document.getElementById("camera");
+      if (!cam || !cam.object3D) {
+        console.warn("AudioKit: no #camera yet; spatial audio will be silent");
+        return null;
+      }
+      // Adopt one that is already there rather than adding a second.
+      cam.object3D.children.forEach(function (c) {
+        if (!listener && (c.type === "AudioListener" ||
+                          c instanceof THREE.AudioListener)) {
+          listener = c;
+        }
+      });
+      if (!listener) {
+        listener = new THREE.AudioListener();
+        cam.object3D.add(listener);
+      }
+      return listener;
+    },
+
+    // Call from inside a user gesture. Safe to call repeatedly.
+    resume: function () {
+      const l = this.getListener();
+      if (l && l.context && l.context.state === "suspended") {
+        const p = l.context.resume();
+        if (p && p.catch) p.catch(function () {});
+      }
+      return l;
+    },
+  };
+})();
 
 (function () {
   let el = null; // the single, reused <audio> element
@@ -39,8 +102,18 @@ window.ZoneA = window.ZoneA || {};
     return !!el && !el.paused && !el.ended;
   }
 
+  // The active view's label updater, plus a BROADCAST for anyone else who
+  // needs to know a memory is being spoken.
+  //
+  // setOnChange is a single slot and the focus views own it — whichever view
+  // is open holds it and clears it on close — so a second listener cannot just
+  // take it. The corridor's ambience has to duck under a spoken memory, and
+  // that is what this event is for: emit it, and anything may listen without
+  // touching the slot. Not bubbled: it is a page-level fact, not a DOM one.
   function notify() {
     if (onChange) onChange(isPlaying());
+    const scene = document.querySelector("a-scene");
+    if (scene) scene.emit("zonea-memory", { playing: isPlaying() }, false);
   }
 
   // play() rejects if the file is missing/unsupported or autoplay is blocked;
