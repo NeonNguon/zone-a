@@ -20,7 +20,8 @@
 
      ?draw=vent   the three bông gió block faces, and a butted row of them
      ?draw=door   the door atlas, front and back, side by side
-     ?draw=gate   the scissor gate's steel
+     ?draw=gate   the scissor gate's steel (the window grille's own recipe,
+                  at the gate's colour and rust)
      ============================================================ -->
 <meta charset="utf-8" />
 <title>corridor canvas probe</title>
@@ -99,7 +100,7 @@
         } else if (what === "gate") {
           tiles.push({
             label: "gate steel",
-            canvas: CorridorTextures.metalRust(256, seed, 0.4, "#35373a").image,
+            canvas: CorridorTextures.grilleIron(256, seed, 0.4, "#35373a").image,
             repeat: 4,
           });
         }

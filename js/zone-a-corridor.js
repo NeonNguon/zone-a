@@ -2895,6 +2895,22 @@ const roomImages = [
 //                                     "mixed" (one per door, seeded)
 //   ventColor #bfb8a8 / ventGrime .5  the concrete, and how filthy it is
 //   (transomHeight is GONE — the louvred fanlight it sized went with it)
+//   gate true                         the scissor gate (cửa kéo) outside every
+//                                     door: stretched across and padlocked, or
+//                                     folded into a stack beside it
+//   gateLockedRatio .3                how many CLOSED doors are locked, seeded
+//                                     per door — the apartments are ALWAYS
+//                                     folded, their pictures being the point
+//   gateBar .012 / gateBarThick .004  a flat bar, on edge
+//   gateStack .32                     the folded stack's width
+//   gateCells 7                       diamonds across; the ROW count derives
+//                                     from it (straps near 60 degrees)
+//   gateColor #35373a / gateRust .4   the steel, on the grille's own recipe
+//   gateTrackDepth .05                how far it all stands off the wall
+//   gatePark "seed"                   "hinge" | "far" | "seed" — and a stack
+//                                     that would hit a neighbour parks the
+//                                     other way regardless
+//   gateHeight is NOT a tunable: doorHeight - 0.05 (GATE_DROP)
 //   roomWidth 3.2 / roomDepth 4       the DEFAULT apartment: along / away from
 //                                     the run
 //   roomSizes [{},{},{}]              per-apartment { w, d } overrides, indexed
@@ -2923,12 +2939,20 @@ const roomImages = [
 //                                     the VR focus view's fit inside the
 //                                     SMALLEST apartment (see js/focus-vr.js)
 // ================================================================
+// How far a scissor gate's head sits under the door's own. gateHeight is
+// DERIVED from doorHeight and this, rather than being a tunable of its own: a
+// gate is cut to the opening it stands in, and a height that could disagree
+// with doorHeight is a height that eventually will.
+const GATE_DROP = 0.05;
+
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "roomWidth", "roomDepth", "roomSizes",
   "roomOffsets", "roomSpacing", "endWallShade",
   "vent", "ventBlock", "ventCols", "ventRows", "ventGap", "ventDepth",
   "ventPattern", "ventColor", "ventGrime",
+  "gate", "gateLockedRatio", "gateBar", "gateBarThick", "gateStack",
+  "gateCells", "gateColor", "gateRust", "gateTrackDepth", "gatePark",
   "window", "windowWidth", "windowHeight", "windowSill", "windowX",
   "windowRevealColor", "windowSillColor",
   "grilleBar", "grilleSpacingX", "grilleSpacingY", "grilleFrame",
@@ -2991,6 +3015,46 @@ AFRAME.registerComponent("corridor-root", {
     ventPattern: { type: "string", default: "mixed" },
     ventColor: { type: "color", default: "#bfb8a8" },
     ventGrime: { type: "number", default: 0.5 },
+
+    // ---- THE SCISSOR GATES (cửa kéo) -----------------------------------
+    // The folding steel gate outside every door: stretched across the opening
+    // and padlocked when the flat is shut, folded into a stack against the
+    // jamb when it is not. See the block above buildGateMeshes.
+    //
+    //   gateLockedRatio  how many of the CLOSED doors are locked, as a
+    //                    probability drawn per door from the corridor's seed —
+    //                    so the same corridor always locks the same doors, and
+    //                    changing `seed` reshuffles the whole run at once. The
+    //                    three apartment doorways are ALWAYS folded: their
+    //                    pictures are the point, and a lattice of steel across
+    //                    that is the exhibition behind bars.
+    //   gateBar          a flat bar's width across its face...
+    //   gateBarThick     ...and its thickness the other way. Flat bars on edge.
+    //   gateStack        how wide the gate is when it is folded
+    //   gateCells        diamonds across the extended span; the ROW count is
+    //                    derived from it, so the straps land near 60 degrees
+    //                    and the lattice closes on both rails
+    //   gateTrackDepth   how far the whole assembly stands off the wall's face
+    //                    (0.05 clears the 0.045 frame by five millimetres, and
+    //                    is well inside the collider's 0.25 m player radius —
+    //                    no collider change, see walkableRects)
+    //   gatePark         "hinge" (the +z jamb, where the doors are hung),
+    //                    "far", or "seed" — and whichever is asked for, a
+    //                    stack that would hit a neighbour's frame parks on the
+    //                    other side instead
+    //   gate false       no gates at all
+    //
+    // gateHeight is not here: it is doorHeight - GATE_DROP.
+    gate: { type: "boolean", default: true },
+    gateLockedRatio: { type: "number", default: 0.3 },
+    gateBar: { type: "number", default: 0.012 },
+    gateBarThick: { type: "number", default: 0.004 },
+    gateStack: { type: "number", default: 0.32 },
+    gateCells: { type: "number", default: 7 },
+    gateColor: { type: "color", default: "#35373a" },
+    gateRust: { type: "number", default: 0.4 },
+    gateTrackDepth: { type: "number", default: 0.05 },
+    gatePark: { type: "string", default: "seed" },
 
     // The DEFAULT apartment, used by any of the three that does not override it.
     roomWidth: { type: "number", default: 3.2 },
@@ -3271,6 +3335,8 @@ AFRAME.registerComponent("corridor-root", {
     this.instanced = [];
     this.ventPlacements = {};
     this.ventCount = 0;
+    this.gates = [];
+    this.gateInfo = null;
     this.hiddenClickables = []; // clickables parked while the corridor is hidden
     this.built = false;
 
@@ -3762,6 +3828,20 @@ AFRAME.registerComponent("corridor-root", {
       ventFrame: this.mat({
         color: new THREE.Color(d.ventColor).multiplyScalar(0.78),
       }),
+      // THE GATES' STEEL, on the window grille's own recipe. grilleIron draws
+      // exactly this — black paint going to rust, u along the bar and v across
+      // its section — and a scissor gate is nothing but bars, so it is reused
+      // rather than copied under a new name. Its cache key carries the colour
+      // and the rust, so the gates get their own canvas at their own settings
+      // without touching the window's.
+      gate: this.mat({
+        map: CorridorTextures.grilleIron(256, d.seed, d.gateRust, d.gateColor),
+      }),
+      // ...and the track and floor rail: painted steel that has never been
+      // touched, so a flat dark and no canvas at all.
+      gateTrack: this.mat({
+        color: new THREE.Color(d.gateColor).multiplyScalar(0.72),
+      }),
       frame: this.mat({ color: new THREE.Color(d.frameColor) }),
       // Window trim. Flat colours: a sill is a cast slab, it has no grain worth
       // a canvas. (Note the setScalar/hex distinction on endWall above — these
@@ -3786,9 +3866,11 @@ AFRAME.registerComponent("corridor-root", {
     // place, so the walls only COLLECT the placements and one pass at the end
     // turns them into a couple of instanced meshes — see buildVentMeshes.
     this.ventPlacements = {};
+    this.gates = [];
     this.buildSideWall(L, -1);
     this.buildSideWall(L, +1);
     this.buildVentMeshes(L);
+    this.buildGateMeshes(L);
     this.buildTubes(L);
     this.partyWalls = {}; // two abutting apartments share ONE wall - see below
     L.rooms.forEach((r) => this.buildRoom(L, r));
@@ -3826,6 +3908,13 @@ AFRAME.registerComponent("corridor-root", {
         L.rooms.length + " apartments, " + this.imageEls.length + " images, " +
         this.ventCount + " vent blocks in " +
         Object.keys(this.ventPlacements).length + " pattern(s), " +
+        (this.gateInfo
+          ? this.gateInfo.locked + " locked + " + this.gateInfo.folded +
+            " folded gates (" + this.gateInfo.bars + " bars each, " +
+            this.gateInfo.cells + "x" + this.gateInfo.rows + ", straps at " +
+            this.gateInfo.angle.toFixed(0) + " deg extended / " +
+            this.gateInfo.foldAngle.toFixed(0) + " folded), "
+          : "no gates, ") +
         this.group.children.length + " meshes | textures " +
         allT.ms.toFixed(0) + " ms total, " + wallT.drawn + " wall canvas(es) " +
         (wallT.drawn ? (wallT.ms / wallT.drawn).toFixed(0) : "0") +
@@ -4330,9 +4419,365 @@ AFRAME.registerComponent("corridor-root", {
       cursor = op.z - op.width / 2;
       this.buildDoorFrame(L, side, op);
       if (!op.open) this.buildClosedDoor(L, side, op, i);
+      // ...and its gate. Decided here, where the door's neighbours on this
+      // wall are to hand for the parking check; built once for the whole
+      // corridor by buildGateMeshes.
+      this.collectGate(L, side, op, list);
     });
     const lastOpen = list.length > 0 && list[list.length - 1].open;
     seg(cursor, L.zLo, 0, d.height, lastOpen ? 0 : rot(list.length));
+  },
+
+  // ---------------------------------------------------------------
+  // THE SCISSOR GATES (cửa kéo)
+  //
+  // The folding steel gate that stands outside every door in a chung cư:
+  // stretched across the opening and padlocked when the flat is shut, shoved
+  // into a stack against the jamb when it is not. It is what makes a corridor
+  // of doors read as a corridor of HOMES — a door says there is a room behind
+  // it, a gate says somebody locks it.
+  //
+  // ONE GEOMETRY PER STATE, FOR THE WHOLE CORRIDOR. A gate is forty-odd flat
+  // bars, and a mesh per bar would be three hundred draw calls over seven
+  // doors. Every opening here is the same width (layout() gives them all
+  // doorWidth), the lattice lies in the y-z plane whichever wall it hangs on,
+  // and both states are built SYMMETRIC in z — so an extended gate and a folded
+  // one are each one merged BufferGeometry, and one door differs from the next
+  // by a TRANSLATION and nothing else. That is what lets InstancedMesh do it:
+  // two draw calls for every gate in the corridor, one more for all the tracks
+  // and one for all the padlocks. Four, for the lot, however long the corridor
+  // gets.
+  //
+  // THE LATTICE, both states out of one generator. Nodes sit on a diamond grid
+  // `cells` wide and `rows` tall, and the bars are the LONG straps through it,
+  // one family per diagonal — which is what a real gate is: long steel running
+  // corner to corner and riveted where it crosses, not a mesh of short pieces.
+  // Extended, the span is the opening plus its frame and the straps land near
+  // 60 degrees off horizontal; folded, the SAME bar count is squeezed into
+  // gateStack and the identical construction takes them up to near 80, which is
+  // exactly what collapsing a pantograph does to it.
+  //
+  // gateHeight is DERIVED, not a tunable: doorHeight - GATE_DROP. A gate is cut
+  // to its own opening, and a number that could disagree with doorHeight is a
+  // number that eventually will.
+  // ---------------------------------------------------------------
+
+  // ONE FLAT BAR, as a box from `a` to `b` in the wall's y-z plane. `w` is the
+  // strap's width across its face; the thickness is the other way. These are
+  // FLAT bars on edge, and which way round that is decides whether the gate
+  // reads as steel or as wire.
+  gateStrap: function (parts, a, b, w, thick, tile) {
+    const dy = b.y - a.y;
+    const dz = b.z - a.z;
+    const len = Math.hypot(dy, dz);
+    if (len < 1e-4) return;
+    const g = new THREE.BoxGeometry(thick, w, len);
+    // u ALONG the bar, v across its section — the same mapping the window
+    // grille's iron uses, which is why the same canvas recipe serves both. The
+    // phase comes from where the bar STANDS, so no two straps in the lattice
+    // are rusted alike and the whole gate still costs one texture.
+    const pos = g.attributes.position;
+    const uvs = g.attributes.uv;
+    const phase = (a.y + a.z) * 3.7;
+    for (let i = 0; i < pos.count; i++) {
+      const face = Math.floor(i / 4); // 0:+x 1:-x 2:+y 3:-y 4:+z 5:-z
+      uvs.setXY(
+        i,
+        (phase + pos.getZ(i)) / tile,
+        face === 0 || face === 1
+          ? pos.getY(i) / w + 0.5
+          : pos.getX(i) / thick + 0.5
+      );
+    }
+    // A box's length is along its local z, and Rx(t) takes (0, 0, 1) to
+    // (0, -sin t, cos t) — so the rotation that aims it at (dy, dz) is MINUS
+    // that angle. A vertical bar therefore comes out with its width across z,
+    // which is what a vertical strap on a gate actually is.
+    g.rotateX(-Math.atan2(dy, dz));
+    g.translate(0, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    parts.push(g);
+  },
+
+  // THE LATTICE. `span` is how wide the gate stands — the opening plus its
+  // frame when it is stretched across, gateStack when it is folded — and
+  // `cells` and `rows` are the same for both, which is what "the same gate,
+  // collapsed" means.
+  //
+  // Nodes are (i, j), i across and j up, i in 0..2*cells and j in 0..2*rows,
+  // and a node exists wherever i + j is even. A strap of the first family runs
+  // along i - j = const and one of the second along i + j = const; each is a
+  // single straight bar from where that line enters the rectangle to where it
+  // leaves, so the count is cells + rows + 1 per family however fine the grid.
+  //
+  // SYMMETRIC IN Z, deliberately: the heavy leading stile is built at BOTH
+  // ends. A gate that parks toward +z leads with its -z end and the other way
+  // round, and one symmetric geometry serves both instead of two mirrored ones.
+  gateGeometry: function (span, height, cells, rows, bar, thick, tile) {
+    const parts = [];
+    const hx = span / (2 * cells);
+    const hy = height / (2 * rows);
+    const nx = 2 * cells;
+    const ny = 2 * rows;
+    const P = (i, j) => ({ z: i * hx - span / 2, y: j * hy });
+
+    for (let c = -ny; c <= nx; c += 2) {
+      const j0 = Math.max(0, -c); // i - j = c
+      const j1 = Math.min(ny, nx - c);
+      if (j1 > j0) {
+        this.gateStrap(parts, P(j0 + c, j0), P(j1 + c, j1), bar, thick, tile);
+      }
+    }
+    for (let c = 0; c <= nx + ny; c += 2) {
+      const j0 = Math.max(0, c - nx); // i + j = c
+      const j1 = Math.min(ny, c);
+      if (j1 > j0) {
+        this.gateStrap(parts, P(c - j0, j0), P(c - j1, j1), bar, thick, tile);
+      }
+    }
+
+    // THE PIVOT BARS: a vertical strap on every column where the diamonds meet,
+    // which is where a real gate carries its rivets and its castors.
+    for (let k = 0; k <= cells; k++) {
+      const z = k * 2 * hx - span / 2;
+      this.gateStrap(parts, { y: 0, z: z }, { y: height, z: z }, bar, thick,
+                     tile);
+    }
+
+    // TOP AND BOTTOM RAIL: what the gate hangs from, and what it runs on.
+    [bar / 2, height - bar / 2].forEach((y) => {
+      this.gateStrap(parts, { y: y, z: -span / 2 }, { y: y, z: span / 2 }, bar,
+                     thick * 1.6, tile);
+    });
+
+    // THE LEADING STILES. Twice the bar and twice the thickness: it is the only
+    // part of a gate anybody ever touches, and it is what the padlock goes
+    // through.
+    [-1, 1].forEach((s) => {
+      const z = s * (span / 2 - bar);
+      this.gateStrap(parts, { y: 0, z: z }, { y: height, z: z }, bar * 2,
+                     thick * 2.4, tile);
+    });
+    return { geometry: mergeGeometries(parts), bars: parts.length };
+  },
+
+  // THE TRACK AND THE FLOOR RAIL, as one geometry: the channel the gate hangs
+  // from — above the frame head and under the vent row — and the shallow rail
+  // it runs on. Both are as long as the opening PLUS the stack, because that is
+  // how far the gate has to travel.
+  //
+  // The rail is set out past frameDepth rather than centred on the gate's own
+  // plane, so it runs in FRONT of the jambs instead of through their feet. It
+  // is 10 mm high; the collider keeps the camera playerRadius (0.25 m) off the
+  // wall and the whole assembly is 50 mm deep, so none of this needs a collider
+  // notch — see the note in walkableRects.
+  gateTrackGeometry: function (len, headY, depth, frameDepth) {
+    const parts = [];
+    const CH = 0.045; // the channel's face height
+    const RAIL = 0.01;
+    const RAIL_D = 0.025;
+    const chan = new THREE.BoxGeometry(depth * 0.7, CH, len);
+    chan.translate(0, headY + CH / 2, 0);
+    parts.push(chan);
+    const rail = new THREE.BoxGeometry(RAIL_D, RAIL, len);
+    // Its own x is measured from the gate plane back toward the wall, and the
+    // gate plane is gateTrackDepth out; so this puts the rail's near edge on
+    // the frame's outer face exactly.
+    rail.translate(depth - frameDepth - RAIL_D / 2, RAIL / 2, 0);
+    parts.push(rail);
+    return mergeGeometries(parts);
+  },
+
+  // THE PADLOCK on a gate that is locked: a body, a shackle over it, and three
+  // links of chain up to the stile. Built once at the origin and dropped at
+  // every locked gate. Boxes, not tori — a torus is three hundred triangles for
+  // something three centimetres across that nobody will ever get closer to than
+  // the collider's quarter metre.
+  gatePadlockGeometry: function () {
+    const parts = [];
+    parts.push(new THREE.BoxGeometry(0.022, 0.05, 0.036));
+    [-1, 1].forEach((s) => {
+      const g = new THREE.BoxGeometry(0.008, 0.028, 0.008);
+      g.translate(0, 0.037, s * 0.012);
+      parts.push(g);
+    });
+    const top = new THREE.BoxGeometry(0.008, 0.008, 0.032);
+    top.translate(0, 0.049, 0);
+    parts.push(top);
+    // Three links of chain, each turned a quarter on the last.
+    for (let k = 0; k < 3; k++) {
+      const flat = k % 2 === 0;
+      const g = new THREE.BoxGeometry(flat ? 0.006 : 0.016, 0.02,
+                                      flat ? 0.016 : 0.006);
+      g.translate(0, 0.062 + k * 0.017, 0);
+      parts.push(g);
+    }
+    return mergeGeometries(parts);
+  },
+
+  // WHICH SIDE the folded stack parks on, as +1 (toward +z) or -1.
+  //
+  //   "hinge"  the side the wooden door itself is hung on, which is the +z jamb
+  //            everywhere here (buildOpenDoor pivots there)
+  //   "far"    the other one
+  //   "seed"   per door, from the same doorKey its paint and its vent pattern
+  //            come from
+  //
+  // ...and then CHECKED, because a stack is gateStack wide and has to go
+  // somewhere real: if it would run into a neighbouring door's frame, or off
+  // the end of the run, it parks on the other side instead; if neither side is
+  // clear the corridor says so and parks it where it was asked to. The vent row
+  // can never be in the way at any setting — the row lives inside the lintel,
+  // between the jambs, and the stack is always outside them.
+  gateParkSide: function (L, side, op, list) {
+    const d = this.data;
+    const preferred =
+      d.gatePark === "far"
+        ? -1
+        : d.gatePark === "seed"
+        ? this.doorKey(op.z, side) % 2 === 0
+          ? 1
+          : -1
+        : 1; // "hinge"
+    const half = op.width / 2 + d.frameWidth;
+    const clear = (s) => {
+      const a = op.z + s * half;
+      const b = a + s * d.gateStack;
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      if (lo < L.zEnd || hi > L.zBack) return false; // off the end of the run
+      return !list.some((o) => {
+        if (o === op) return false;
+        const oh = o.width / 2 + d.frameWidth;
+        return o.z + oh > lo && o.z - oh < hi;
+      });
+    };
+    if (clear(preferred)) return preferred;
+    if (clear(-preferred)) return -preferred;
+    console.warn(
+      "[corridor] the folded gate beside the door at z " + op.z.toFixed(2) +
+        " has nowhere to park: a " + d.gateStack + " m stack runs into a " +
+        "neighbouring frame, or off the end of the run, on BOTH sides. " +
+        "doorPitch is " + d.doorPitch + " m and a door with its frame is " +
+        (op.width + d.frameWidth * 2).toFixed(2) + " m wide. Widen doorPitch " +
+        "or narrow gateStack. Parking it on the preferred side regardless."
+    );
+    return preferred;
+  },
+
+  // ONE DOOR'S GATE — decided and collected, not built. buildGateMeshes turns
+  // the corridor's whole set into four draw calls once both walls are up.
+  //
+  // LOCKED OR OPEN. The three APARTMENT doorways are always folded: their doors
+  // stand open, their pictures are the point of the whole room, and a lattice
+  // of steel across that is the exhibition behind bars. Every CLOSED door takes
+  // its chances — locked with probability gateLockedRatio, drawn from the
+  // corridor's own seeded PRNG through doorKey, so the same corridor always
+  // locks the same doors and changing `seed` reshuffles the entire run at once.
+  //
+  // Through the PRNG and not doorKey % 100: doorKey is a rounded linear
+  // function of z, so its low digits march in step down the corridor and a
+  // straight modulo would have locked doors in a repeating pattern rather than
+  // at random.
+  collectGate: function (L, side, op, list) {
+    const d = this.data;
+    if (!d.gate) return;
+    const locked =
+      !op.open &&
+      CorridorTextures.rand(this.doorKey(op.z, side) * 733 + 11)() <
+        d.gateLockedRatio;
+    const park = this.gateParkSide(L, side, op, list);
+    const half = op.width / 2 + d.frameWidth;
+    this.gates.push({
+      // The gate's plane: gateTrackDepth out from the wall's inner face, which
+      // clears the frame (frameDepth 0.045) by five millimetres.
+      x: side * (L.halfW - d.gateTrackDepth),
+      y: 0,
+      // EXTENDED sits centred on the opening; FOLDED sits just outside the
+      // frame on its park side, its own width beyond it.
+      z: locked ? op.z : op.z + park * (half + d.gateStack / 2),
+      // The track has to cover the opening AND the stack, so it is centred half
+      // a stack over toward wherever this gate parks.
+      trackZ: op.z + (park * d.gateStack) / 2,
+      locked: locked,
+      park: park,
+      op: op,
+      side: side,
+    });
+  },
+
+  // EVERY GATE IN THE CORRIDOR: two lattice geometries, one track, one padlock,
+  // four InstancedMeshes, two materials.
+  buildGateMeshes: function (L) {
+    const d = this.data;
+    if (!this.gates.length) return;
+    const H = d.doorHeight - GATE_DROP;
+    const span = d.doorWidth + d.frameWidth * 2;
+    const cells = Math.max(2, Math.round(d.gateCells));
+    // ROWS come from the ANGLE, not from a tunable of their own: at `cells`
+    // across, a diamond is span/cells wide, and the row count that puts the
+    // diagonals nearest 60 degrees off horizontal is height / (width * tan 60).
+    // Deriving it is also what keeps the lattice CLOSED at both rails — a
+    // fractional row would leave the top course cut through.
+    const rows = Math.max(2, Math.round(H / ((span / cells) * Math.sqrt(3))));
+    const tile = d.grilleTile; // metres of bar per texture repeat, as the grille
+    const ext = this.gateGeometry(span, H, cells, rows, d.gateBar,
+                                  d.gateBarThick, tile);
+    const fold = this.gateGeometry(d.gateStack, H, cells, rows, d.gateBar,
+                                   d.gateBarThick, tile);
+    const track = this.gateTrackGeometry(
+      span + d.gateStack,
+      d.doorHeight + d.frameWidth + 0.005, // just clear of the frame head
+      d.gateTrackDepth,
+      d.frameDepth
+    );
+    const lock = this.gatePadlockGeometry();
+    this.geometries.push(ext.geometry, fold.geometry, track, lock);
+
+    const place = (geo, material, list, at) => {
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(geo, material, list.length);
+      const m4 = new THREE.Matrix4();
+      list.forEach((g, i) => {
+        const p = at(g);
+        m4.makeTranslation(p.x, p.y, p.z);
+        im.setMatrixAt(i, m4);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.computeBoundingSphere();
+      this.group.add(im);
+      this.instanced.push(im);
+    };
+
+    const locked = this.gates.filter((g) => g.locked);
+    const folded = this.gates.filter((g) => !g.locked);
+    place(ext.geometry, this.m.gate, locked, (g) => g);
+    place(fold.geometry, this.m.gate, folded, (g) => g);
+    place(track, this.m.gateTrack, this.gates,
+          (g) => ({ x: g.x, y: 0, z: g.trackZ }));
+    // THE PADLOCKS hang on the leading stile at 1.0 m — the end AWAY from
+    // wherever this gate would park, which is the end that meets the jamb. A
+    // seeded nudge each, because they are hung by hand.
+    place(lock, this.m.gate, locked, (g) => {
+      const r = CorridorTextures.rand(this.doorKey(g.op.z, g.side) * 97 + 3);
+      const lead = -g.park * (span / 2 - d.gateBar);
+      return {
+        x: g.x - g.side * 0.024, // on the corridor side of the lattice
+        y: 1.0 + (r() - 0.5) * 0.06,
+        z: g.z + lead - g.park * 0.014 + (r() - 0.5) * 0.012,
+      };
+    });
+    this.gateInfo = {
+      locked: locked.length,
+      folded: folded.length,
+      bars: ext.bars,
+      rows: rows,
+      cells: cells,
+      // The straps' angle off horizontal, which is the number to look at if a
+      // gate ever reads wrong: an extended one should be near 60, a folded one
+      // steep enough to stack.
+      angle: (Math.atan2(H / rows, span / cells) * 180) / Math.PI,
+      foldAngle: (Math.atan2(H / rows, d.gateStack / cells) * 180) / Math.PI,
+    };
   },
 
   // ---------------------------------------------------------------
@@ -4944,6 +5389,8 @@ AFRAME.registerComponent("corridor-root", {
     this.instanced = [];
     this.ventPlacements = {};
     this.ventCount = 0;
+    this.gates = [];
+    this.gateInfo = null;
     this.imageEls.forEach(function (el) {
       if (el.parentNode) el.parentNode.removeChild(el);
     });
