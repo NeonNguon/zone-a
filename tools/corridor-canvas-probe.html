@@ -1,0 +1,141 @@
+<!doctype html>
+<!-- ============================================================
+     A HEADLESS PROBE for the corridor's runtime canvases.
+
+     There is no node on this machine, so the only JavaScript engine to hand is
+     the browser — and the canvases in js/zone-a-corridor.js are drawn with the
+     2D context anyway, so a browser is the honest place to look at them. This
+     page loads the real file with a stub AFRAME (so its two registerComponent
+     calls do not need A-Frame) and a stub THREE.CanvasTexture (so
+     CorridorTextures.get can wrap a canvas without a GPU), then draws whatever
+     the query string asks for onto a dark ground and hands the result back as
+     a data URL in #out.
+
+     Run it, and read the answer out of the DOM:
+       chrome --headless=new --disable-gpu --dump-dom
+              "file:///.../tools/corridor-canvas-probe.html?draw=vent"
+
+     #status carries "OK" or the parse/runtime error, so this doubles as the
+     syntax check the missing node would otherwise have given.
+
+     ?draw=vent   the three bông gió block faces, and a butted row of them
+     ?draw=door   the door atlas, front and back, side by side
+     ?draw=gate   the scissor gate's steel (the window grille's own recipe,
+                  at the gate's colour and rust)
+     ============================================================ -->
+<meta charset="utf-8" />
+<title>corridor canvas probe</title>
+<style>
+  body { background: #101014; color: #ddd; font: 12px monospace; }
+  img { image-rendering: pixelated; }
+</style>
+<body>
+  <div id="status">loading</div>
+  <div id="out"></div>
+  <img id="preview" />
+
+  <script>
+    // The stubs. zone-a-corridor.js touches AFRAME at load (two
+    // registerComponent calls) and THREE only inside functions — except
+    // CorridorTextures.texture(), which every canvas getter returns through.
+    window.AFRAME = {
+      registerComponent: function (name) {
+        (window.__registered = window.__registered || []).push(name);
+      },
+    };
+    window.THREE = {
+      CanvasTexture: function (canvas) {
+        this.image = canvas;
+      },
+      SRGBColorSpace: "srgb",
+      RepeatWrapping: 1000,
+    };
+    window.onerror = function (msg, src, line, col) {
+      document.getElementById("status").textContent =
+        "ERROR " + msg + " @ " + src + ":" + line + ":" + col;
+      return true;
+    };
+  </script>
+  <script src="../js/zone-a-corridor.js"></script>
+  <script>
+    (function () {
+      const status = document.getElementById("status");
+      if (status.textContent.indexOf("ERROR") === 0) return;
+      try {
+        const q = new URLSearchParams(location.search);
+        const what = q.get("draw") || "vent";
+        const seed = Number(q.get("seed") || 1);
+        // A dark ground, so a hole cut by alpha reads as a hole and not as
+        // white paper.
+        const pad = 12;
+        let tiles = [];
+
+        if (what === "vent") {
+          CorridorTextures.VENT_PATTERNS.forEach(function (p) {
+            tiles.push({
+              label: p,
+              canvas: CorridorTextures.ventFace(256, seed, p, "#bfb8a8", 0.5)
+                .image,
+              repeat: 1,
+            });
+          });
+          // ...and a butted row of four, which is what a door actually gets.
+          tiles.push({
+            label: "row x4",
+            canvas: CorridorTextures.ventFace(256, seed, "flower", "#bfb8a8",
+                                              0.5).image,
+            repeat: 4,
+          });
+        } else if (what === "door") {
+          tiles.push({
+            label: "front atlas",
+            canvas: CorridorTextures.doorAtlas(512, seed).image,
+            repeat: 1,
+          });
+          tiles.push({
+            label: "back atlas",
+            canvas: CorridorTextures.doorAtlasBack(512, seed).image,
+            repeat: 1,
+          });
+        } else if (what === "gate") {
+          tiles.push({
+            label: "gate steel",
+            canvas: CorridorTextures.grilleIron(256, seed, 0.4, "#35373a").image,
+            repeat: 4,
+          });
+        }
+
+        const cell = 256;
+        const W = tiles.reduce(function (a, t) {
+          return a + cell * t.repeat + pad;
+        }, pad);
+        const H = cell + pad * 2 + 16;
+        const out = document.createElement("canvas");
+        out.width = W;
+        out.height = H;
+        const ctx = out.getContext("2d");
+        ctx.fillStyle = "#101014";
+        ctx.fillRect(0, 0, W, H);
+        let x = pad;
+        tiles.forEach(function (t) {
+          for (let k = 0; k < t.repeat; k++) {
+            ctx.drawImage(t.canvas, x + k * cell, pad, cell, cell);
+          }
+          ctx.fillStyle = "#9aa";
+          ctx.font = "13px monospace";
+          ctx.fillText(t.label, x, pad + cell + 13);
+          x += cell * t.repeat + pad;
+        });
+
+        const url = out.toDataURL("image/png");
+        document.getElementById("preview").src = url;
+        document.getElementById("out").textContent = url;
+        status.textContent =
+          "OK registered=" + (window.__registered || []).join(",") +
+          " size=" + W + "x" + H;
+      } catch (e) {
+        status.textContent = "ERROR " + (e && e.stack ? e.stack : e);
+      }
+    })();
+  </script>
+</body>
