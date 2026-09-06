@@ -35,9 +35,9 @@
 // teardown() like everything else.
 //
 // WHERE THEY GO IS DERIVED, not typed: furnitureLayout() reads L.openings and
-// puts the seats between the corridor's mouth and the first closed door on the
-// right, and the bike between the first two closed doors on the left. Change
-// doorPitch and the furniture moves with the doors. That function is PURE and
+// puts the seats between the SECOND and THIRD door on the right and the bike
+// between the first two closed doors on the left. Change doorPitch and the
+// furniture moves with the doors. That function is PURE and
 // takes no part in the build, because walkableRects() needs the same answer and
 // rig-collision calls it whenever it likes — including before the corridor has
 // ever been built.
@@ -4603,7 +4603,8 @@ AFRAME.registerComponent("corridor-root", {
   // THE FURNITURE — four props from js/props.js, put where the DOORS say.
   //
   // Nothing here is a typed coordinate. The seat row goes in the stretch
-  // between the mouth and the first closed door on the right; the bike goes
+  // between the SECOND and THIRD door on the right — counting every opening
+  // from the mouth, so the third is the apartment doorway; the bike goes
   // between the first two closed doors on the left. Both come out of
   // L.openings, so changing doorPitch or lengthening the corridor moves the
   // furniture with the doors instead of leaving it standing in a doorway.
@@ -4649,8 +4650,15 @@ AFRAME.registerComponent("corridor-root", {
     const out = [];
 
     // ---- THE SEAT ROW + ITS TABLE, on the RIGHT wall -------------------
+    // BETWEEN THE SECOND AND THIRD DOOR, counting from the corridor's mouth.
+    // layout() already orders each wall's openings that way, and this counts
+    // ALL of them — the two closed doors and then the apartment doorway —
+    // because "the third door on the right" is the third thing that looks like
+    // a door as you walk in, whether or not it opens.
+    //
+    // It used to sit in the first stretch, between the mouth and the first
+    // door, where you walked straight into it on arrival.
     const rightList = L.openings["1"] || [];
-    const firstClosed = rightList.filter((o) => !o.open)[0] || rightList[0];
     const seatOpts = {
       seats: 3, seatWidth: 0.58, seatDepth: 0.55, seatH: 0.42, backH: 0.55,
       color: "#5a2e1e", color2: "#7a4430", wear: 0.6,
@@ -4661,23 +4669,24 @@ AFRAME.registerComponent("corridor-root", {
     const CLEAR = 0.4; // the elbow room the brief asks for either side of it
     let rowZ;
     let placedInLanding = false;
-    if (firstClosed) {
-      // The gap: from the corridor's mouth (z = 0) to that door's NEAR frame
-      // edge — the frame, not the opening, or the row would touch the timber.
-      const doorEdge = firstClosed.z + firstClosed.width / 2 + fw;
-      const gap = -doorEdge; // doorEdge is negative; the gap runs 0 -> it
+    if (rightList.length >= 3) {
+      // The gap between their facing FRAME edges — the frame, not the opening,
+      // or the row would touch the timber.
+      const a = rightList[1].z - rightList[1].width / 2 - fw; // 2nd, far edge
+      const b = rightList[2].z + rightList[2].width / 2 + fw; // 3rd, near edge
+      const gap = a - b;
       if (gap >= rowW + CLEAR) {
-        rowZ = doorEdge / 2;
+        rowZ = (a + b) / 2;
       } else {
         placedInLanding = true;
         if (warn) {
           console.warn(
-            "[corridor] no room for the seat row between the mouth and the " +
-              "first door on the right: the gap is " + gap.toFixed(2) +
+            "[corridor] no room for the seat row between the second and third " +
+              "doors on the right: the gap is " + gap.toFixed(2) +
               " m and the row needs " + (rowW + CLEAR).toFixed(2) +
               " (3 seats of " + seatOpts.seatWidth + " m plus " + CLEAR +
-              " m). Standing it on the LANDING's right-hand wall instead. " +
-              "Widen doorPitch (now " + d.doorPitch + ") to put it back."
+              " m of elbow room). Standing it on the LANDING's right-hand wall " +
+              "instead. Widen doorPitch (now " + d.doorPitch + ") to put it back."
           );
         }
       }
@@ -4685,8 +4694,9 @@ AFRAME.registerComponent("corridor-root", {
       placedInLanding = true;
       if (warn) {
         console.warn(
-          "[corridor] there are no doors on the right-hand wall, so the seat " +
-            "row has nothing to sit in front of. Standing it on the landing."
+          "[corridor] the right-hand wall has only " + rightList.length +
+            " opening(s), so there is no gap between a second and a third " +
+            "door for the seat row. Standing it on the landing instead."
         );
       }
     }

@@ -259,7 +259,6 @@ const PropKit = {
 
     const rowW = seats * sw;
     const plinthH = 0.11; // the dark base the chairs stand on
-    const cushionH = 0.12;
     const backT = 0.09;
 
     // THE PLINTH, running a little past the row at both ends, and its two feet.
@@ -284,9 +283,14 @@ const PropKit = {
       // step in the skyline of the row is the first thing you notice about it.
       const sHi = mid ? sh + 0.035 : sh;
       const bHi = mid ? bh * 1.14 : bh;
-      // THE CUSHION: its top at seatH, so seatH means what it says.
-      this.add(ctx, new THREE.BoxGeometry(sw - GAP, cushionH, sd), m,
-               x, sHi - cushionH / 2, 0);
+      // THE CHAIR IS A SOLID BLOCK from the plinth up to the seat, not a
+      // cushion hovering over it. It used to be a 12 cm slab with its top at
+      // seatH, which left 19 cm of nothing between it and the plinth and made
+      // all three chairs look like they were floating. A chair like this — a
+      // vinyl box on a dark base — has no legs to see between.
+      const bodyH = sHi - plinthH;
+      this.add(ctx, new THREE.BoxGeometry(sw - GAP, bodyH, sd), m,
+               x, plinthH + bodyH / 2, 0);
       // THE BACK, leaning back a little, standing on the cushion's rear edge.
       const back = this.add(
         ctx, new THREE.BoxGeometry(sw - GAP, bHi, backT), m,
@@ -298,10 +302,13 @@ const PropKit = {
 
     // THE ARMS, only at the two ends of the row — the chairs in the photograph
     // have wings between them rather than a rail, and the seat gaps already
-    // read as divisions.
+    // read as divisions. They run down to the plinth like the chairs do, for
+    // the same reason.
+    const armTop = sh * 1.32;
     [-1, 1].forEach((s) => {
-      this.add(ctx, new THREE.BoxGeometry(aw, sh * 0.42, sd * 0.86), outer,
-               s * (rowW / 2 - aw / 2), sh + sh * 0.11, 0.02);
+      this.add(ctx, new THREE.BoxGeometry(aw, armTop - plinthH, sd * 0.86),
+               outer, s * (rowW / 2 - aw / 2),
+               plinthH + (armTop - plinthH) / 2, 0.02);
     });
 
     return ctx.group;
@@ -452,15 +459,25 @@ const PropKit = {
 
     // FOUR SPLAYED ROUND LEGS. Thin, and leaning out a little, which is what
     // stops a low table looking like a box on stilts.
+    //
+    // THEY ARE PLACED BY ANGLE ON THE ELLIPSE, not by a fraction of the
+    // rectangle it fits in. A corner at (0.78 w/2, 0.78 d/2) is at normalised
+    // radius 0.78 * sqrt(2) = 1.10 — OUTSIDE the oval top — so all four legs
+    // stood off the rim, touching nothing, which is exactly how they looked.
+    // Going round by angle instead makes `reach` mean what it says: 0.85 is
+    // 85% of the way to the rim, whatever the rim is doing at that bearing.
     const LEG_R = 0.011;
-    const inset = 0.78; // how far out toward the rim they stand
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((s) => {
-      const tx = (s[0] * w * inset) / 2;
-      const tz = (s[1] * d * inset) / 2;
-      // The foot splays outward from the top fixing by the lean over the drop.
-      const spread = Math.tan(splay) * h;
+    const reach = 0.85; // fraction of the way out to the rim
+    const BEARING = (25 * Math.PI) / 180; // off the long axis: legs near the ends
+    // Up INTO the slab, not to just under it: a leg that stops at the apron's
+    // underside shows daylight at the joint from a low angle.
+    const legTop = h - TOP_T / 2;
+    const spread = Math.tan(splay) * h;
+    [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach((s) => {
+      const tx = (s[0] * w * reach * Math.cos(BEARING)) / 2;
+      const tz = (s[1] * d * reach * Math.sin(BEARING)) / 2;
       this.tube(ctx, legMat,
-                [tx, h - TOP_T - 0.018, tz],
+                [tx, legTop, tz],
                 [tx + s[0] * spread * 0.5, 0, tz + s[1] * spread * 0.5],
                 LEG_R, 7);
     });
