@@ -2149,6 +2149,8 @@ const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
   "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSizes",
   "roomOffsets", "roomSpacing", "endWallShade",
+  "window", "windowWidth", "windowHeight", "windowSill", "windowX",
+  "windowRevealColor", "windowSillColor",
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
@@ -2303,6 +2305,23 @@ AFRAME.registerComponent("corridor-root", {
     // straight linear multiplier: 1 is identical, and the default is a hint of
     // recession you would not notice unless you looked for it.
     endWallShade: { type: "number", default: 0.92 },
+
+    // ---- THE WINDOW in the end wall ------------------------------------
+    // The corridor's dead end is not dead: it carries a big barred window with
+    // the city behind it, so the whole run reads as an approach to that view.
+    // `window` false restores a solid end wall and skips the grille, the view
+    // and the daylight with it.
+    //   windowX     centre along the wall; 0 is the corridor's centreline
+    //   windowSill  the opening's bottom, above the floor
+    //   windowRevealColor  "" leaves the four reveals in the wall's own
+    //                      texture; a colour paints them (painted concrete)
+    window: { type: "boolean", default: true },
+    windowWidth: { type: "number", default: 2.8 },
+    windowHeight: { type: "number", default: 1.5 },
+    windowSill: { type: "number", default: 1.0 },
+    windowX: { type: "number", default: 0 },
+    windowRevealColor: { type: "color", default: "" },
+    windowSillColor: { type: "color", default: "#b9b3a6" },
 
     tubeSpacing: { type: "number", default: 4 },
     tubeColor: { type: "color", default: "#f4f1e2" },
@@ -2658,9 +2677,44 @@ AFRAME.registerComponent("corridor-root", {
       });
     });
 
+    // THE WINDOW in the end wall, clamped to fit. It needs a margin of wall
+    // each side and above it, or the opening would break out of the wall and
+    // leave the corridor open at the corner.
+    const outerHalf = d.width / 2 + t;
+    let winW = d.windowWidth;
+    let winH = d.windowHeight;
+    let winSill = d.windowSill;
+    let winX = d.windowX;
+    if (d.window) {
+      const MARGIN_SIDE = 0.3;
+      const MARGIN_TOP = 0.25;
+      const maxW = 2 * (outerHalf - Math.abs(winX) - MARGIN_SIDE);
+      const maxH = d.height - winSill - MARGIN_TOP;
+      if (winW > maxW || winH > maxH) {
+        console.warn(
+          "[corridor] the end-wall window does not fit and has been clamped: " +
+            "asked for " + d.windowWidth.toFixed(2) + " x " +
+            d.windowHeight.toFixed(2) + " at x " + winX.toFixed(2) +
+            ", sill " + winSill.toFixed(2) + "; the wall is " +
+            (outerHalf * 2).toFixed(2) + " x " + d.height.toFixed(2) +
+            " and needs " + MARGIN_SIDE + " m each side and " + MARGIN_TOP +
+            " m above. Using " + Math.min(winW, maxW).toFixed(2) + " x " +
+            Math.min(winH, maxH).toFixed(2) + "."
+        );
+        winW = Math.min(winW, maxW);
+        winH = Math.min(winH, maxH);
+      }
+    }
+
     return {
       t: t,
       halfW: halfW,
+      outerHalf: outerHalf,
+      win: d.window
+        ? { x: winX, w: winW, h: winH, sill: winSill,
+            x0: winX - winW / 2, x1: winX + winW / 2,
+            y0: winSill, y1: winSill + winH }
+        : null,
       zBack: zBack,
       zEnd: zEnd,
       run: run,
@@ -2782,6 +2836,17 @@ AFRAME.registerComponent("corridor-root", {
       doorEdge: this.mat({ color: new THREE.Color("#4a3f2c") }),
       transom: this.mat({ map: this.tex.transom }),
       frame: this.mat({ color: new THREE.Color(d.frameColor) }),
+      // Window trim. Flat colours: a sill is a cast slab, it has no grain worth
+      // a canvas. (Note the setScalar/hex distinction on endWall above — these
+      // are real colours, so a hex is right here.)
+      sill: this.mat({ color: new THREE.Color(d.windowSillColor) }),
+      sillLip: this.mat({
+        color: new THREE.Color(d.windowSillColor).multiplyScalar(0.62),
+      }),
+      reveal: this.mat({
+        color: new THREE.Color(d.windowRevealColor || "#b9b3a6"),
+        side: THREE.DoubleSide,
+      }),
       roomFloor: this.mat({ map: this.tex.roomFloor }),
       tube: this.mat({ color: new THREE.Color(d.tubeColor), fog: false }),
     };
@@ -2907,8 +2972,65 @@ AFRAME.registerComponent("corridor-root", {
     // something on a wall.
     this.addBox(outerW, d.height, L.t, 0, d.height / 2, L.zBack + L.t / 2,
                 this.m.wall[0], L.bay, d.height);
-    this.addBox(outerW, d.height, L.t, 0, d.height / 2, L.zEnd - L.t / 2,
-                this.m.endWall, L.bay, d.height);
+
+    // THE END WALL. Solid, unless it carries the window — in which case it is
+    // four boxes around the opening instead of one, exactly the way a side wall
+    // is built around a doorway. metricBoxUVs derives every face's UVs from its
+    // WORLD position, so the wall texture runs on across all four pieces with
+    // no seam and no restart; that is the whole reason it works that way.
+    // The boxes' inner end faces are the reveals.
+    const zc = L.zEnd - L.t / 2;
+    if (!L.win) {
+      this.addBox(outerW, d.height, L.t, 0, d.height / 2, zc,
+                  this.m.endWall, L.bay, d.height);
+      return;
+    }
+    const w = L.win;
+    const piece = (x0, x1, y0, y1) => {
+      if (x1 - x0 < 0.004 || y1 - y0 < 0.004) return;
+      this.addBox(x1 - x0, y1 - y0, L.t, (x0 + x1) / 2, (y0 + y1) / 2, zc,
+                  this.m.endWall, L.bay, d.height);
+    };
+    piece(-outerW / 2, outerW / 2, 0, w.y0);              // below the sill
+    piece(-outerW / 2, outerW / 2, w.y1, d.height);       // above the head
+    piece(-outerW / 2, w.x0, w.y0, w.y1);                 // left of the opening
+    piece(w.x1, outerW / 2, w.y0, w.y1);                  // right of it
+    this.buildWindowTrim(L, w);
+  },
+
+  // The sill, and optionally a painted reveal.
+  buildWindowTrim: function (L, w) {
+    const d = this.data;
+    // CONCRETE SILL: a slab capping the wall below the opening, standing proud
+    // of the inner face so it catches the light and throws a line of shadow.
+    const SILL_T = 0.06;
+    const SILL_D = 0.12;
+    const SILL_PROUD = 0.05;
+    const sillZ = L.zEnd + SILL_PROUD - SILL_D / 2;
+    this.addBox(w.w + 0.1, SILL_T, SILL_D, w.x, w.y0 - SILL_T / 2, sillZ,
+                this.m.sill);
+    // ...and a thinner, darker lip under its front edge: two tones for the
+    // price of one small box, which is all flat shading needs to read a slab.
+    this.addBox(w.w + 0.1, 0.015, SILL_D * 0.55, w.x,
+                w.y0 - SILL_T - 0.0075,
+                L.zEnd + SILL_PROUD - SILL_D * 0.55 / 2, this.m.sillLip);
+
+    // PAINTED REVEALS, only when asked for: four thin planes on the opening's
+    // four inner faces. Off by default, when the reveals are simply the wall
+    // texture continuing into the opening, which is what a knocked-through
+    // hole in a painted wall actually looks like.
+    if (!d.windowRevealColor) return;
+    const zMid = L.zEnd - L.t / 2;
+    const inset = 0.002;
+    const mk = (sw, sh, x, y, rx, ry) => {
+      const m = this.addPlane(sw, sh, this.m.reveal);
+      m.position.set(x, y, zMid);
+      m.rotation.set(rx, ry, 0);
+    };
+    mk(L.t, w.h, w.x0 + inset, (w.y0 + w.y1) / 2, 0, Math.PI / 2);   // left
+    mk(L.t, w.h, w.x1 - inset, (w.y0 + w.y1) / 2, 0, -Math.PI / 2);  // right
+    mk(w.w, L.t, w.x, w.y1 - inset, Math.PI / 2, 0);                 // head
+    mk(w.w, L.t, w.x, w.y0 + inset, -Math.PI / 2, 0);                // bottom
   },
 
   // One side wall: the full run minus each opening, a lintel over every
