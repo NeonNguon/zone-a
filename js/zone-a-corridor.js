@@ -96,8 +96,8 @@
 // Palette + wear are taken from photographs of old Saigon chung cư corridors:
 // dark red-brown cement floor tiles worn shiny down the middle, a yellowed
 // stained ceiling, cream/yellow (sometimes faded green) two-leaf doors with
-// louvred transoms, patterned gạch bông encaustic tiles inside the apartments
-// — and, the thing the walls are actually about, paint.
+// pierced bông gió vent blocks over them, patterned gạch bông encaustic tiles
+// inside the apartments — and, the thing the walls are actually about, paint.
 //
 // ---------------------------------------------------------------- THE WALLS
 // A chung cư wall is not a colour, it is a STACK of coats put on over fifty
@@ -141,11 +141,13 @@
 //   with `wallPaletteOverride`, and can give each apartment its own with
 //   `roomWallPalettes`. See the comment on WALL_PALETTES for the schema.
 //
-// EIGHTEEN canvases as the corridor ships, cached by their full parameter key —
-// which includes a hash of the palette — so a rebuild (or a second corridor)
+// TWENTY-ONE canvases as the corridor ships, cached by their full parameter key
+// — which includes a hash of the palette — so a rebuild (or a second corridor)
 // reuses them: 3 corridor wall variants, ONE wall canvas for each of the three
-// apartments' own schemes, floor, ceiling, door atlas, room floor, all
-// textureSize², plus one small transom strip; and for the window, the four
+// apartments' own schemes, floor, ceiling, the door atlas and its BACKS, room
+// floor, all textureSize², plus up to three 256² bông gió block faces (one per
+// pattern actually used — a corridor set to a single ventPattern draws a
+// single canvas); and for the window, the four
 // skyline PNGs lifted into canvases (1456×816 each, 4.5 MB, 18.1 MB together),
 // the sky gradient (4×512, a rounding error) and the daylight patch
 // (256²). About 59 MB, 79 MB with mipmaps — of which the walls are 24 MB and
@@ -2078,41 +2080,225 @@ const CorridorTextures = {
     });
   },
 
-  // ---- TRANSOM -----------------------------------------------------------
-  // The louvred fanlight over every door: dark timber slats, tiled along the
-  // door's width. A small strip, not a full textureSize canvas — it is one
-  // repeating pattern with no large-scale structure to hold.
-  transom: function (size, seed, slats) {
-    const key = "transom|" + size + "|" + seed + "|" + slats;
-    return this.get(key, () => {
-      const w = size;
-      const h = Math.max(64, Math.round(size / 4));
-      const c = this.canvas(w, h);
-      const ctx = c.getContext("2d");
-      const rand = this.rand(seed * 271 + 13);
+  // ---- BÔNG GIÓ — the ventilation block's face ---------------------------
+  // The pierced concrete blocks set in a row above every door, which is how a
+  // chung cư corridor breathes: the flat is shut and the air still moves. The
+  // louvred transom that used to sit INSIDE the frame is gone — a transom is
+  // joinery, and what these corridors actually have is a hole in the concrete
+  // above the frame.
+  //
+  // HOW A HOLE IS MADE HERE. The block is a thin box in a real gap in the wall
+  // (see buildVentRow: the lintel is split into a band, the row, and a band,
+  // with NO wall behind the row), and the pattern's holes are cut out of the
+  // block's two faces by ALPHA. So the pierced part is not modelled: you look
+  // through the near face's holes, past the far face's holes, and out into the
+  // corridor or the room beyond, and the two faces standing ventDepth apart is
+  // what gives the block its thickness as you walk past it.
+  //
+  // THE ALPHA GOES IN THE CANVAS'S OWN ALPHA CHANNEL, NOT AN alphaMap. THREE
+  // samples an alphaMap's GREEN channel, and a green channel here would have to
+  // survive the sRGB -> linear conversion the map's colour space asks for:
+  // concrete #bfb8a8 is green 0.72 in sRGB and 0.478 linear, which lands just
+  // UNDER a 0.5 alphaTest — the block would vanish entirely, and every darker
+  // pixel (the shading round the holes, the grime) would cut its own extra
+  // holes on the way. The alpha channel is not colour-managed, so map +
+  // alphaTest is both exact and one texture. Same trap as the silhouette PNGs
+  // further down, approached from the other side.
+  //
+  // Three patterns, each a complete motif inside its own solid border, so a row
+  // of butted blocks reads as concrete mullions with holes between them — which
+  // is what the reference rows look like. Drawn at 256 whatever the corridor's
+  // textureSize is: it is a 20 cm block, and one canvas serves every copy.
+  VENT_PATTERNS: ["circle", "flower", "diamond"],
 
-      ctx.fillStyle = "#2a2419";
-      ctx.fillRect(0, 0, w, h);
-      const pitch = h / slats;
-      for (let i = 0; i < slats; i++) {
-        const y = i * pitch;
-        // Each slat: a lit top bevel over a dark underside, so the louvre reads
-        // as tilted timber rather than stripes.
-        const g = ctx.createLinearGradient(0, y, 0, y + pitch);
-        g.addColorStop(0, "#6d5c40");
-        g.addColorStop(0.35, "#4b3f2b");
-        g.addColorStop(0.75, "#221c13");
-        g.addColorStop(1, "#3a3122");
-        ctx.fillStyle = g;
-        ctx.fillRect(0, y, w, pitch * 0.92);
-        ctx.fillStyle = "rgba(0,0,0,0.55)"; // the gap you can see through
-        ctx.fillRect(0, y + pitch * 0.92, w, pitch * 0.08);
+  ventPatternFor: function (key) {
+    return this.VENT_PATTERNS[key % this.VENT_PATTERNS.length];
+  },
+
+  // WHERE THE HOLES ARE, as canvas paths in an S-square cell. Returned rather
+  // than drawn, because each path is used TWICE — stroked wide and dark first
+  // (the rim shading), then punched — and the two must not drift apart.
+  //
+  // Paths may overlap freely: punching is destination-out, so overlapping
+  // punches simply union, and a rim stroke running through a neighbouring
+  // hole's interior is punched away with it. That is what lets the flower be
+  // five plain circles rather than a rosette outline.
+  ventHolePaths: function (S, pattern) {
+    const M = S * 0.11; // the solid border every block keeps
+    const F = S - M * 2; // the patterned field inside it
+    const cx = S / 2;
+    const cy = S / 2;
+    const out = [];
+    const circle = (x, y, r) => {
+      const p = new Path2D();
+      p.arc(x, y, r, 0, Math.PI * 2);
+      out.push({ path: p, rule: "nonzero" });
+    };
+    if (pattern === "circle") {
+      // A RING, cut into four arcs by solid spokes on the diagonals: an
+      // unbroken annulus would leave the middle disc floating, and a block has
+      // to hold it up. Plus a quarter circle in each corner of the field.
+      const ro = F * 0.38;
+      const ri = F * 0.17;
+      const gap = 0.16; // radians of solid spoke either side of each diagonal
+      for (let k = 0; k < 4; k++) {
+        const a0 = (k * Math.PI) / 2 + gap;
+        const a1 = ((k + 1) * Math.PI) / 2 - gap;
+        const p = new Path2D();
+        p.arc(cx, cy, ro, a0, a1);
+        p.arc(cx, cy, ri, a1, a0, true);
+        p.closePath();
+        out.push({ path: p, rule: "nonzero" });
       }
-      // Grime and a few missing/broken slats.
-      for (let i = 0; i < 40; i++) {
-        ctx.fillStyle = "rgba(0,0,0," + (rand() * 0.25).toFixed(3) + ")";
-        ctx.fillRect(rand() * w, rand() * h, rand() * w * 0.1, pitch * 0.9);
+      // Small enough to stay clear of the ring: a corner circle reaches
+      // (0.707 - q/F) x F in from its corner, and the ring's outer edge is at
+      // 0.38 F, so anything under about 0.3 F leaves concrete between them.
+      const q = F * 0.16;
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((s) => {
+        circle(cx + (s[0] * F) / 2, cy + (s[1] * F) / 2, q);
+      });
+    } else if (pattern === "flower") {
+      // FOUR PETALS round a middle: five overlapping circles, unioned by the
+      // punch. The petals reach past each other, which is what rounds the
+      // rosette's waist instead of leaving four separate holes.
+      // Petal radius under pd (0.8 x is about right) is what gives the rosette
+      // its WAISTS: at pr = pd the four circles merge into one blob and the
+      // whole motif reads as a hole rather than as a flower. The middle circle
+      // has to be at least (pd - pr) to bridge them.
+      const pd = F * 0.23;
+      const pr = F * 0.18;
+      circle(cx, cy, F * 0.12);
+      [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach((s) => {
+        circle(cx + s[0] * pd, cy + s[1] * pd, pr);
+      });
+    } else {
+      // DIAMOND LATTICE: four diamonds in a 2x2 and a fifth between them, so
+      // what is left solid reads as crossing diagonal ribs.
+      const dia = (x, y, r) => {
+        const p = new Path2D();
+        p.moveTo(x, y - r);
+        p.lineTo(x + r, y);
+        p.lineTo(x, y + r);
+        p.lineTo(x - r, y);
+        p.closePath();
+        out.push({ path: p, rule: "nonzero" });
+      };
+      const r = F * 0.19;
+      const off = F * 0.25;
+      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((s) => {
+        dia(cx + s[0] * off, cy + s[1] * off, r);
+      });
+      dia(cx, cy, F * 0.17);
+    }
+    return { paths: out, margin: M, field: F };
+  },
+
+  // ONE BLOCK FACE: concrete, weathered, with the pattern punched out of it.
+  ventFace: function (size, seed, pattern, color, grime) {
+    const key = "vent|" + size + "|" + seed + "|" + pattern + "|" + color +
+                "|" + grime;
+    return this.get(key, () => {
+      const S = size;
+      const c = this.canvas(S, S);
+      const ctx = c.getContext("2d");
+      const rand = this.rand(
+        seed * 577 + this.VENT_PATTERNS.indexOf(pattern) * 131 + 7
+      );
+      const rgb = this.hexRGB(color);
+      const tone = (f, a) =>
+        "rgba(" + Math.round(rgb[0] * f) + "," + Math.round(rgb[1] * f) + "," +
+        Math.round(rgb[2] * f) + "," + a + ")";
+
+      // 1. THE CONCRETE. Flat colour, then a coarse mottle and a fine grit —
+      // cast concrete is never one tone, and at 20 cm across you stand close
+      // enough to see that.
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, S, S);
+      for (let k = 0; k < 90; k++) {
+        ctx.fillStyle = rand() < 0.5 ? tone(1.08, 0.16) : tone(0.86, 0.18);
+        this.blob(ctx, rand, rand() * S, rand() * S, S * (0.03 + rand() * 0.1),
+                  S * (0.03 + rand() * 0.1), 8);
       }
+      this.grain(ctx, rand, S, S, Math.round(S * 5), 0.07);
+
+      // 2. GRIME, before the holes are cut, so it settles on the solid and not
+      // in the air. Heaviest low down and wherever a butted neighbour's joint
+      // holds the dust.
+      const low = ctx.createLinearGradient(0, S * 0.45, 0, S);
+      low.addColorStop(0, "rgba(44,38,28,0)");
+      low.addColorStop(1, "rgba(44,38,28," + (0.4 * grime).toFixed(3) + ")");
+      ctx.fillStyle = low;
+      ctx.fillRect(0, S * 0.45, S, S * 0.55);
+      for (let k = 0; k < Math.round(26 * grime); k++) {
+        ctx.fillStyle =
+          "rgba(52,44,32," + (0.1 + rand() * 0.28).toFixed(3) + ")";
+        this.blob(ctx, rand, rand() * S, rand() * S, S * (0.02 + rand() * 0.09),
+                  S * (0.02 + rand() * 0.07), 9);
+      }
+
+      const holes = this.ventHolePaths(S, pattern);
+      const M = holes.margin;
+
+      // 3. THE HOLES' RIMS, stroked wide and dark BEFORE the punch: the punch
+      // takes the inner half of every stroke away with it, and what is left is
+      // a soft dark ring on the concrete round each opening. That ring is the
+      // only thing telling the eye the block has depth, everything here being
+      // unlit — see the LIGHTING note at the top of the file.
+      //
+      // Clipped to the field, so a rim never crosses the block's solid border.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(M, M, holes.field, holes.field);
+      ctx.clip();
+      ctx.lineJoin = "round";
+      holes.paths.forEach((h) => {
+        ctx.strokeStyle = "rgba(28,24,18,0.34)";
+        ctx.lineWidth = S * 0.05;
+        ctx.stroke(h.path);
+        ctx.strokeStyle = "rgba(30,26,20,0.3)";
+        ctx.lineWidth = S * 0.02;
+        ctx.stroke(h.path);
+      });
+      // A thin LIT edge offset up and to the left: the top arris of the reveal
+      // catching whatever light there is.
+      ctx.save();
+      ctx.translate(-S * 0.012, -S * 0.012);
+      holes.paths.forEach((h) => {
+        ctx.strokeStyle = "rgba(255,252,240,0.13)";
+        ctx.lineWidth = S * 0.012;
+        ctx.stroke(h.path);
+      });
+      ctx.restore();
+      ctx.restore();
+
+      // 4. PUNCH. destination-out subtracts the SOURCE's alpha from the
+      // destination's, so the fill colour's own alpha is how hard it cuts —
+      // and the fillStyle still standing here is the grime loop's last blotch
+      // at alpha 0.1-0.38, which takes a third of the alpha away and leaves a
+      // smear where the hole should be. Opaque black, explicitly, every time.
+      // Clipped to the field, exactly as the rims were: the border is what
+      // makes a row of these read as concrete mullions, and a corner motif
+      // punched without the clip runs straight out through it.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(M, M, holes.field, holes.field);
+      ctx.clip();
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#000";
+      holes.paths.forEach((h) => {
+        ctx.fill(h.path, h.rule);
+      });
+      ctx.restore();
+
+      // 5. THE BLOCK'S OWN EDGES: a dark line all round, so a row of butted
+      // blocks shows its joints instead of reading as one pierced slab, and a
+      // lighter one along the top.
+      ctx.strokeStyle = "rgba(30,26,20,0.55)";
+      ctx.lineWidth = Math.max(2, S * 0.016);
+      ctx.strokeRect(1, 1, S - 2, S - 2);
+      ctx.fillStyle = "rgba(255,252,240,0.16)";
+      ctx.fillRect(0, 0, S, Math.max(1, S * 0.012));
       return c;
     });
   },
@@ -2698,7 +2884,17 @@ const roomImages = [
 //   landingDepth 2                    the arrival end, behind z = 0
 //   doorPitch 3.2                     spacing of the CLOSED doors along a wall
 //   doorWidth 0.9 / doorHeight 2.1    every opening, closed or open
-//   transomHeight 0.4                 the louvred fanlight over a closed door
+//   vent true                         the bong gio row above EVERY door, open
+//                                     or closed: a real hole through the wall
+//   ventBlock .2 / ventCols 4         one block, and how many across (the row
+//   ventRows 1                        is centred on the door and clamped to
+//                                     fit inside the opening)
+//   ventGap .15                       frame head to the row's bottom
+//   ventDepth 0                       0 = auto: wallThickness, right through
+//   ventPattern "mixed"               "circle" | "flower" | "diamond" |
+//                                     "mixed" (one per door, seeded)
+//   ventColor #bfb8a8 / ventGrime .5  the concrete, and how filthy it is
+//   (transomHeight is GONE — the louvred fanlight it sized went with it)
 //   roomWidth 3.2 / roomDepth 4       the DEFAULT apartment: along / away from
 //                                     the run
 //   roomSizes [{},{},{}]              per-apartment { w, d } overrides, indexed
@@ -2729,8 +2925,10 @@ const roomImages = [
 // ================================================================
 const CORRIDOR_GEOM_PROPS = [
   "length", "width", "height", "landingDepth", "doorPitch", "doorWidth",
-  "doorHeight", "transomHeight", "roomWidth", "roomDepth", "roomSizes",
+  "doorHeight", "roomWidth", "roomDepth", "roomSizes",
   "roomOffsets", "roomSpacing", "endWallShade",
+  "vent", "ventBlock", "ventCols", "ventRows", "ventGap", "ventDepth",
+  "ventPattern", "ventColor", "ventGrime",
   "window", "windowWidth", "windowHeight", "windowSill", "windowX",
   "windowRevealColor", "windowSillColor",
   "grilleBar", "grilleSpacingX", "grilleSpacingY", "grilleFrame",
@@ -2765,7 +2963,34 @@ AFRAME.registerComponent("corridor-root", {
     doorPitch: { type: "number", default: 3.2 },
     doorWidth: { type: "number", default: 0.9 },
     doorHeight: { type: "number", default: 2.1 },
-    transomHeight: { type: "number", default: 0.4 },
+
+    // ---- BÔNG GIÓ: the ventilation row above every door ----------------
+    // Not a transom. A chung cu corridor ventilates a shut flat through
+    // PIERCED CONCRETE BLOCKS set in the wall over the door frame, and that is
+    // a real hole through the wall here: the lintel is split into a band, the
+    // row and a band, with nothing behind the row, so corridor light reaches
+    // the room through it and you can see the corridor from inside. See
+    // buildVentRow and CorridorTextures.ventFace.
+    //
+    //   ventBlock    one block, square, in metres
+    //   ventCols     blocks across; the row is CENTRED on the door, and is
+    //                clamped down to fit inside the opening's own width
+    //   ventRows     blocks high
+    //   ventGap      from the TOP OF THE FRAME HEAD to the row's bottom
+    //   ventDepth    0 = auto: wallThickness, so the block goes right through
+    //   ventPattern  "circle" | "flower" | "diamond" | "mixed" — "mixed"
+    //                gives each door one of the three, seeded from where it
+    //                stands like its atlas cell is (doorKey)
+    //   vent false   restores a plain lintel over every door
+    vent: { type: "boolean", default: true },
+    ventBlock: { type: "number", default: 0.2 },
+    ventCols: { type: "number", default: 4 },
+    ventRows: { type: "number", default: 1 },
+    ventGap: { type: "number", default: 0.15 },
+    ventDepth: { type: "number", default: 0 }, // 0 = auto (wallThickness)
+    ventPattern: { type: "string", default: "mixed" },
+    ventColor: { type: "color", default: "#bfb8a8" },
+    ventGrime: { type: "number", default: 0.5 },
 
     // The DEFAULT apartment, used by any of the three that does not override it.
     roomWidth: { type: "number", default: 3.2 },
@@ -3040,6 +3265,12 @@ AFRAME.registerComponent("corridor-root", {
     this.geometries = [];
     this.materials = [];
     this.imageEls = [];
+    // InstancedMeshes hold a buffer of their own (instanceMatrix) that neither
+    // the geometry's dispose nor the material's touches, so they are tracked
+    // separately and disposed with the rest.
+    this.instanced = [];
+    this.ventPlacements = {};
+    this.ventCount = 0;
     this.hiddenClickables = []; // clickables parked while the corridor is hidden
     this.built = false;
 
@@ -3330,7 +3561,7 @@ AFRAME.registerComponent("corridor-root", {
       openings[String(r.side)].push({
         z: r.z,
         width: d.doorWidth,
-        top: d.doorHeight, // an open doorway has no transom above it
+        top: d.doorHeight,
         open: true,
         room: r,
       });
@@ -3353,7 +3584,7 @@ AFRAME.registerComponent("corridor-root", {
         list.push({
           z: z,
           width: d.doorWidth,
-          top: d.doorHeight + d.transomHeight, // leaf + louvred transom
+          top: d.doorHeight, // the leaf, and nothing above it but wall
           open: false,
         });
       }
@@ -3492,7 +3723,6 @@ AFRAME.registerComponent("corridor-root", {
       ceiling: CorridorTextures.ceiling(S, d.seed),
       door: CorridorTextures.doorAtlas(S, d.seed),
       doorBack: CorridorTextures.doorAtlasBack(S, d.seed),
-      transom: CorridorTextures.transom(S, d.seed, 9),
       roomFloor: CorridorTextures.roomFloor(S, d.seed, 4),
     };
     // Materials: one per texture, shared by every mesh that uses it. The end
@@ -3524,7 +3754,14 @@ AFRAME.registerComponent("corridor-root", {
       // buried in the wall and never built.
       doorBack: this.mat({ map: this.tex.doorBack }),
       doorEdge: this.mat({ color: new THREE.Color("#4a3f2c") }),
-      transom: this.mat({ map: this.tex.transom }),
+      // The bong gio blocks' outer frame — the square tube round each block
+      // that gives its border real depth. Flat concrete, a shade under the
+      // faces' own colour. The FACES' materials are made in buildVentMeshes,
+      // one per pattern actually used, so a corridor set to a single pattern
+      // pays for a single canvas.
+      ventFrame: this.mat({
+        color: new THREE.Color(d.ventColor).multiplyScalar(0.78),
+      }),
       frame: this.mat({ color: new THREE.Color(d.frameColor) }),
       // Window trim. Flat colours: a sill is a cast slab, it has no grain worth
       // a canvas. (Note the setScalar/hex distinction on endWall above — these
@@ -3545,8 +3782,13 @@ AFRAME.registerComponent("corridor-root", {
     };
 
     this.buildShell(L);
+    // Every vent block in the corridor is the same geometry in a different
+    // place, so the walls only COLLECT the placements and one pass at the end
+    // turns them into a couple of instanced meshes — see buildVentMeshes.
+    this.ventPlacements = {};
     this.buildSideWall(L, -1);
     this.buildSideWall(L, +1);
+    this.buildVentMeshes(L);
     this.buildTubes(L);
     this.partyWalls = {}; // two abutting apartments share ONE wall - see below
     L.rooms.forEach((r) => this.buildRoom(L, r));
@@ -3582,6 +3824,8 @@ AFRAME.registerComponent("corridor-root", {
         L.bay.toFixed(2) + " m, " +
         (L.openings["-1"].length + L.openings["1"].length) + " doorways, " +
         L.rooms.length + " apartments, " + this.imageEls.length + " images, " +
+        this.ventCount + " vent blocks in " +
+        Object.keys(this.ventPlacements).length + " pattern(s), " +
         this.group.children.length + " meshes | textures " +
         allT.ms.toFixed(0) + " ms total, " + wallT.drawn + " wall canvas(es) " +
         (wallT.drawn ? (wallT.ms / wallT.drawn).toFixed(0) : "0") +
@@ -4030,8 +4274,8 @@ AFRAME.registerComponent("corridor-root", {
   },
 
   // One side wall: the full run minus each opening, a lintel over every
-  // opening, and — for the closed doors — a leaf, a louvred transom and a
-  // frame. Same construction as floorplan.buildSide, for the same reason: the
+  // opening (with the ventilation row cut through it), and — for the closed
+  // doors — a leaf and a frame. Same construction as floorplan.buildSide, for the same reason: the
   // segments' end faces ARE the doorway reveals, so a doorway is a real hole in
   // a wall with thickness rather than a decal.
   buildSideWall: function (L, side) {
@@ -4059,15 +4303,253 @@ AFRAME.registerComponent("corridor-root", {
       const prev = i > 0 ? list[i - 1] : null;
       const byRoom = op.open || (prev && prev.open);
       seg(cursor, op.z + op.width / 2, 0, d.height, byRoom ? 0 : rot(i));
-      // The lintel: the wall carries on above the opening.
-      seg(op.z + op.width / 2, op.z - op.width / 2, op.top, d.height,
-          op.open ? 0 : rot(i + 1));
+      // THE LINTEL: the wall carries on above the opening — as ONE box if
+      // there is no vent row, and as four pieces around a real hole if there
+      // is: a band from the frame head up to the row, a short piece of wall
+      // each side of the row, and a band from the row to the ceiling. Nothing
+      // is built BEHIND the row, which is what makes it a hole you can see the
+      // corridor through from inside a flat.
+      //
+      // All four are seg() calls like any other wall, so metricBoxUVs takes
+      // their UVs from their own world positions and the paint runs straight
+      // on across every join with no restart — the same reason the window's
+      // end wall is four boxes rather than a plane with a hole in it.
+      const zA = op.z - op.width / 2;
+      const zB = op.z + op.width / 2;
+      const lintel = op.open ? 0 : rot(i + 1);
+      const v = this.ventRow(L, op, true);
+      if (!v) {
+        seg(zB, zA, op.top, d.height, lintel);
+      } else {
+        seg(zB, zA, op.top, v.y0, lintel);   // under the row
+        seg(zB, v.z1, v.y0, v.y1, lintel);   // the jamb of the hole, +z side
+        seg(v.z0, zA, v.y0, v.y1, lintel);   // ...and -z
+        seg(zB, zA, v.y1, d.height, lintel); // over the row, up to the ceiling
+        this.collectVentBlocks(L, side, op, v);
+      }
       cursor = op.z - op.width / 2;
       this.buildDoorFrame(L, side, op);
       if (!op.open) this.buildClosedDoor(L, side, op, i);
     });
     const lastOpen = list.length > 0 && list[list.length - 1].open;
     seg(cursor, L.zLo, 0, d.height, lastOpen ? 0 : rot(list.length));
+  },
+
+  // ---------------------------------------------------------------
+  // THE VENTILATION ROW above one opening — WHERE it goes, or null if it does
+  // not fit. Its own method because two builders need the same answer and must
+  // not compute it twice: buildSideWall cuts the hole in the CORRIDOR wall, and
+  // lineCorridorWall cuts the matching hole in the skin an apartment paints on
+  // its side of that same wall. Two copies of this arithmetic would drift apart
+  // the first time anyone touched ventGap, and the room would end up with a
+  // painted panel over the hole — exactly the same reason grilleLattice() is a
+  // method rather than a repeated sum.
+  //
+  // `warn` gates the console: the wall builder passes true, the room's skin
+  // passes false, so a door that does not fit says so once and not twice.
+  //
+  // The row is CENTRED on the opening and lives INSIDE the lintel, so it can
+  // never be wider than the opening itself — a wider row would want a hole in
+  // the full-height wall segments beside the door, which is a different
+  // building. Columns are dropped until it fits rather than the row being
+  // silently squashed, because ventBlock is a real block size and 0.2 m means
+  // 0.2 m.
+  // ---------------------------------------------------------------
+  ventRow: function (L, op, warn) {
+    const d = this.data;
+    if (!d.vent || d.ventBlock <= 0 || d.ventCols < 1 || d.ventRows < 1) {
+      return null;
+    }
+    // Clear of the frame HEAD, not of the opening: the frame stands proud of
+    // the wall and its head sits a frameWidth above op.top, so measuring from
+    // op.top would put the row's bottom edge into the timber.
+    const head = op.top + d.frameWidth;
+    const y0 = head + d.ventGap;
+    const rowH = d.ventRows * d.ventBlock;
+    const y1 = y0 + rowH;
+    const CLEAR = 0.1; // concrete that must be left between the row and the slab
+    if (y1 + CLEAR > d.height) {
+      if (warn) {
+        console.warn(
+          "[corridor] no room for the vent row over the door at z " +
+            op.z.toFixed(2) + ": the frame head is at " + head.toFixed(2) +
+            " m, and ventGap " + d.ventGap + " + " + d.ventRows + " x " +
+            d.ventBlock + " m of block would take the row's top to " +
+            y1.toFixed(2) + " m, inside the " + CLEAR + " m of ceiling the " +
+            "wall has to keep (height " + d.height + "). Lower ventGap, drop " +
+            "ventRows, or raise `height`. That door goes without."
+        );
+      }
+      return null;
+    }
+    let cols = d.ventCols;
+    while (cols > 1 && cols * d.ventBlock > op.width) cols--;
+    if (cols * d.ventBlock > op.width) {
+      if (warn) {
+        console.warn(
+          "[corridor] no room for the vent row over the door at z " +
+            op.z.toFixed(2) + ": one " + d.ventBlock + " m block is wider " +
+            "than the " + op.width.toFixed(2) + " m opening it has to sit " +
+            "inside. That door goes without."
+        );
+      }
+      return null;
+    }
+    if (warn && cols < d.ventCols) {
+      console.warn(
+        "[corridor] the vent row over the door at z " + op.z.toFixed(2) +
+          " has been cut from " + d.ventCols + " blocks to " + cols +
+          ": " + d.ventCols + " x " + d.ventBlock + " m is wider than the " +
+          op.width.toFixed(2) + " m opening, and the row sits inside the " +
+          "lintel. Narrow ventBlock or widen doorWidth."
+      );
+    }
+    const rowW = cols * d.ventBlock;
+    return {
+      y0: y0,
+      y1: y1,
+      z0: op.z - rowW / 2,
+      z1: op.z + rowW / 2,
+      w: rowW,
+      h: rowH,
+      cols: cols,
+      rows: d.ventRows,
+      depth: d.ventDepth > 0 ? d.ventDepth : L.t,
+    };
+  },
+
+  // The blocks that fill that hole. Nothing is BUILT here: every block in the
+  // corridor is the same geometry standing at a different place, and both walls
+  // want it in the same orientation (the block's faces look along x either
+  // way), so a placement is a position and nothing else. They are collected by
+  // pattern and instanced once, at the end of the walls — see buildVentMeshes.
+  //
+  // WHICH PATTERN: "mixed" gives each door one of the three, seeded from
+  // doorKey — the same number its atlas cell comes from — so a door's paint and
+  // its vent pattern travel together when the seed changes, and the same
+  // corridor always has the same blocks over the same doors.
+  collectVentBlocks: function (L, side, op, v) {
+    const d = this.data;
+    const pattern =
+      d.ventPattern === "mixed"
+        ? CorridorTextures.ventPatternFor(this.doorKey(op.z, side))
+        : d.ventPattern;
+    const list =
+      this.ventPlacements[pattern] || (this.ventPlacements[pattern] = []);
+    const x = side * (L.halfW + L.t / 2); // the wall's own centreline
+    for (let r = 0; r < v.rows; r++) {
+      for (let c = 0; c < v.cols; c++) {
+        list.push({
+          x: x,
+          y: v.y0 + (r + 0.5) * d.ventBlock,
+          z: v.z0 + (c + 0.5) * d.ventBlock,
+        });
+      }
+    }
+  },
+
+  // ONE BLOCK'S TWO FACES, as a single geometry: two quads in the wall's y-z
+  // plane, ventDepth apart, each looking out of its own side of the wall. That
+  // separation is the whole illusion — you look through the near face's holes,
+  // past the far face's, and out the other side, and walking along the corridor
+  // makes the two slide against each other exactly as a 15 cm-deep block does.
+  //
+  // The faces are `side: DoubleSide` (see buildVentMeshes): through a hole you
+  // are looking at the BACK of the far face, and without that it would not be
+  // drawn at all — you would see straight through to the room and the block
+  // would read as a stencil rather than as something with a thickness.
+  ventPaneGeometry: function (block, depth) {
+    const INSET = 0.004; // just inside the wall's faces, not flush with them
+    const parts = [];
+    [-1, 1].forEach((s) => {
+      const g = new THREE.PlaneGeometry(block, block);
+      // A plane is born in the x-y plane looking along +z; yaw it into the
+      // wall's plane so it looks along the side's own x. The two end up
+      // mirrored in u relative to each other, which is what the two faces of a
+      // real block are.
+      g.rotateY((s * Math.PI) / 2);
+      g.translate(s * (depth / 2 - INSET), 0, 0);
+      parts.push(g);
+    });
+    return mergeGeometries(parts);
+  },
+
+  // ...and the block's outer frame: a square tube round its border, four thin
+  // boxes merged. It is what gives the border a real edge — at the row's rim,
+  // and anywhere you look along the wall rather than at it, two paper-thin
+  // quads would show themselves for what they are. One geometry, one material,
+  // one instanced draw call for every block in the corridor.
+  ventRingGeometry: function (block, depth) {
+    const b = block * 0.09; // the border's own width
+    const parts = [];
+    const box = (sy, sz, cy, cz) => {
+      const g = new THREE.BoxGeometry(depth, sy, sz);
+      g.translate(0, cy, cz);
+      parts.push(g);
+    };
+    box(b, block, (block - b) / 2, 0); // top
+    box(b, block, -(block - b) / 2, 0); // bottom
+    box(block - b * 2, b, 0, (block - b) / 2); // +z side
+    box(block - b * 2, b, 0, -(block - b) / 2); // -z side
+    return mergeGeometries(parts);
+  },
+
+  // EVERY VENT BLOCK IN THE CORRIDOR, in a handful of draw calls. The walls
+  // collected placements; this turns them into one InstancedMesh per pattern
+  // for the faces plus one for all the frames — so twelve doors' worth of
+  // blocks is four draw calls rather than a hundred and forty, and the whole
+  // row costs two geometries and at most four materials however long the
+  // corridor gets.
+  //
+  // The face materials are made HERE rather than in build()'s table because
+  // which patterns are in use is not known until the walls have been laid out:
+  // a corridor set to a single ventPattern draws a single canvas.
+  buildVentMeshes: function (L) {
+    const d = this.data;
+    const patterns = Object.keys(this.ventPlacements);
+    if (!patterns.length) return;
+    const depth = d.ventDepth > 0 ? d.ventDepth : L.t;
+    const pane = this.ventPaneGeometry(d.ventBlock, depth);
+    const ring = this.ventRingGeometry(d.ventBlock, depth);
+    this.geometries.push(pane, ring);
+
+    const place = (geo, material, list) => {
+      const im = new THREE.InstancedMesh(geo, material, list.length);
+      const m4 = new THREE.Matrix4();
+      list.forEach((p, i) => {
+        m4.makeTranslation(p.x, p.y, p.z);
+        im.setMatrixAt(i, m4);
+      });
+      im.instanceMatrix.needsUpdate = true;
+      // An InstancedMesh carries its own bounding sphere over every instance,
+      // and THREE computes it lazily the first time the frustum asks. Doing it
+      // here instead keeps that work out of the first frame after a teleport,
+      // which is the one frame in the corridor's life that has a budget.
+      im.computeBoundingSphere();
+      this.group.add(im);
+      this.instanced.push(im);
+      return im;
+    };
+
+    this.m.vent = {};
+    const all = [];
+    patterns.forEach((pattern) => {
+      const list = this.ventPlacements[pattern];
+      this.m.vent[pattern] = this.mat({
+        map: CorridorTextures.ventFace(256, d.seed, pattern, d.ventColor,
+                                       d.ventGrime),
+        // The holes are cut out of the canvas's ALPHA, not out of an alphaMap
+        // — see the note on ventFace for why the green channel is a trap here.
+        // alphaTest and not `transparent`, so the blocks stay in the opaque
+        // pass and sort by depth like everything else.
+        alphaTest: 0.5,
+        side: THREE.DoubleSide,
+      });
+      place(pane, this.m.vent[pattern], list);
+      all.push.apply(all, list);
+    });
+    place(ring, this.m.ventFrame, all);
+    this.ventCount = all.length;
   },
 
   // WHICH DOOR a given opening is: an integer key seeded from where it stands
@@ -4099,7 +4581,8 @@ AFRAME.registerComponent("corridor-root", {
 
   // A closed door: a thin leaf set INTO the wall's opening (the opening is
   // real — the wall segments stop either side of it), the door picture on its
-  // corridor face, and the louvred transom filling the rest of the opening.
+  // corridor face. The opening stops at the top of the leaf: the ventilation
+  // is a row of pierced blocks in the wall above the frame, not a fanlight.
   buildClosedDoor: function (L, side, op, i) {
     const d = this.data;
     const cx = side * (L.halfW + L.t / 2);
@@ -4117,12 +4600,12 @@ AFRAME.registerComponent("corridor-root", {
     face.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
     // No back face: a closed door's other side is buried in the wall segment
     // behind it and cannot be seen from anywhere.
-
-    // TRANSOM: the louvre above the leaf, tiled metrically along the width.
-    const tr = this.addPlane(op.width, d.transomHeight, this.m.transom,
-                             [0, 0, op.width / d.transomHeight, 1]);
-    tr.position.set(faceX, d.doorHeight + d.transomHeight / 2, op.z);
-    tr.rotation.y = face.rotation.y;
+    //
+    // Nothing above the leaf either. There used to be a louvred transom plane
+    // filling the rest of the opening; the opening now stops at the top of the
+    // leaf, and the ventilation is where it belongs — a row of pierced blocks
+    // in the wall ABOVE the frame, built by the wall itself (buildVentRow), on
+    // open doorways and closed doors alike.
   },
 
   // ---------------------------------------------------------------
@@ -4323,7 +4806,21 @@ AFRAME.registerComponent("corridor-root", {
     };
     panel(zA, dz0, 0, H);
     panel(dz1, zB, 0, H);
-    panel(dz0, dz1, d.doorHeight, H);
+    // OVER THE DOORWAY. One panel, unless the vent row runs through here —
+    // then it is cut round the hole in exactly the pieces the corridor wall
+    // itself was cut into, from the same ventRow() answer. Without this the
+    // room paints a solid panel straight over its own vent and the hole is
+    // only a hole from the corridor side.
+    const op = (L.openings[String(r.side)] || []).filter((o) => o.room === r)[0];
+    const v = op ? this.ventRow(L, op, false) : null;
+    if (!v) {
+      panel(dz0, dz1, d.doorHeight, H);
+    } else {
+      panel(dz0, dz1, d.doorHeight, v.y0);
+      panel(dz0, v.z0, v.y0, v.y1);
+      panel(v.z1, dz1, v.y0, v.y1);
+      panel(dz0, dz1, v.y1, H);
+    }
   },
 
   // The apartment's own door, standing open into the room: the same leaf and
@@ -4441,6 +4938,12 @@ AFRAME.registerComponent("corridor-root", {
     });
     this.geometries = [];
     this.materials = [];
+    this.instanced.forEach(function (im) {
+      im.dispose();
+    });
+    this.instanced = [];
+    this.ventPlacements = {};
+    this.ventCount = 0;
     this.imageEls.forEach(function (el) {
       if (el.parentNode) el.parentNode.removeChild(el);
     });
