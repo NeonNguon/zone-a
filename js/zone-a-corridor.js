@@ -874,6 +874,165 @@ const CorridorTextures = {
     return n;
   },
 
+  // THE NUMBER ITSELF: a real Vietnamese mobile, 0 + a live prefix + seven
+  // seeded digits, grouped the way they are written on walls. Its own function
+  // because there are two kinds of mark now — the ones painted into the wall
+  // canvas and the ones placed on a named stretch of it (stencilDecal below) —
+  // and the two must not disagree about what a phone number looks like.
+  //
+  // Nine draws from `rand`, in this order, which is what it has always taken:
+  // moving it here did not shift a single existing mark.
+  markNumber: function (rand) {
+    const pre = this.MARK_PREFIXES[Math.floor(rand() * this.MARK_PREFIXES.length)];
+    let digits = "0" + pre;
+    for (let i = 0; i < 7; i++) digits += Math.floor(rand() * 10);
+    const sep = rand() < 0.5 ? " " : ".";
+    return {
+      digits: digits,
+      text: digits.slice(0, 4) + sep + digits.slice(4, 7) + sep +
+            digits.slice(7),
+    };
+  },
+
+  // ---- A PLACED STENCIL ---------------------------------------------------
+  // The same service ad as wallMarks, but on a stretch of wall somebody CHOSE
+  // rather than wherever the bay texture happened to put one.
+  //
+  // WHY IT IS A SEPARATE THING. wallMarks paints into the wall canvas and masks
+  // itself against that composite's own coat-index map, which is what makes a
+  // mark read as paint inside the paint stack rather than as a decal. It is
+  // also why it cannot be AIMED: the wall canvas is one bay long and tiles down
+  // the corridor, so a mark drawn on it appears every 3.6 m, in every bay of
+  // that variant, and nowhere in particular. Putting a number on one named
+  // stretch of wall means a quad with its own canvas.
+  //
+  // WHAT IT KEEPS from wallMarks, because these are the rules and not the
+  // implementation: numbers only and never a trade (a wall that captions itself
+  // is not what this place is); a real Vietnamese mobile from markNumber, so
+  // the two kinds of mark cannot disagree about what a phone number looks like;
+  // painted freehand and so never level; overspray under the ink; the two
+  // uncut BRIDGES every stencil card needs to hold together; and never a
+  // complete number.
+  //
+  // WHAT IT DOES DIFFERENTLY. It cannot mask itself to a coat map it is not
+  // part of, so its weathering is subtractive: the run of digits that has to go
+  // is ERASED rather than overpainted, which on a transparent quad is the same
+  // picture — the wall shows through where the ad has gone — and it costs no
+  // second colour. The whole number stays inside the quad rather than running
+  // off the edge of a bay, because a quad's edge is not a place a number can
+  // plausibly be cut off at.
+  stencilDecal: function (w, h, seed, o) {
+    const key = "stencilDecal|" + w + "|" + h + "|" + seed + "|" + o.red + "|" +
+                o.dark + "|" + o.ink + "|" + o.tilt;
+    return this.get(key, () => {
+      const c = this.canvas(w, h);
+      const ctx = c.getContext("2d");
+      const rand = this.rand(seed * 883 + 41);
+      const num = this.markNumber(rand);
+      const text = num.text;
+
+      // SIZE IT TO THE QUAD. The digits want to be as big as the wall allows,
+      // so the font is fitted to the width rather than picked and hoped for.
+      let dh = h * 0.42; // digit height
+      let fontPx = dh / 0.72;
+      const fontFor = (px) => "700 " + px.toFixed(1) + "px " + this.MARK_FONT;
+      ctx.font = fontFor(fontPx);
+      const fit = (w * 0.9) / ctx.measureText(text).width;
+      if (fit < 1) {
+        fontPx *= fit;
+        dh *= fit;
+        ctx.font = fontFor(fontPx);
+      }
+      const wpx = ctx.measureText(text).width;
+
+      // Painted freehand off a card: never level, and always tilted enough to
+      // see. Same rule and same tunable as the marks in the wall.
+      const tiltDeg = o.tilt * (0.4 + rand() * 0.6) * (rand() < 0.5 ? -1 : 1);
+      const theta = (tiltDeg * Math.PI) / 180;
+      // BIASED TOWARD THE RED, harder than the baked marks' 62%. A mark in
+      // the wall texture is background hum and can afford to be the dark ink
+      // on a blue wall; a PLACED one is on a stretch chosen because you walk
+      // up to it, and navy on cerulean is a mark nobody ever sees.
+      const stencil = rand() < 0.85 ? o.red : o.dark;
+      // The dark ink goes on heavier here than it does in the wall texture: a
+      // placed mark is seen from across the corridor rather than in passing,
+      // and navy at the baked marks' 0.58 disappears into a cerulean wall.
+      const alpha = Math.min(
+        0.95,
+        (stencil === o.red ? 0.66 + rand() * 0.22 : 0.74 + rand() * 0.18) * o.ink
+      );
+
+      ctx.save();
+      ctx.translate((w - wpx * Math.cos(theta)) / 2, h * 0.5 + dh * 0.5);
+      ctx.rotate(theta);
+      ctx.textBaseline = "alphabetic";
+
+      // OVERSPRAY first — a soft dark halo under the ink, which is both what a
+      // card stencil actually leaves and what lets the digits hold their shape
+      // against a wall this mottled.
+      ctx.fillStyle = stencil;
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.shadowColor = "rgba(40,20,14,0.85)";
+      ctx.shadowBlur = Math.max(2, dh * 0.11);
+      ctx.fillText(text, 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = alpha;
+      ctx.fillText(text, 0, 0);
+      ctx.globalAlpha = 1;
+
+      // THE BRIDGES: the card the digits were cut from has to hold together,
+      // so every glyph carries two thin uncut gaps across it.
+      ctx.globalCompositeOperation = "destination-out";
+      const barH = Math.max(1, dh * 0.055);
+      [0.36, 0.68].forEach((f) => {
+        ctx.fillRect(-dh, -dh * f - barH / 2, wpx + dh * 2, barH);
+      });
+
+      // NEVER A COMPLETE NUMBER. A contiguous run of at least three digits
+      // goes, taken out with ragged blobs rather than a rectangle — what
+      // removed it was somebody's roller, not a scalpel. Measured in the text's
+      // own frame, which is why this happens inside the rotation.
+      const adv = [];
+      let cursor = 0;
+      const digitAt = [];
+      for (let i = 0; i < text.length; i++) {
+        adv.push(cursor);
+        digitAt.push(text[i] >= "0" && text[i] <= "9");
+        cursor += ctx.measureText(text[i]).width;
+      }
+      const runLen = 3 + Math.floor(rand() * 3);
+      const start = Math.floor(rand() * Math.max(1, text.length - runLen));
+      const x0 = adv[start] - dh * 0.15;
+      const x1 =
+        (start + runLen < adv.length ? adv[start + runLen] : cursor) + dh * 0.15;
+      const blobs = Math.max(2, Math.round((x1 - x0) / (dh * 0.55)));
+      for (let i = 0; i < blobs; i++) {
+        const bx = x0 + ((i + 0.5) / blobs) * (x1 - x0);
+        this.blob(ctx, rand, bx, -dh * 0.45, (x1 - x0) / blobs * 0.85,
+                  dh * (0.75 + rand() * 0.25), 8);
+      }
+      ctx.restore();
+
+      // EROSION over the whole ad: the wall has been shedding since it was
+      // painted, and the pigment goes with it.
+      ctx.globalCompositeOperation = "destination-out";
+      for (let i = 0; i < 90; i++) {
+        ctx.fillStyle = "rgba(0,0,0," + (0.25 + rand() * 0.75).toFixed(3) + ")";
+        this.blob(ctx, rand, rand() * w, rand() * h, h * (0.02 + rand() * 0.11),
+                  h * (0.02 + rand() * 0.09), 7);
+      }
+      // ...and a general thinning from one end, so no mark is evenly faded.
+      const g = ctx.createLinearGradient(rand() < 0.5 ? 0 : w, 0,
+                                         rand() < 0.5 ? w : 0, h);
+      g.addColorStop(0, "rgba(0,0,0,0.45)");
+      g.addColorStop(0.55, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "source-over";
+      return c;
+    });
+  },
+
   // ONE stencilled phone number.
   oneNumberMark: function (ctx, C) {
     const S = C.S;
@@ -881,12 +1040,7 @@ const CorridorTextures = {
     const pal = C.pal;
 
     // --- the number, and how it is written on the wall
-    const pre = this.MARK_PREFIXES[Math.floor(rand() * this.MARK_PREFIXES.length)];
-    let digits = "0" + pre;
-    for (let i = 0; i < 7; i++) digits += Math.floor(rand() * 10);
-    const sep = rand() < 0.5 ? " " : ".";
-    const text =
-      digits.slice(0, 4) + sep + digits.slice(4, 7) + sep + digits.slice(7);
+    const text = this.markNumber(rand).text;
 
     // --- size and place it, in metres
     const dh = (0.09 + rand() * 0.06) * C.pxY; // 9-15 cm digit height
@@ -3032,6 +3186,7 @@ const CORRIDOR_GEOM_PROPS = [
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
+  "wallStencilDecals", "wallStencilDecalWidth", "wallStencilDecalY",
   "wallPalette", "wallPaletteOverride",
   "roomWallPalettes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
@@ -3252,6 +3407,15 @@ AFRAME.registerComponent("corridor-root", {
     // reads against the wall before the wall starts taking it away. 1 is a
     // fresh-ish coat of spray paint; below that it was thin to begin with.
     wallStencils: { type: "number", default: 0.6 },
+    // THE PLACED STENCILS: numbers on a NAMED stretch of wall — the right
+    // wall between its 1st and 2nd door, the left between its 2nd and 3rd —
+    // rather than in whichever bay the tiled wall canvas happened to put one.
+    // See stencilSpots(). They honour wallStencilInk and wallStencilTilt like
+    // the baked ones do; wallStencils does NOT scale them, because these are
+    // placed and that one is a density.
+    wallStencilDecals: { type: "boolean", default: true },
+    wallStencilDecalWidth: { type: "number", default: 1.7 },
+    wallStencilDecalY: { type: "number", default: 1.45 },
     wallStencilTilt: { type: "number", default: 6 },
     wallStencilInk: { type: "number", default: 1 },
     wallPalette: { type: "string", default: "chungcu" },
@@ -3439,6 +3603,7 @@ AFRAME.registerComponent("corridor-root", {
     // them back through group.userData.dispose(), so they are tracked
     // separately from this component's own lists.
     this.props = [];
+    this.stencilCount = 0;
     // Textures this component made itself (the props' shared floor mark).
     // Everything else it draws lives in CorridorTextures' own cache, which
     // deliberately outlives a rebuild.
@@ -4033,6 +4198,7 @@ AFRAME.registerComponent("corridor-root", {
     this.buildSideWall(L, +1);
     this.buildVentMeshes(L);
     this.buildGateMeshes(L);
+    this.buildWallStencils(L);
     this.buildFurniture(L);
     this.buildTubes(L);
     this.partyWalls = {}; // two abutting apartments share ONE wall - see below
@@ -4078,6 +4244,9 @@ AFRAME.registerComponent("corridor-root", {
             this.gateInfo.angle.toFixed(0) + " deg extended / " +
             this.gateInfo.foldAngle.toFixed(0) + " folded), "
           : "no gates, ") +
+        (this.stencilCount
+          ? this.stencilCount + " placed stencils, "
+          : "") +
         (this.props.length
           ? this.props.length + " props (" +
             this.props.reduce((n, g) => {
@@ -4597,6 +4766,93 @@ AFRAME.registerComponent("corridor-root", {
     });
     const lastOpen = list.length > 0 && list[list.length - 1].open;
     seg(cursor, L.zLo, 0, d.height, lastOpen ? 0 : rot(list.length));
+  },
+
+  // ---------------------------------------------------------------
+  // THE PLACED STENCILS — a stencilled phone number on a NAMED stretch of
+  // wall, as against the ones baked into the wall canvas by wallMarks.
+  //
+  // The two do different jobs and both are wanted. wallMarks gives the corridor
+  // its background hum of old advertising: a mark in every bay of the right
+  // variant, masked into the paint stack itself, unaimed by construction
+  // because the canvas it lives on tiles every 3.6 m. These are the ones you
+  // actually walk up to — on the long blank runs of wall between doors, which
+  // is exactly where somebody with a can and a card would put one.
+  //
+  // WHERE, derived like everything else here, from L.openings (which layout()
+  // orders from the corridor's mouth toward the end wall):
+  //   RIGHT wall, between the 1st and 2nd door
+  //   LEFT wall, between the 2nd and 3rd
+  // Both stretches are blank at the shipped settings — the seat row moved down
+  // to the right wall's second gap and the bike sits in the left wall's first —
+  // so a stencil is the only thing on either.
+  //
+  // A stretch too short to carry one is skipped rather than squeezed: a number
+  // crammed between two frames reads as a label, and the whole point of these
+  // is that somebody painted them on a wall nobody was looking after.
+  // ---------------------------------------------------------------
+  stencilSpots: function (L) {
+    const d = this.data;
+    if (!d.wallStencilDecals || d.wallStencilInk <= 0) return [];
+    const fw = d.frameWidth;
+    const out = [];
+    // The gap between opening i and opening j on `side`, measured between their
+    // facing FRAME edges — the frame, not the opening, or a stencil would run
+    // under the timber.
+    const between = (side, i, j) => {
+      const list = L.openings[String(side)] || [];
+      if (list.length <= j) return null;
+      const a = list[i].z - list[i].width / 2 - fw;
+      const b = list[j].z + list[j].width / 2 + fw;
+      return { a: a, b: b, gap: a - b, side: side };
+    };
+    [between(1, 0, 1), between(-1, 1, 2)].forEach((g, k) => {
+      if (!g) return;
+      const width = Math.min(d.wallStencilDecalWidth, g.gap - 0.3);
+      if (width < 0.8) return; // not enough blank wall to be worth one
+      out.push({
+        side: g.side,
+        z: (g.a + g.b) / 2,
+        w: width,
+        h: width / 3.2, // the quad's proportions; the canvas matches
+        seed: this.data.seed * 991 + k * 137,
+      });
+    });
+    return out;
+  },
+
+  buildWallStencils: function (L) {
+    const d = this.data;
+    const spots = this.stencilSpots(L);
+    if (!spots.length) return;
+    const pal = this.corridorPal;
+    spots.forEach((sp) => {
+      const tex = CorridorTextures.stencilDecal(512, 160, sp.seed, {
+        red: pal.stencil.red,
+        dark: pal.stencil.dark,
+        ink: d.wallStencilInk,
+        tilt: d.wallStencilTilt,
+      });
+      // Its edges are soft and its middle is full of holes, so it has to blend
+      // rather than cut: `transparent`, not alphaTest. depthWrite off and a
+      // polygon offset keep it off the wall it lies on — the same treatment
+      // every other soft mark in the exhibition gets (see ContactCue).
+      const mat = this.mat({
+        map: tex,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      const m = this.addPlane(sp.w, sp.h, mat);
+      m.position.set(sp.side * (L.halfW - 0.006), d.wallStencilDecalY, sp.z);
+      // Facing the corridor. The same quarter turn the props take, and it puts
+      // the canvas's left-to-right along the viewer's, so the number reads the
+      // right way round on both walls.
+      m.rotation.y = (-sp.side * Math.PI) / 2;
+    });
+    this.stencilCount = spots.length;
   },
 
   // ---------------------------------------------------------------
@@ -5878,6 +6134,7 @@ AFRAME.registerComponent("corridor-root", {
       if (g.userData && g.userData.dispose) g.userData.dispose();
     });
     this.props = [];
+    this.stencilCount = 0;
     this.textures.forEach(function (t) {
       t.dispose();
     });

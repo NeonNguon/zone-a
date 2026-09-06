@@ -22,6 +22,7 @@
      ?draw=door   the door atlas, front and back, side by side
      ?draw=gate   the scissor gate's steel (the window grille's own recipe,
                   at the gate's colour and rust)
+     ?draw=stencil the placed wall stencils, four seeds over a wall tone
      ?draw=props  PropKit's four canvases: seat vinyl, table laminate, bike
                   spokes, bag creases. js/props.js is loaded here too, so this
                   is its syntax check as well.
@@ -140,6 +141,21 @@
             canvas: tint(PropKit.creaseCanvas(256, seed), "#e9e6dc"),
             repeat: 1,
           });
+        } else if (what === "stencil") {
+          // Four seeds, so the "never a complete number" rule can be seen
+          // holding rather than taken on trust. Drawn over a wall-ish tone,
+          // since the canvas is transparent everywhere the paint is gone.
+          for (let k = 0; k < 4; k++) {
+            tiles.push({
+              label: "stencil seed " + (seed + k),
+              canvas: CorridorTextures.stencilDecal(512, 160, seed + k, {
+                red: "#c8472a", dark: "#1c2a44", ink: 1, tilt: 6,
+              }).image,
+              repeat: 1,
+              ground: "#9dbac5",
+              aspect: 160 / 512,
+            });
+          }
         } else if (what === "gate") {
           tiles.push({
             label: "gate steel",
@@ -161,8 +177,13 @@
         ctx.fillRect(0, 0, W, H);
         let x = pad;
         tiles.forEach(function (t) {
+          const th = Math.round(cell * (t.aspect || 1));
+          if (t.ground) {
+            ctx.fillStyle = t.ground;
+            ctx.fillRect(x, pad, cell * t.repeat, th);
+          }
           for (let k = 0; k < t.repeat; k++) {
-            ctx.drawImage(t.canvas, x + k * cell, pad, cell, cell);
+            ctx.drawImage(t.canvas, x + k * cell, pad, cell, th);
           }
           ctx.fillStyle = "#9aa";
           ctx.font = "13px monospace";
