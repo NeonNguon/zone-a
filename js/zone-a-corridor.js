@@ -27,6 +27,17 @@
 //                     the return booth on the corridor's landing, wired to each
 //                     other through glitch-masked jumps.
 //
+// THE PLACED STENCILS. Two painted phone numbers on the long blank runs of
+// wall — the right wall between its 1st and 2nd door, the left between its 2nd
+// and 3rd. They are NOT the marks wallMarks paints into the wall canvas: those
+// are masked into the paint stack itself and cannot be AIMED, because that
+// canvas is one bay long and tiles every 3.6 m, so a mark on it turns up in
+// every bay of that variant and nowhere in particular. These are quads with
+// their own canvas, so they go where somebody with a can and a card would put
+// one. Both kinds share markNumber() and every rule that matters — numbers
+// only, never level, never a complete number. See stencilSpots() and
+// CorridorTextures.stencilDecal.
+//
 // THE FURNITURE. Four props stand in the run — a three-seat row of brown vinyl
 // cinema chairs with a peeling black oval table in front of them on the right,
 // a child's bike leaning on the left wall with a stuffed bag beside it. They
@@ -204,18 +215,23 @@
 //   with `wallPaletteOverride`, and can give each apartment its own with
 //   `roomWallPalettes`. See the comment on WALL_PALETTES for the schema.
 //
-// TWENTY-ONE canvases as the corridor ships, cached by their full parameter key
-// — which includes a hash of the palette — so a rebuild (or a second corridor)
-// reuses them: 3 corridor wall variants, ONE wall canvas for each of the three
-// apartments' own schemes, floor, ceiling, the door atlas and its BACKS, room
-// floor, all textureSize², plus up to three 256² bông gió block faces (one per
-// pattern actually used — a corridor set to a single ventPattern draws a
-// single canvas); and for the window, the four
-// skyline PNGs lifted into canvases (1456×816 each, 4.5 MB, 18.1 MB together),
-// the sky gradient (4×512, a rounding error) and the daylight patch
-// (256²). About 59 MB, 79 MB with mipmaps — of which the walls are 24 MB and
-// the skylines 18 MB, so textureSize and viewLayers are the two levers if a
-// device is short of texture memory.
+// TWENTY-FOUR canvases as the corridor ships, cached by their full parameter
+// key — which includes a hash of the palette — so a rebuild (or a second
+// corridor) reuses them: 3 corridor wall variants, ONE wall canvas for each of
+// the three apartments' own schemes, floor, ceiling, the door atlas and its
+// BACKS, room floor, all textureSize²; up to three 256² bông gió block faces
+// (one per pattern actually used — a corridor set to a single ventPattern
+// draws a single canvas); the gates' steel and the window grille's, which are
+// one recipe at two settings; two 512×160 placed wall stencils; and for the
+// window, the four skyline PNGs lifted into canvases (1456×816 each, 4.5 MB,
+// 18.1 MB together), the sky gradient (4×512, a rounding error) and the
+// daylight patch (256²). 85 MB with mipmaps, measured — of which the walls are
+// 24 MB and the skylines 18 MB, so textureSize and viewLayers are still the
+// two levers if a device is short of texture memory.
+//
+// The FURNITURE's canvases are neither in here nor in that count: PropKit
+// keeps its textures per-prop so a group's own dispose() can be exact. See the
+// header of js/props.js.
 // A palette costs one canvas per VARIANT it is actually used with, which is why
 // an apartment (one variant) is cheap and the corridor (three) is not.
 // On this desktop a wall canvas takes ~105 ms at the defaults (1024²,
@@ -3128,6 +3144,24 @@ const roomImages = [
 //                                     that would hit a neighbour parks the
 //                                     other way regardless
 //   gateHeight is NOT a tunable: doorHeight - 0.05 (GATE_DROP)
+//   wallStencils 0.6                  the painted phone numbers BAKED INTO the
+//                                     wall texture: a density, one per bay of
+//                                     the right variant, never aimed
+//   wallStencilDecals true            ...and the PLACED ones, on the two long
+//   wallStencilDecalWidth 1.7         blank stretches between doors. Derived
+//   wallStencilDecalY 1.45            from L.openings; skipped, never
+//                                     squeezed, if a stretch is too short
+//   wallStencilTilt 6                 both kinds: degrees off level, and
+//   wallStencilInk 1                  how much pigment went on
+//   furniture true                    the four props from js/props.js — a seat
+//                                     row and a low table on the right, a
+//                                     child's bike and a bag on the left. All
+//                                     four POSITIONS derived from L.openings
+//   furnitureCollide true             cut their footprints out of the walkable
+//                                     rectangle (see rectMinus)
+//   furnitureUnlit false              the props are the only LIT things out
+//                                     here; this bakes their shading instead
+//   furnitureOffsets {}               by-eye nudges per prop, { z, x, yaw }
 //   roomWidth 3.2 / roomDepth 4       the DEFAULT apartment: along / away from
 //                                     the run
 //   roomSizes [{},{},{}]              per-apartment { w, d } overrides, indexed

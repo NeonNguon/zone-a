@@ -56,16 +56,42 @@
 //                come out brighter than the walls they stand against, or if a
 //                future environment preset changes the rig under them.
 //
-// The four builders, and what they are FROM — both photographs are in
-// reference/ChungCu:
-//   seatRow      ...-7039: three brown vinyl cinema seats against a corridor
-//                wall, the outer two with fan-pleated backs, the middle one
-//                darker and squarer. Set on a dark plinth.
-//   lowTable     ...-7039 again: the black oval in front of them, its laminate
-//                peeled off in big pale islands, on four thin splayed legs.
-//   childBike    ...-6551: a small blue bike with red trim leaning on the wall
-//                of a dark corridor, next to a stuffed white bag.
-//   plasticBag   ...-6551: that bag.
+// The four builders, what they are FROM — both photographs are in
+// reference/ChungCu — and what they cost:
+//   seatRow      11 meshes, 1 texture. ...-7039: three brown vinyl chairs
+//                against a corridor wall, pleated, the middle one darker and
+//                taller because it is a different chair. Each is a SOLID block
+//                on a shared dark plinth, not a cushion on legs — that is what
+//                the photograph shows and it is also the only way three boxes
+//                read as furniture rather than as floating slabs.
+//   lowTable     6 meshes, 1 texture. ...-7039 again: the black oval in front
+//                of them, its laminate peeled off in big pale islands, on four
+//                thin splayed legs. The top is a scaled CYLINDER, which is
+//                cheaper than an extrusion and brings three material groups
+//                with it — so the bare-plywood edge costs no extra mesh.
+//   childBike    24 meshes, 1 texture. ...-6551: a small blue bike with red
+//                trim leaning on the wall of a dark corridor. Described by its
+//                JOINTS, every one a fraction of `wheel` (see BIKE), so one
+//                option resizes the machine — and so the CORRIDOR can ask how
+//                big one is, through bikeMetrics(), without building it.
+//   plasticBag   2 meshes, 1 texture. ...-6551: the stuffed white bag beside
+//                the bike. A sphere pushed about by six seeded lobes and
+//                flattened where it meets the floor, because a full bag
+//                spreads.
+//
+// TWO INVARIANTS THAT COST REAL TIME TO FIND, both written up where they
+// happen and both worth knowing before touching this file:
+//
+//   A WHEEL TURNS IN THE BIKE'S OWN PLANE. x is forward and y is up, so a
+//   wheel is a circle in x-y — which is where TorusGeometry and CircleGeometry
+//   are born, so they need NO rotation. Only the hub axle turns.
+//
+//   AND NOTHING BUT THE FORK MAY CROSS A WHEEL. The tyre is a solid torus
+//   standing proud of the frame's plane in both directions, so it hides any
+//   tube whose centre sits inside that — not just tubes behind the spoke disc.
+//   The stays and the fork therefore straddle the wheel, and the fork crown
+//   sits clear ABOVE the tyre so the head tube above it never has to reach
+//   through the wheel to meet it.
 // ================================================================
 const PropKit = {
   // ---- the small shared machinery ---------------------------------------
