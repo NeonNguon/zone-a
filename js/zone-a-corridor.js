@@ -2991,6 +2991,7 @@ const CORRIDOR_GEOM_PROPS = [
   "ventPattern", "ventColor", "ventGrime",
   "gate", "gateLockedRatio", "gateBar", "gateBarThick", "gateStack",
   "gateCells", "gateColor", "gateRust", "gateTrackDepth", "gatePark",
+  "furniture", "furnitureCollide", "furnitureUnlit", "furnitureOffsets",
   "window", "windowWidth", "windowHeight", "windowSill", "windowX",
   "windowRevealColor", "windowSillColor",
   "grilleBar", "grilleSpacingX", "grilleSpacingY", "grilleFrame",
@@ -3093,6 +3094,40 @@ AFRAME.registerComponent("corridor-root", {
     gateRust: { type: "number", default: 0.4 },
     gateTrackDepth: { type: "number", default: 0.05 },
     gatePark: { type: "string", default: "seed" },
+
+    // ---- THE FURNITURE -------------------------------------------------
+    // Four props from js/props.js, put where the DOORS say rather than at
+    // typed coordinates — a seat row and a low table on the right wall in the
+    // stretch before the first closed door, a child's bike and a stuffed bag
+    // on the left between the first two. See furnitureLayout().
+    //
+    //   furnitureCollide  subtract each prop's footprint from the corridor's
+    //                     walkable rectangle, so you cannot walk through them.
+    //                     Off leaves the props as scenery you pass through.
+    //   furnitureUnlit    build them MeshBasic with baked vertex shading
+    //                     instead of MeshLambert. The props are the only lit
+    //                     thing in the corridor — everything else has its light
+    //                     painted into its texture — so this is the switch if
+    //                     they read brighter than the walls they stand against.
+    //   furnitureOffsets  by-eye nudges per prop, keyed seats / table / bike /
+    //                     bag, each { z, x, yaw } in metres and DEGREES,
+    //                     applied after the derivation. An object, or the JSON
+    //                     string an HTML attribute carries — the same
+    //                     parse/stringify pattern roomSizes uses. Any key or
+    //                     any prop may be left out.
+    furniture: { type: "boolean", default: true },
+    furnitureCollide: { type: "boolean", default: true },
+    furnitureUnlit: { type: "boolean", default: false },
+    furnitureOffsets: {
+      default: {},
+      parse: function (v) {
+        if (typeof v !== "string") return v || {};
+        return v ? JSON.parse(v) : {};
+      },
+      stringify: function (v) {
+        return typeof v === "string" ? v : JSON.stringify(v);
+      },
+    },
 
     // The DEFAULT apartment, used by any of the three that does not override it.
     roomWidth: { type: "number", default: 3.2 },
@@ -3375,6 +3410,14 @@ AFRAME.registerComponent("corridor-root", {
     this.ventCount = 0;
     this.gates = [];
     this.gateInfo = null;
+    // PropKit groups. They own their own geometries and materials and hand
+    // them back through group.userData.dispose(), so they are tracked
+    // separately from this component's own lists.
+    this.props = [];
+    // Textures this component made itself (the props' shared floor mark).
+    // Everything else it draws lives in CorridorTextures' own cache, which
+    // deliberately outlives a rebuild.
+    this.textures = [];
     this.hiddenClickables = []; // clickables parked while the corridor is hidden
     this.built = false;
 
@@ -3484,7 +3527,42 @@ AFRAME.registerComponent("corridor-root", {
   // continuous — the same rule buildRegions() uses for the floorplan's
   // hallways. The closed doors get no throat, which is exactly why they are
   // solid: they sit inside a wall, where there is no rectangle at all.
+  //
+  // THE FURNITURE, and why an obstacle here is a SUBTRACTION. The collider
+  // takes the UNION of these rectangles: anything inside any rectangle is
+  // somewhere you may stand. So there is no such thing as adding a solid — a
+  // prop is made solid by CUTTING ITS FOOTPRINT OUT of the rectangle it stands
+  // in, and rebuilding what is left as the pieces around it. rectMinus() does
+  // that: a rectangle minus a rectangle is up to four rectangles, and because
+  // they are cut on the hole's own edges they tile the remainder exactly and
+  // the union stays continuous — you walk past a prop through pieces that share
+  // their edges, the same way the landing and the run already share z = 0.
+  //
+  // The footprint is inflated by playerRadius first, which is what actually
+  // stops the camera: the collider does not know about the seat row, it knows
+  // there is nowhere to stand within a quarter metre of it.
   // ---------------------------------------------------------------
+
+  // One rectangle minus one rectangle, appended to `out`. Both are
+  // {x0, x1, z0, z1} with any other keys carried through (the tag). Guillotine:
+  // the z-bands clear of the hole survive whole, and inside the hole's own band
+  // only the strips to either side of it in x are left.
+  rectMinus: function (a, h, out) {
+    if (h.x1 <= a.x0 || h.x0 >= a.x1 || h.z1 <= a.z0 || h.z0 >= a.z1) {
+      out.push(a); // no overlap at all
+      return;
+    }
+    const zLo = Math.max(a.z0, h.z0);
+    const zHi = Math.min(a.z1, h.z1);
+    if (a.z0 < zLo) out.push(Object.assign({}, a, { z1: zLo }));
+    if (zHi < a.z1) out.push(Object.assign({}, a, { z0: zHi }));
+    if (a.x0 < h.x0) {
+      out.push(Object.assign({}, a, { z0: zLo, z1: zHi, x1: h.x0 }));
+    }
+    if (h.x1 < a.x1) {
+      out.push(Object.assign({}, a, { z0: zLo, z1: zHi, x0: h.x1 }));
+    }
+  },
   walkableRects: function (opts) {
     const d = this.data;
     const L = this.layout();
@@ -3503,9 +3581,30 @@ AFRAME.registerComponent("corridor-root", {
 
     // The LANDING and the CORRIDOR: one tube, split at z = 0 into two
     // rectangles that share that edge, so each carries its own tag while the
-    // union stays continuous.
-    push(-L.halfW + r, L.halfW - r, 0, L.zBack - r, "corridor:landing");
-    push(-L.halfW + r, L.halfW - r, L.zEnd + r, 0, "corridor:run");
+    // union stays continuous — and then cut around the furniture, which is the
+    // only thing standing in either of them.
+    let open = [
+      { x0: -L.halfW + r, x1: L.halfW - r, z0: 0, z1: L.zBack - r,
+        tag: "corridor:landing" },
+      { x0: -L.halfW + r, x1: L.halfW - r, z0: L.zEnd + r, z1: 0,
+        tag: "corridor:run" },
+    ];
+    if (d.furniture && d.furnitureCollide) {
+      // `false`: this runs on every collider rebuild, and buildFurniture has
+      // already said anything there was to say about where these went.
+      this.furnitureLayout(L, false).forEach((p) => {
+        const hole = {
+          x0: p.x - p.spanX / 2 - r,
+          x1: p.x + p.spanX / 2 + r,
+          z0: p.z - p.spanZ / 2 - r,
+          z1: p.z + p.spanZ / 2 + r,
+        };
+        const cut = [];
+        open.forEach((a) => this.rectMinus(a, hole, cut));
+        open = cut;
+      });
+    }
+    open.forEach((a, i) => push(a.x0, a.x1, a.z0, a.z1, a.tag + "/" + i));
 
     L.rooms.forEach((room) => {
       // The apartment itself.
@@ -3909,6 +4008,7 @@ AFRAME.registerComponent("corridor-root", {
     this.buildSideWall(L, +1);
     this.buildVentMeshes(L);
     this.buildGateMeshes(L);
+    this.buildFurniture(L);
     this.buildTubes(L);
     this.partyWalls = {}; // two abutting apartments share ONE wall - see below
     L.rooms.forEach((r) => this.buildRoom(L, r));
@@ -3953,6 +4053,14 @@ AFRAME.registerComponent("corridor-root", {
             this.gateInfo.angle.toFixed(0) + " deg extended / " +
             this.gateInfo.foldAngle.toFixed(0) + " folded), "
           : "no gates, ") +
+        (this.props.length
+          ? this.props.length + " props (" +
+            this.props.reduce((n, g) => {
+              let k = 0;
+              g.traverse((o) => { if (o.isMesh) k++; });
+              return n + k;
+            }, 0) + " meshes, " + this.props.length + " floor marks), "
+          : "no furniture, ") +
         this.group.children.length + " meshes | textures " +
         allT.ms.toFixed(0) + " ms total, " + wallT.drawn + " wall canvas(es) " +
         (wallT.drawn ? (wallT.ms / wallT.drawn).toFixed(0) : "0") +
@@ -4467,6 +4575,308 @@ AFRAME.registerComponent("corridor-root", {
   },
 
   // ---------------------------------------------------------------
+  // THE FURNITURE — four props from js/props.js, put where the DOORS say.
+  //
+  // Nothing here is a typed coordinate. The seat row goes in the stretch
+  // between the mouth and the first closed door on the right; the bike goes
+  // between the first two closed doors on the left. Both come out of
+  // L.openings, so changing doorPitch or lengthening the corridor moves the
+  // furniture with the doors instead of leaving it standing in a doorway.
+  //
+  // WHY THIS IS A PURE FUNCTION AND NOT PART OF THE BUILD. walkableRects() has
+  // to subtract these footprints from the corridor, and rig-collision calls it
+  // whenever IT likes — including before the corridor has ever been built. So
+  // the placement is worked out here, from the layout alone, and both
+  // buildFurniture (which puts the props there) and walkableRects (which cuts
+  // holes in the floor there) ask the same question. Same reason ventRow() and
+  // grilleLattice() are methods: two copies of this arithmetic would drift the
+  // first time anyone touched a size.
+  //
+  // `warn` gates the console, because walkableRects can run many times a second
+  // and buildFurniture runs once.
+  //
+  // Returns [{ key, x, z, yaw, spanX, spanZ, opts }], all in the corridor's
+  // local frame: spanX / spanZ are the prop's WORLD footprint (a prop is yawed
+  // a quarter turn to face the corridor, so its own width becomes spanZ).
+  // ---------------------------------------------------------------
+  PLAYER_R: 0.25, // rig-collision's default, used only to warn about squeezes
+
+  furnitureLayout: function (L, warn) {
+    const d = this.data;
+    if (!d.furniture) return [];
+    const t = L.t;
+    const fw = d.frameWidth;
+    const off = d.furnitureOffsets || {};
+    const nudge = (k) => {
+      const e = off[k] || {};
+      return { z: e.z || 0, x: e.x || 0, yaw: e.yaw || 0 };
+    };
+    // A prop stands against a wall facing the corridor. Its own +z is its
+    // front, so the yaw that turns it to face inward is a quarter turn against
+    // the side — and that same turn puts its WIDTH along the corridor, which is
+    // why spanZ below comes from a prop's width and spanX from its depth.
+    const facing = (side) => (-side * Math.PI) / 2;
+    const WALL_GAP = 0.03; // how far a prop's back stands off the inner face
+    const out = [];
+
+    // ---- THE SEAT ROW + ITS TABLE, on the RIGHT wall -------------------
+    const rightList = L.openings["1"] || [];
+    const firstClosed = rightList.filter((o) => !o.open)[0] || rightList[0];
+    const seatOpts = {
+      seats: 3, seatWidth: 0.58, seatDepth: 0.55, seatH: 0.42, backH: 0.55,
+      color: "#5a2e1e", color2: "#7a4430", wear: 0.6,
+      seed: d.seed + 11, unlit: d.furnitureUnlit,
+    };
+    const rowW = seatOpts.seats * seatOpts.seatWidth;
+    const rowD = seatOpts.seatDepth;
+    const CLEAR = 0.4; // the elbow room the brief asks for either side of it
+    let rowZ;
+    let placedInLanding = false;
+    if (firstClosed) {
+      // The gap: from the corridor's mouth (z = 0) to that door's NEAR frame
+      // edge — the frame, not the opening, or the row would touch the timber.
+      const doorEdge = firstClosed.z + firstClosed.width / 2 + fw;
+      const gap = -doorEdge; // doorEdge is negative; the gap runs 0 -> it
+      if (gap >= rowW + CLEAR) {
+        rowZ = doorEdge / 2;
+      } else {
+        placedInLanding = true;
+        if (warn) {
+          console.warn(
+            "[corridor] no room for the seat row between the mouth and the " +
+              "first door on the right: the gap is " + gap.toFixed(2) +
+              " m and the row needs " + (rowW + CLEAR).toFixed(2) +
+              " (3 seats of " + seatOpts.seatWidth + " m plus " + CLEAR +
+              " m). Standing it on the LANDING's right-hand wall instead. " +
+              "Widen doorPitch (now " + d.doorPitch + ") to put it back."
+          );
+        }
+      }
+    } else {
+      placedInLanding = true;
+      if (warn) {
+        console.warn(
+          "[corridor] there are no doors on the right-hand wall, so the seat " +
+            "row has nothing to sit in front of. Standing it on the landing."
+        );
+      }
+    }
+    if (placedInLanding) rowZ = L.zBack / 2;
+    const seatX = L.halfW - WALL_GAP - rowD / 2;
+    const sN = nudge("seats");
+    out.push({
+      key: "seats",
+      x: seatX + sN.x,
+      z: rowZ + sN.z,
+      yaw: facing(1) + (sN.yaw * Math.PI) / 180,
+      spanX: rowD,
+      spanZ: rowW + 0.16, // the plinth runs a little past the chairs
+      opts: seatOpts,
+    });
+
+    // THE TABLE, in front of the row. The brief says "0.45 m in front of the
+    // row's centre"; measured from the CENTRE that lands the table 12 cm inside
+    // the seats, so it is measured from the row's FRONT FACE instead — which is
+    // what the photograph shows anyway, the table almost touching their knees.
+    const tableOpts = {
+      w: 1.1, d: 0.6, h: 0.45, color: "#141414", laminatePeel: 0.6,
+      seed: d.seed + 23, unlit: d.furnitureUnlit,
+    };
+    const TABLE_GAP = 0.45;
+    const rowFront = seatX - rowD / 2;
+    const tN = nudge("table");
+    // ±6 degrees of "somebody moved it and never straightened it", seeded so
+    // it is the same every time this corridor is built.
+    const skew = (CorridorTextures.rand(d.seed * 57 + 3)() - 0.5) * 12;
+    out.push({
+      key: "table",
+      x: rowFront - TABLE_GAP + tN.x,
+      z: rowZ + tN.z,
+      yaw: facing(1) + ((skew + tN.yaw) * Math.PI) / 180,
+      spanX: tableOpts.d,
+      spanZ: tableOpts.w,
+      opts: tableOpts,
+    });
+
+    // ---- THE BIKE + THE BAG, on the LEFT wall --------------------------
+    const leftList = L.openings["-1"] || [];
+    const leftClosed = leftList.filter((o) => !o.open);
+    // WHEEL 0.38, not PropKit's 0.3. Against a 0.9 x 2.1 m door the default
+    // read as a toddler's balance bike; the reference machine is a 16-inch
+    // child's bike, which is what this is. PropKit keeps its own default —
+    // this is the corridor deciding what stands in it.
+    const bikeOpts = {
+      wheel: 0.38, color: "#2b6db3", color2: "#d94b3a", lean: 12,
+      seed: d.seed + 37, unlit: d.furnitureUnlit,
+    };
+    // ...and the bag smaller and duller than PropKit's default, which at
+    // 0.35 x 0.45 in near-white stood nearly as tall as the bike and, being
+    // the only lit near-white thing in a dark corridor, took the eye straight
+    // off it.
+    const bagOpts = {
+      w: 0.3, h: 0.34, color: "#cdc7b7",
+      seed: d.seed + 53, unlit: d.furnitureUnlit,
+    };
+    // The machine's own extents, from the same fractions childBike builds it
+    // from: the wheels sit a wheelbase apart and each reaches a radius past its
+    // hub, and the handlebar is the widest thing across.
+    const R = bikeOpts.wheel / 2;
+    const bikeLen = bikeOpts.wheel * 2.4 + bikeOpts.wheel; // wheelbase + a wheel
+    const bikeTop = R * 2.24 + bikeOpts.wheel * 0.06; // saddle top
+    const barHalf = bikeOpts.wheel * 0.36 + bikeOpts.wheel * 0.05; // bar + grip
+    const lean = (bikeOpts.lean * Math.PI) / 180;
+    // LEANING it moves its top toward the wall and its bar with it, so how far
+    // out the tyres have to stand is derived from the lean rather than guessed:
+    // the bar is the point that reaches furthest, at barHalf across and its own
+    // height up.
+    const reach = barHalf * Math.cos(lean) + bikeTop * Math.sin(lean);
+    const bikeDepth = reach + barHalf; // wall side + corridor side
+    let bikeZ;
+    if (leftClosed.length >= 2) {
+      // Midway between the two doors' facing frame edges.
+      const a = leftClosed[0].z - leftClosed[0].width / 2 - fw;
+      const b = leftClosed[1].z + leftClosed[1].width / 2 + fw;
+      bikeZ = (a + b) / 2;
+      // A FOLDED GATE may already be parked in that gap. Ask the gates where
+      // they went (quietly — collectGate already warned once if it had to) and
+      // step the bike clear of any stack that overlaps it.
+      const stacks = [];
+      [leftClosed[0], leftClosed[1]].forEach((op) => {
+        const park = this.gateParkSide(L, -1, op, leftList, false);
+        const half = op.width / 2 + fw;
+        const s0 = op.z + park * half;
+        const s1 = s0 + park * d.gateStack;
+        stacks.push({ lo: Math.min(s0, s1), hi: Math.max(s0, s1) });
+      });
+      const hits = (z) =>
+        stacks.some((s) => z + bikeLen / 2 > s.lo && z - bikeLen / 2 < s.hi);
+      if (d.gate && hits(bikeZ)) {
+        const tryZ = [bikeZ + d.gateStack, bikeZ - d.gateStack].filter(
+          (z) => z - bikeLen / 2 > b && z + bikeLen / 2 < a && !hits(z)
+        );
+        if (tryZ.length) {
+          bikeZ = tryZ[0];
+        } else if (warn) {
+          console.warn(
+            "[corridor] the bike's gap between the first two doors on the " +
+              "left is taken by a folded gate stack, and there is no " +
+              (bikeLen.toFixed(2)) + " m of clear wall either side of it " +
+              "(the gap is " + (a - b).toFixed(2) + " m). Leaving the bike " +
+              "where it is — it will overlap the stack. Widen doorPitch, " +
+              "narrow gateStack, or nudge it with furnitureOffsets.bike.z."
+          );
+        }
+      }
+    } else {
+      bikeZ = L.zEnd / 2;
+      if (warn) {
+        console.warn(
+          "[corridor] fewer than two closed doors on the left wall, so the " +
+            "bike has no gap between doors to lean in. Putting it halfway " +
+            "down the left wall instead."
+        );
+      }
+    }
+    // How far the tyres stand off the wall, so the LEANING top clears it by
+    // WALL_GAP rather than going through it.
+    const bikeX = -(L.halfW - WALL_GAP - reach);
+    const bN = nudge("bike");
+    out.push({
+      key: "bike",
+      x: bikeX + bN.x,
+      z: bikeZ + bN.z,
+      yaw: facing(-1) + (bN.yaw * Math.PI) / 180,
+      spanX: bikeDepth,
+      spanZ: bikeLen,
+      opts: bikeOpts,
+    });
+
+    // THE BAG, on the floor beside the rear wheel — which is the end toward the
+    // MOUTH, the bike's own front pointing away down the corridor.
+    const gN = nudge("bag");
+    out.push({
+      key: "bag",
+      x: -(L.halfW - WALL_GAP - bagOpts.w / 2) + gN.x,
+      z: bikeZ + bikeLen / 2 + bagOpts.w * 0.62 + gN.z,
+      yaw: facing(-1) + (gN.yaw * Math.PI) / 180,
+      spanX: bagOpts.w,
+      spanZ: bagOpts.w,
+      opts: bagOpts,
+    });
+
+    // ONE LAST CHECK: none of this may seal the corridor. A footprint plus a
+    // player radius each side has to leave somebody room to walk past it.
+    if (warn) {
+      out.forEach((p) => {
+        const free =
+          p.x > 0
+            ? p.x - p.spanX / 2 - this.PLAYER_R - (-L.halfW + this.PLAYER_R)
+            : L.halfW - this.PLAYER_R - (p.x + p.spanX / 2 + this.PLAYER_R);
+        if (free < 0.35) {
+          console.warn(
+            "[corridor] the " + p.key + " leaves only " + free.toFixed(2) +
+              " m of walkable corridor beside it (player radius " +
+              this.PLAYER_R + " m). The collider will make it hard or " +
+              "impossible to get past. Widen the corridor (`width` is " +
+              d.width + ") or move it with furnitureOffsets." + p.key + ".x."
+          );
+        }
+      });
+    }
+    return out;
+  },
+
+  // Put them there. Each prop is a THREE.Group from PropKit, added to the
+  // corridor's own group — so it rides `offset`, hides with `shown` and dies in
+  // teardown() — plus one soft floor mark under it.
+  buildFurniture: function (L) {
+    const d = this.data;
+    if (!d.furniture) return;
+    if (typeof PropKit === "undefined") {
+      console.warn(
+        "[corridor] `furniture` is on but PropKit is not loaded. Add " +
+          "<script src=\"js/props.js\"></script> to index.html BEFORE " +
+          "js/zone-a-corridor.js. Building the corridor without it."
+      );
+      return;
+    }
+    const make = {
+      seats: (o) => PropKit.seatRow(o),
+      table: (o) => PropKit.lowTable(o),
+      bike: (o) => PropKit.childBike(o),
+      bag: (o) => PropKit.plasticBag(o),
+    };
+    // ONE floor-mark texture for all of them: the exhibition's shared contact
+    // cue, in SHADOW mode. The corridor is unlit and its floor is dark cement,
+    // so unlike every other cue in the show this one is NOT subscribed to the
+    // environment retune — there is no environment out here to follow, and a
+    // preset that switched cues to glow would light four bright patches in a
+    // corridor whose whole point is that the light is painted on. Same
+    // reasoning, and the same `null` profile, as buildDaylight.
+    const cue = { opacity: 0.35, color: "#000000", mode: "shadow" };
+    const cueTex = ContactCue.makeTexture(0.55);
+    this.textures.push(cueTex);
+    const cueMat = ContactCue.makeMaterial(cue, cueTex);
+    ContactCue.tuneMaterial(cueMat, cue, null);
+    this.materials.push(cueMat);
+
+    this.furnitureLayout(L, true).forEach((p) => {
+      const g = make[p.key](p.opts);
+      g.position.set(p.x, 0, p.z);
+      g.rotation.y = p.yaw;
+      this.group.add(g);
+      this.props.push(g);
+
+      // THE FLOOR MARK: a quad a third larger than the footprint, lying just
+      // above the floor. Axis-aligned to the corridor rather than to the prop,
+      // because it is a smudge of shadow and not a decal of the object.
+      const mark = this.addPlane(p.spanX * 1.3, p.spanZ * 1.3, cueMat);
+      mark.rotation.x = -Math.PI / 2;
+      mark.position.set(p.x, 0.006, p.z);
+    });
+  },
+
+  // ---------------------------------------------------------------
   // THE SCISSOR GATES (cửa kéo)
   //
   // The folding steel gate that stands outside every door in a chung cư:
@@ -4666,7 +5076,7 @@ AFRAME.registerComponent("corridor-root", {
   // clear the corridor says so and parks it where it was asked to. The vent row
   // can never be in the way at any setting — the row lives inside the lintel,
   // between the jambs, and the stack is always outside them.
-  gateParkSide: function (L, side, op, list) {
+  gateParkSide: function (L, side, op, list, warn) {
     const d = this.data;
     const preferred =
       d.gatePark === "far"
@@ -4691,6 +5101,9 @@ AFRAME.registerComponent("corridor-root", {
     };
     if (clear(preferred)) return preferred;
     if (clear(-preferred)) return -preferred;
+    // Quietly, when it is the FURNITURE asking where a stack went rather than
+    // the gate builder deciding: collectGate has already said this once.
+    if (warn === false) return preferred;
     console.warn(
       "[corridor] the folded gate beside the door at z " + op.z.toFixed(2) +
         " has nowhere to park: a " + d.gateStack + " m stack runs into a " +
@@ -4723,7 +5136,7 @@ AFRAME.registerComponent("corridor-root", {
       !op.open &&
       CorridorTextures.rand(this.doorKey(op.z, side) * 733 + 11)() <
         d.gateLockedRatio;
-    const park = this.gateParkSide(L, side, op, list);
+    const park = this.gateParkSide(L, side, op, list, true);
     const half = op.width / 2 + d.frameWidth;
     this.gates.push({
       // The gate's plane: gateTrackDepth out from the wall's inner face, which
@@ -5425,6 +5838,14 @@ AFRAME.registerComponent("corridor-root", {
       im.dispose();
     });
     this.instanced = [];
+    this.props.forEach(function (g) {
+      if (g.userData && g.userData.dispose) g.userData.dispose();
+    });
+    this.props = [];
+    this.textures.forEach(function (t) {
+      t.dispose();
+    });
+    this.textures = [];
     this.ventPlacements = {};
     this.ventCount = 0;
     this.gates = [];

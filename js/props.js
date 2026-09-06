@@ -270,19 +270,30 @@ const PropKit = {
                s * (rowW / 2 - 0.06), 0.015, 0);
     });
 
+    // THE GAP between chairs has to be a real one. At 2 cm the row read as a
+    // single banquette with seams in it — three chairs carried out of three
+    // flats do not touch, and the daylight between them is most of what says
+    // there are three.
+    const GAP = 0.055;
     for (let i = 0; i < seats; i++) {
       const x = (i - (seats - 1) / 2) * sw;
-      const m = i === Math.floor(seats / 2) && seats > 1 ? middle : outer;
+      const mid = seats > 1 && i === Math.floor(seats / 2);
+      const m = mid ? middle : outer;
+      // ...and the middle one is not just a darker copy: it is a different
+      // chair, so it sits higher and its back is taller. In the photograph that
+      // step in the skyline of the row is the first thing you notice about it.
+      const sHi = mid ? sh + 0.035 : sh;
+      const bHi = mid ? bh * 1.14 : bh;
       // THE CUSHION: its top at seatH, so seatH means what it says.
-      this.add(ctx, new THREE.BoxGeometry(sw - 0.02, cushionH, sd), m,
-               x, sh - cushionH / 2, 0);
+      this.add(ctx, new THREE.BoxGeometry(sw - GAP, cushionH, sd), m,
+               x, sHi - cushionH / 2, 0);
       // THE BACK, leaning back a little, standing on the cushion's rear edge.
       const back = this.add(
-        ctx, new THREE.BoxGeometry(sw - 0.02, bh, backT), m,
-        x, sh + bh / 2 - 0.02, -sd / 2 + backT / 2
+        ctx, new THREE.BoxGeometry(sw - GAP, bHi, backT), m,
+        x, sHi + bHi / 2 - 0.02, -sd / 2 + backT / 2
       );
       back.rotation.x = 0.10; // ~6 degrees of recline
-      back.position.z -= Math.sin(0.10) * bh * 0.5;
+      back.position.z -= Math.sin(0.10) * bHi * 0.5;
     }
 
     // THE ARMS, only at the two ends of the row — the chairs in the photograph
@@ -641,10 +652,21 @@ const PropKit = {
              accentMat, A[0] + wheel * 0.06, R * 1.72, 0);
 
     // THE LEAN, about the tyres' own contact line: a rotation about the
-    // machine's long axis, applied to the group, so wherever the caller puts it
-    // the wheels stay on the floor. Positive tips it toward local -z, which is
-    // AWAY from the viewer — i.e. into the wall it is propped against.
-    ctx.group.rotation.x = -lean;
+    // machine's long axis, so the wheels stay on the floor. Positive tips it
+    // toward local -z, which is AWAY from the viewer — into the wall it is
+    // propped against.
+    //
+    // It goes on an INNER group, not on the one returned. A caller places a
+    // prop by setting rotation.y on it, and a THREE.Euler in the default 'XYZ'
+    // order composes as RX * RY * RZ — so a lean written onto the same object
+    // would be applied AFTER the caller's yaw, about the WORLD x axis. The bike
+    // would pitch forward down the corridor instead of leaning sideways into
+    // the wall. Nesting keeps the lean in the machine's own frame and keeps the
+    // contract simple: the group this returns has no rotation of its own.
+    const tilt = new THREE.Group();
+    tilt.rotation.x = -lean;
+    while (ctx.group.children.length) tilt.add(ctx.group.children[0]);
+    ctx.group.add(tilt);
     return ctx.group;
   },
 
@@ -703,8 +725,9 @@ const PropKit = {
   // full bag spreads. Plus the knot: a small sphere on top. The creases are a
   // canvas, so the lumps read as folded polythene and not as a potato.
   //
-  // @param {object} [o] w .35, h .45, color "#e9e6dc", lumps .18, seed 1,
-  //   unlit false
+  // @param {object} [o] w .35, h .45, color "#e9e6dc", lumps .3, seed 1,
+  //   lumps .3 (how far the six seeded lobes push the surface about, as a
+  //   fraction of the radius — under about .25 it reads as an egg)
   // @returns {THREE.Group} origin on the floor at the bag's centre. 2 meshes,
   //   one texture.
   // ======================================================================
@@ -713,7 +736,7 @@ const PropKit = {
     const w = o.w != null ? o.w : 0.35;
     const h = o.h != null ? o.h : 0.45;
     const color = o.color || "#e9e6dc";
-    const lumps = o.lumps != null ? o.lumps : 0.18;
+    const lumps = o.lumps != null ? o.lumps : 0.3;
     const seed = o.seed != null ? o.seed : 1;
     const ctx = this.begin(o);
 
@@ -729,7 +752,9 @@ const PropKit = {
     for (let i = 0; i < 6; i++) {
       const v = new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5)
         .normalize();
-      lobes.push({ v: v, a: (rand() - 0.4) * lumps });
+      // Biased positive: a stuffed bag bulges outward far more than it
+      // dents, and a symmetric range just made it round again.
+      lobes.push({ v: v, a: (rand() * 1.3 - 0.35) * lumps });
     }
     const p = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
@@ -775,15 +800,15 @@ const PropKit = {
       const r = S * (0.05 + rand() * 0.18);
       const g = ctx.createRadialGradient(x, y, 0, x, y, r);
       const dark = rand() < 0.5;
-      g.addColorStop(0, dark ? "rgba(120,118,110,0.20)" : "rgba(255,255,255,0.5)");
+      g.addColorStop(0, dark ? "rgba(96,94,86,0.42)" : "rgba(255,255,255,0.7)");
       g.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = g;
       ctx.fillRect(x - r, y - r, r * 2, r * 2);
     }
     // Hard folds: the lines a bag keeps once it has been screwed up.
     for (let k = 0; k < 22; k++) {
-      ctx.strokeStyle = "rgba(105,103,96," + (0.16 + rand() * 0.3).toFixed(3) + ")";
-      ctx.lineWidth = Math.max(1, S / 300);
+      ctx.strokeStyle = "rgba(88,86,79," + (0.3 + rand() * 0.4).toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1.4, S / 190);
       let x = rand() * S;
       let y = rand() * S;
       ctx.beginPath();
