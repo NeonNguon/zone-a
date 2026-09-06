@@ -542,6 +542,45 @@ const PropKit = {
   // triangles than the rest of the corridor's furniture put together, for
   // something read at two metres in a dark corridor.
   //
+  // THE PROPORTIONS, as fractions of the wheel — so one option sizes the whole
+  // machine, and so the CORRIDOR can ask how big a bike is without building
+  // one. furnitureLayout needs a footprint before anything exists, and it used
+  // to re-derive these numbers by hand; the wheelbase changing here and not
+  // there is exactly the drift that would put a bike through a door frame.
+  //
+  // 1.95 wheelbases to a wheel is a real 16-inch child's bike: 0.74 m between
+  // the hubs. It was 2.4, which drew a stretched cruiser.
+  BIKE: {
+    wheelbase: 1.95, // x wheel
+    seatTop: 2.24, // x radius, to the top of the saddle
+    bar: 0.36, // x wheel, half the handlebar
+    grip: 0.04, // x wheel, how far a grip stands proud of the bar's end
+  },
+
+  // What a bike with these options works out to, without building it.
+  // `reach` is how far the LEANING machine gets toward the wall behind it —
+  // the handlebar arrives first, at `bar` across and `top` up — and `depth` is
+  // its whole footprint across the corridor.
+  bikeMetrics: function (o) {
+    o = o || {};
+    const wheel = o.wheel != null ? o.wheel : 0.3;
+    const lean = ((o.lean != null ? o.lean : 12) * Math.PI) / 180;
+    const bar = wheel * this.BIKE.bar;
+    const barOuter = wheel * (this.BIKE.bar + this.BIKE.grip);
+    const top = (wheel / 2) * this.BIKE.seatTop + wheel * 0.06;
+    const reach = barOuter * Math.cos(lean) + top * Math.sin(lean);
+    return {
+      wheel: wheel,
+      wheelbase: wheel * this.BIKE.wheelbase,
+      length: wheel * this.BIKE.wheelbase + wheel, // wheelbase plus a wheel
+      top: top,
+      bar: bar,
+      barOuter: barOuter,
+      reach: reach,
+      depth: reach + barOuter,
+    };
+  },
+
   // @param {object} [o] wheel .3 (DIAMETER), color "#2b6db3",
   //   color2 "#d94b3a", lean 12 (deg, tips the top toward local -z, which is
   //   INTO the wall when the bike is placed facing the room), seed 1,
@@ -559,9 +598,8 @@ const PropKit = {
     const ctx = this.begin(o);
 
     const R = wheel / 2;
-    // EVERY proportion below is a fraction of the wheel, so one option sizes
-    // the whole machine. A child's bike is short and tall for its wheels.
-    const wb = wheel * 2.4; // wheelbase
+    const m = this.bikeMetrics(o); // see BIKE above — the shared proportions
+    const wb = m.wheelbase;
     const TUBE = wheel * 0.045;
 
     const frameMat = this.mat(ctx, { color: new THREE.Color(color) });
@@ -625,7 +663,7 @@ const PropKit = {
     // grips — the one flash of colour the reference bike has at that height.
     const barY = HT[1] + R * 0.34;
     this.tube(ctx, rimMat, HT, [HT[0], barY, 0], TUBE * 0.7, 6);
-    const halfBar = wheel * 0.36;
+    const halfBar = m.bar;
     this.tube(ctx, darkMat, [HT[0], barY, -halfBar], [HT[0], barY, halfBar],
               TUBE * 0.62, 7);
     [-1, 1].forEach((s) => {
@@ -645,13 +683,18 @@ const PropKit = {
     this.add(ctx, new THREE.BoxGeometry(wheel * 0.16, wheel * 0.03, wheel * 0.08),
              darkMat, BB[0] + crank * 0.5, BB[1] + crank * 0.7, -wheel * 0.19);
 
-    // CHAIN GUARD — the pale panel over the chainring, which on the reference
-    // bike is the biggest single thing you see.
-    const guard = this.add(ctx,
-      new THREE.BoxGeometry(wheel * 0.62, wheel * 0.3, wheel * 0.012),
+    // CHAIN GUARD — the round cover over the chainring, which is what a child's
+    // bike actually has and what makes it read as one.
+    //
+    // It was a flat slab the length of the chain, hung between the wheels: at
+    // this size and unlit on one edge it read as a grey rectangle floating
+    // inside the frame and nothing like a bicycle part at all. A disc AT the
+    // bottom bracket, where the chainring is, is unmistakable — and it is one
+    // mesh either way.
+    this.add(ctx,
+      new THREE.CylinderGeometry(wheel * 0.17, wheel * 0.17, wheel * 0.02, 14),
       this.mat(ctx, { color: new THREE.Color("#ddd8cb") }),
-      BB[0] - wheel * 0.14, BB[1] + wheel * 0.03, wheel * 0.1);
-    guard.rotation.z = 0.15;
+      BB[0], BB[1], wheel * 0.09, Math.PI / 2, 0, 0);
 
     // REAR RACK, over the back wheel.
     this.add(ctx, new THREE.BoxGeometry(wheel * 0.5, wheel * 0.035, wheel * 0.3),

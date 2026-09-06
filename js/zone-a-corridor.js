@@ -4629,6 +4629,10 @@ AFRAME.registerComponent("corridor-root", {
   furnitureLayout: function (L, warn) {
     const d = this.data;
     if (!d.furniture) return [];
+    // It asks PropKit how big a bike is, so it cannot answer without it. The
+    // collider calls this before anything is built; buildFurniture is where the
+    // missing-script warning lives, so this just declines quietly.
+    if (typeof PropKit === "undefined") return [];
     const t = L.t;
     const fw = d.frameWidth;
     const off = d.furnitureOffsets || {};
@@ -4742,20 +4746,17 @@ AFRAME.registerComponent("corridor-root", {
       w: 0.3, h: 0.34, color: "#cdc7b7",
       seed: d.seed + 53, unlit: d.furnitureUnlit,
     };
-    // The machine's own extents, from the same fractions childBike builds it
-    // from: the wheels sit a wheelbase apart and each reaches a radius past its
-    // hub, and the handlebar is the widest thing across.
-    const R = bikeOpts.wheel / 2;
-    const bikeLen = bikeOpts.wheel * 2.4 + bikeOpts.wheel; // wheelbase + a wheel
-    const bikeTop = R * 2.24 + bikeOpts.wheel * 0.06; // saddle top
-    const barHalf = bikeOpts.wheel * 0.36 + bikeOpts.wheel * 0.05; // bar + grip
-    const lean = (bikeOpts.lean * Math.PI) / 180;
-    // LEANING it moves its top toward the wall and its bar with it, so how far
-    // out the tyres have to stand is derived from the lean rather than guessed:
-    // the bar is the point that reaches furthest, at barHalf across and its own
-    // height up.
-    const reach = barHalf * Math.cos(lean) + bikeTop * Math.sin(lean);
-    const bikeDepth = reach + barHalf; // wall side + corridor side
+    // HOW BIG A BIKE IS, asked of PropKit rather than worked out again here.
+    // These numbers used to be re-derived in this file from the same fractions
+    // childBike builds with — the wheelbase, the saddle height, the handlebar's
+    // half-width — and a proportion changed in one place and not the other is
+    // exactly how a bike ends up standing through a door frame. bikeMetrics()
+    // answers without building anything, which is what this function needs: it
+    // runs from walkableRects, long before any prop exists.
+    const bm = PropKit.bikeMetrics(bikeOpts);
+    const bikeLen = bm.length;
+    const reach = bm.reach; // how far the LEANING machine gets toward the wall
+    const bikeDepth = bm.depth;
     let bikeZ;
     if (leftClosed.length >= 2) {
       // Midway between the two doors' facing frame edges.
