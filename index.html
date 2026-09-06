@@ -43,6 +43,13 @@
     <!-- Reusable đá mài terrazzo park bench (primitives + runtime canvas
          texture, zone-agnostic — instances are placed per zone). -->
     <script src="js/bench.js"></script>
+    <!-- PropKit — the small furniture (seat row, low table, child's bike,
+         plastic bag), primitives + runtime canvases like the bench, but as
+         plain BUILDERS returning a THREE.Group rather than as components:
+         corridor-root puts them inside its own group so they ride its offset,
+         hide with its `shown` and go in its teardown. AFTER bench.js (same
+         family, same rules) and BEFORE zone-a-corridor.js, which calls it. -->
+    <script src="js/props.js"></script>
     <!-- Local tinted-terrazzo floor patches (per-room/-hallway colourways over
          the shared global floor). AFTER bench.js: reuses makeTerrazzoTexture.
          Used by Zone C (dark) and Zone B (soft coral). See js/tinted-floor.js. -->
@@ -425,6 +432,50 @@
            gates plus their tracks and padlocks are FOUR draw calls however
            long the corridor gets.
 
+           SOMEBODY LIVES HERE. Four props stand in the run, built from
+           primitives and runtime canvases by PropKit (js/props.js) and taken
+           from two of the reference photographs: a three-seat row of brown
+           pleated vinyl chairs with a peeling black oval table in front of
+           them against the RIGHT wall, and a child's bike leaning on the LEFT
+           wall with a stuffed plastic bag beside it. Where they stand is
+           DERIVED from the doors, not typed — the seats go in the stretch
+           between the SECOND and THIRD door on the right (counting every
+           opening as you walk in, so the third is the apartment doorway), the
+           bike between the first two on the left — so lengthening the corridor
+           or changing doorPitch moves the furniture with them. The bike even
+           asks the gates where they parked and steps clear of a folded stack.
+
+           They are the only LIT things out here. Everything else in the
+           corridor has its light painted into its texture; a small object with
+           real curvature is worth handing to the gallery's global lights,
+           which do reach 400 m out even though its room lamps do not. Each
+           gets a soft dark floor mark from the exhibition's shared contact-cue
+           kit, in shadow mode and deliberately NOT following the environment
+           retune — there is no environment out here to follow.
+
+           They are solid: rig-collision takes a union of walkable rectangles,
+           so each footprint is CUT OUT of the corridor's, leaving the pieces
+           around it. The narrowest way past anything is 2.57 m.
+
+           AND TWO PAINTED PHONE NUMBERS on the long blank stretches of wall
+           the furniture leaves — the right wall between its 1st and 2nd door,
+           the left between its 2nd and 3rd. These are a different mechanism
+           from the ads already on every wall: those are painted INTO the wall
+           canvas and masked into its paint stack, which is what makes them
+           read as paint rather than as stickers, and is also why they cannot
+           be aimed (that canvas is one bay long and tiles every 3.6 m, so a
+           mark on it turns up in every bay of that variant and nowhere in
+           particular). These are quads with their own canvas, put where
+           somebody with a can and a card would put one. Both kinds share the
+           same number generator and the same rules: numbers only, never level,
+           and never a complete number — the run of digits that has to go is
+           simply erased, so the wall shows through where the ad has gone.
+
+           WHAT THE WHOLE CORRIDOR COSTS, measured: 159 objects in its group,
+           204 meshes, 8 800 triangles, 24 canvases at 85 MB with mipmaps. The
+           four props are 43 of those meshes and the bike alone is 24 of them —
+           worth it, as it is the only object down there with no flat faces.
+
            THE WINDOW at the far end is what the run is walking toward. A
            2.8 × 1.5 m opening in the dead-end wall, a welded security grille
            over it, Saigon in the haze behind it and a patch of sun on the floor
@@ -508,6 +559,31 @@
                          asked for, a stack that would hit a neighbouring
                          frame parks the other way instead
                          gateHeight is NOT a tunable: doorHeight − .05
+             furniture   furniture true   the four props (seat row + table on
+                         the right, bike + bag on the left). Their POSITIONS
+                         are derived from the doors — see furnitureLayout in
+                         js/zone-a-corridor.js — so there are no coordinates
+                         here to tune, only nudges
+                         furnitureCollide true   cut each prop's footprint out
+                         of the corridor's walkable rectangle so you cannot
+                         walk through it. Off leaves them as scenery
+                         furnitureUnlit false   build them MeshBasic with
+                         shading baked into vertex colours instead of
+                         MeshLambert. They are the only lit things in the
+                         corridor, so this is the switch if they ever read
+                         brighter than the walls, or if the environment preset
+                         changes the light rig under them
+                         furnitureOffsets {}   by-eye nudges, keyed seats /
+                         table / bike / bag, each { z, x, yaw } in metres and
+                         DEGREES, applied after the derivation. Any key or any
+                         prop may be left out, e.g.
+                         furnitureOffsets: {"bike": {"z": 0.4}, "table":
+                         {"yaw": -8}}
+                         The props' own sizes live in PropKit's defaults and in
+                         the option sets furnitureLayout passes it — the
+                         corridor asks for a 0.38 m wheel rather than PropKit's
+                         0.3, which is a 16-inch child's bike rather than a
+                         toddler's
              apartments  roomWidth 3.2 / roomDepth 4   the DEFAULT size, w
                          ALONG the corridor and d away from it
                          roomSizes [{},{},{}]   per-apartment { w, d }
@@ -529,6 +605,19 @@
                          looks across at the party wall rather than into
                          either of their doors. The closed doors fill whatever
                          corridor is left in front of the stretch.
+             stencils    wallStencils .6   the density of the painted phone
+                         numbers BAKED INTO the wall texture — background hum,
+                         one per bay of the right variant, masked into the
+                         paint stack itself and therefore never aimed at
+                         anything (the canvas tiles every 3.6 m)
+                         wallStencilDecals true   and the PLACED ones, on the
+                         two long blank runs of wall: the right wall between
+                         its 1st and 2nd door, the left between its 2nd and
+                         3rd. Derived from the openings like everything else,
+                         and skipped rather than squeezed if a stretch is too
+                         short. These are the ones you walk up to
+                         wallStencilDecalWidth 1.7 / wallStencilDecalY 1.45
+                         wallStencilTilt 6 / wallStencilInk 1   apply to both
              fabric      wallThickness 0.15 / textureSize 1024 / seed 1
                          endWallShade .92    how much darker the dead-end wall
                                              is than the sides, as a LINEAR

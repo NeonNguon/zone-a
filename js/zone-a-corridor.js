@@ -27,6 +27,42 @@
 //                     the return booth on the corridor's landing, wired to each
 //                     other through glitch-masked jumps.
 //
+// THE PLACED STENCILS. Two painted phone numbers on the long blank runs of
+// wall — the right wall between its 1st and 2nd door, the left between its 2nd
+// and 3rd. They are NOT the marks wallMarks paints into the wall canvas: those
+// are masked into the paint stack itself and cannot be AIMED, because that
+// canvas is one bay long and tiles every 3.6 m, so a mark on it turns up in
+// every bay of that variant and nowhere in particular. These are quads with
+// their own canvas, so they go where somebody with a can and a card would put
+// one. Both kinds share markNumber() and every rule that matters — numbers
+// only, never level, never a complete number. See stencilSpots() and
+// CorridorTextures.stencilDecal.
+//
+// THE FURNITURE. Four props stand in the run — a three-seat row of brown vinyl
+// cinema chairs with a peeling black oval table in front of them on the right,
+// a child's bike leaning on the left wall with a stuffed bag beside it. They
+// are built by PropKit (js/props.js, loaded before this file) and added to this
+// component's own group, so they ride `offset`, hide with `shown` and go in
+// teardown() like everything else.
+//
+// WHERE THEY GO IS DERIVED, not typed: furnitureLayout() reads L.openings and
+// puts the seats between the SECOND and THIRD door on the right and the bike
+// between the first two closed doors on the left. Change doorPitch and the
+// furniture moves with the doors. That function is PURE and
+// takes no part in the build, because walkableRects() needs the same answer and
+// rig-collision calls it whenever it likes — including before the corridor has
+// ever been built.
+//
+// AND THEY ARE SOLID BY SUBTRACTION. The collider takes the UNION of walkable
+// rectangles, so a prop is not something added to the world — it is a hole cut
+// in the floor you are allowed to stand on. See rectMinus() and the note above
+// walkableRects.
+//
+// They are also the only LIT things out here (MeshLambertMaterial): a small
+// object with real curvature is worth handing to the gallery's global lights,
+// which do reach 400 m out even though its room lamps do not. `furnitureUnlit`
+// bakes that shading into vertex colours instead — see the header of props.js.
+//
 // EVERY DOOR IS THREE THINGS, and only one of them is a door.
 //
 //   THE LEAF        a painted two-leaf door from an atlas of four, picked by
@@ -179,18 +215,23 @@
 //   with `wallPaletteOverride`, and can give each apartment its own with
 //   `roomWallPalettes`. See the comment on WALL_PALETTES for the schema.
 //
-// TWENTY-ONE canvases as the corridor ships, cached by their full parameter key
-// — which includes a hash of the palette — so a rebuild (or a second corridor)
-// reuses them: 3 corridor wall variants, ONE wall canvas for each of the three
-// apartments' own schemes, floor, ceiling, the door atlas and its BACKS, room
-// floor, all textureSize², plus up to three 256² bông gió block faces (one per
-// pattern actually used — a corridor set to a single ventPattern draws a
-// single canvas); and for the window, the four
-// skyline PNGs lifted into canvases (1456×816 each, 4.5 MB, 18.1 MB together),
-// the sky gradient (4×512, a rounding error) and the daylight patch
-// (256²). About 59 MB, 79 MB with mipmaps — of which the walls are 24 MB and
-// the skylines 18 MB, so textureSize and viewLayers are the two levers if a
-// device is short of texture memory.
+// TWENTY-FOUR canvases as the corridor ships, cached by their full parameter
+// key — which includes a hash of the palette — so a rebuild (or a second
+// corridor) reuses them: 3 corridor wall variants, ONE wall canvas for each of
+// the three apartments' own schemes, floor, ceiling, the door atlas and its
+// BACKS, room floor, all textureSize²; up to three 256² bông gió block faces
+// (one per pattern actually used — a corridor set to a single ventPattern
+// draws a single canvas); the gates' steel and the window grille's, which are
+// one recipe at two settings; two 512×160 placed wall stencils; and for the
+// window, the four skyline PNGs lifted into canvases (1456×816 each, 4.5 MB,
+// 18.1 MB together), the sky gradient (4×512, a rounding error) and the
+// daylight patch (256²). 85 MB with mipmaps, measured — of which the walls are
+// 24 MB and the skylines 18 MB, so textureSize and viewLayers are still the
+// two levers if a device is short of texture memory.
+//
+// The FURNITURE's canvases are neither in here nor in that count: PropKit
+// keeps its textures per-prop so a group's own dispose() can be exact. See the
+// header of js/props.js.
 // A palette costs one canvas per VARIANT it is actually used with, which is why
 // an apartment (one variant) is cheap and the corridor (three) is not.
 // On this desktop a wall canvas takes ~105 ms at the defaults (1024²,
@@ -849,6 +890,165 @@ const CorridorTextures = {
     return n;
   },
 
+  // THE NUMBER ITSELF: a real Vietnamese mobile, 0 + a live prefix + seven
+  // seeded digits, grouped the way they are written on walls. Its own function
+  // because there are two kinds of mark now — the ones painted into the wall
+  // canvas and the ones placed on a named stretch of it (stencilDecal below) —
+  // and the two must not disagree about what a phone number looks like.
+  //
+  // Nine draws from `rand`, in this order, which is what it has always taken:
+  // moving it here did not shift a single existing mark.
+  markNumber: function (rand) {
+    const pre = this.MARK_PREFIXES[Math.floor(rand() * this.MARK_PREFIXES.length)];
+    let digits = "0" + pre;
+    for (let i = 0; i < 7; i++) digits += Math.floor(rand() * 10);
+    const sep = rand() < 0.5 ? " " : ".";
+    return {
+      digits: digits,
+      text: digits.slice(0, 4) + sep + digits.slice(4, 7) + sep +
+            digits.slice(7),
+    };
+  },
+
+  // ---- A PLACED STENCIL ---------------------------------------------------
+  // The same service ad as wallMarks, but on a stretch of wall somebody CHOSE
+  // rather than wherever the bay texture happened to put one.
+  //
+  // WHY IT IS A SEPARATE THING. wallMarks paints into the wall canvas and masks
+  // itself against that composite's own coat-index map, which is what makes a
+  // mark read as paint inside the paint stack rather than as a decal. It is
+  // also why it cannot be AIMED: the wall canvas is one bay long and tiles down
+  // the corridor, so a mark drawn on it appears every 3.6 m, in every bay of
+  // that variant, and nowhere in particular. Putting a number on one named
+  // stretch of wall means a quad with its own canvas.
+  //
+  // WHAT IT KEEPS from wallMarks, because these are the rules and not the
+  // implementation: numbers only and never a trade (a wall that captions itself
+  // is not what this place is); a real Vietnamese mobile from markNumber, so
+  // the two kinds of mark cannot disagree about what a phone number looks like;
+  // painted freehand and so never level; overspray under the ink; the two
+  // uncut BRIDGES every stencil card needs to hold together; and never a
+  // complete number.
+  //
+  // WHAT IT DOES DIFFERENTLY. It cannot mask itself to a coat map it is not
+  // part of, so its weathering is subtractive: the run of digits that has to go
+  // is ERASED rather than overpainted, which on a transparent quad is the same
+  // picture — the wall shows through where the ad has gone — and it costs no
+  // second colour. The whole number stays inside the quad rather than running
+  // off the edge of a bay, because a quad's edge is not a place a number can
+  // plausibly be cut off at.
+  stencilDecal: function (w, h, seed, o) {
+    const key = "stencilDecal|" + w + "|" + h + "|" + seed + "|" + o.red + "|" +
+                o.dark + "|" + o.ink + "|" + o.tilt;
+    return this.get(key, () => {
+      const c = this.canvas(w, h);
+      const ctx = c.getContext("2d");
+      const rand = this.rand(seed * 883 + 41);
+      const num = this.markNumber(rand);
+      const text = num.text;
+
+      // SIZE IT TO THE QUAD. The digits want to be as big as the wall allows,
+      // so the font is fitted to the width rather than picked and hoped for.
+      let dh = h * 0.42; // digit height
+      let fontPx = dh / 0.72;
+      const fontFor = (px) => "700 " + px.toFixed(1) + "px " + this.MARK_FONT;
+      ctx.font = fontFor(fontPx);
+      const fit = (w * 0.9) / ctx.measureText(text).width;
+      if (fit < 1) {
+        fontPx *= fit;
+        dh *= fit;
+        ctx.font = fontFor(fontPx);
+      }
+      const wpx = ctx.measureText(text).width;
+
+      // Painted freehand off a card: never level, and always tilted enough to
+      // see. Same rule and same tunable as the marks in the wall.
+      const tiltDeg = o.tilt * (0.4 + rand() * 0.6) * (rand() < 0.5 ? -1 : 1);
+      const theta = (tiltDeg * Math.PI) / 180;
+      // BIASED TOWARD THE RED, harder than the baked marks' 62%. A mark in
+      // the wall texture is background hum and can afford to be the dark ink
+      // on a blue wall; a PLACED one is on a stretch chosen because you walk
+      // up to it, and navy on cerulean is a mark nobody ever sees.
+      const stencil = rand() < 0.85 ? o.red : o.dark;
+      // The dark ink goes on heavier here than it does in the wall texture: a
+      // placed mark is seen from across the corridor rather than in passing,
+      // and navy at the baked marks' 0.58 disappears into a cerulean wall.
+      const alpha = Math.min(
+        0.95,
+        (stencil === o.red ? 0.66 + rand() * 0.22 : 0.74 + rand() * 0.18) * o.ink
+      );
+
+      ctx.save();
+      ctx.translate((w - wpx * Math.cos(theta)) / 2, h * 0.5 + dh * 0.5);
+      ctx.rotate(theta);
+      ctx.textBaseline = "alphabetic";
+
+      // OVERSPRAY first — a soft dark halo under the ink, which is both what a
+      // card stencil actually leaves and what lets the digits hold their shape
+      // against a wall this mottled.
+      ctx.fillStyle = stencil;
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.shadowColor = "rgba(40,20,14,0.85)";
+      ctx.shadowBlur = Math.max(2, dh * 0.11);
+      ctx.fillText(text, 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = alpha;
+      ctx.fillText(text, 0, 0);
+      ctx.globalAlpha = 1;
+
+      // THE BRIDGES: the card the digits were cut from has to hold together,
+      // so every glyph carries two thin uncut gaps across it.
+      ctx.globalCompositeOperation = "destination-out";
+      const barH = Math.max(1, dh * 0.055);
+      [0.36, 0.68].forEach((f) => {
+        ctx.fillRect(-dh, -dh * f - barH / 2, wpx + dh * 2, barH);
+      });
+
+      // NEVER A COMPLETE NUMBER. A contiguous run of at least three digits
+      // goes, taken out with ragged blobs rather than a rectangle — what
+      // removed it was somebody's roller, not a scalpel. Measured in the text's
+      // own frame, which is why this happens inside the rotation.
+      const adv = [];
+      let cursor = 0;
+      const digitAt = [];
+      for (let i = 0; i < text.length; i++) {
+        adv.push(cursor);
+        digitAt.push(text[i] >= "0" && text[i] <= "9");
+        cursor += ctx.measureText(text[i]).width;
+      }
+      const runLen = 3 + Math.floor(rand() * 3);
+      const start = Math.floor(rand() * Math.max(1, text.length - runLen));
+      const x0 = adv[start] - dh * 0.15;
+      const x1 =
+        (start + runLen < adv.length ? adv[start + runLen] : cursor) + dh * 0.15;
+      const blobs = Math.max(2, Math.round((x1 - x0) / (dh * 0.55)));
+      for (let i = 0; i < blobs; i++) {
+        const bx = x0 + ((i + 0.5) / blobs) * (x1 - x0);
+        this.blob(ctx, rand, bx, -dh * 0.45, (x1 - x0) / blobs * 0.85,
+                  dh * (0.75 + rand() * 0.25), 8);
+      }
+      ctx.restore();
+
+      // EROSION over the whole ad: the wall has been shedding since it was
+      // painted, and the pigment goes with it.
+      ctx.globalCompositeOperation = "destination-out";
+      for (let i = 0; i < 90; i++) {
+        ctx.fillStyle = "rgba(0,0,0," + (0.25 + rand() * 0.75).toFixed(3) + ")";
+        this.blob(ctx, rand, rand() * w, rand() * h, h * (0.02 + rand() * 0.11),
+                  h * (0.02 + rand() * 0.09), 7);
+      }
+      // ...and a general thinning from one end, so no mark is evenly faded.
+      const g = ctx.createLinearGradient(rand() < 0.5 ? 0 : w, 0,
+                                         rand() < 0.5 ? w : 0, h);
+      g.addColorStop(0, "rgba(0,0,0,0.45)");
+      g.addColorStop(0.55, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "source-over";
+      return c;
+    });
+  },
+
   // ONE stencilled phone number.
   oneNumberMark: function (ctx, C) {
     const S = C.S;
@@ -856,12 +1056,7 @@ const CorridorTextures = {
     const pal = C.pal;
 
     // --- the number, and how it is written on the wall
-    const pre = this.MARK_PREFIXES[Math.floor(rand() * this.MARK_PREFIXES.length)];
-    let digits = "0" + pre;
-    for (let i = 0; i < 7; i++) digits += Math.floor(rand() * 10);
-    const sep = rand() < 0.5 ? " " : ".";
-    const text =
-      digits.slice(0, 4) + sep + digits.slice(4, 7) + sep + digits.slice(7);
+    const text = this.markNumber(rand).text;
 
     // --- size and place it, in metres
     const dh = (0.09 + rand() * 0.06) * C.pxY; // 9-15 cm digit height
@@ -2949,6 +3144,24 @@ const roomImages = [
 //                                     that would hit a neighbour parks the
 //                                     other way regardless
 //   gateHeight is NOT a tunable: doorHeight - 0.05 (GATE_DROP)
+//   wallStencils 0.6                  the painted phone numbers BAKED INTO the
+//                                     wall texture: a density, one per bay of
+//                                     the right variant, never aimed
+//   wallStencilDecals true            ...and the PLACED ones, on the two long
+//   wallStencilDecalWidth 1.7         blank stretches between doors. Derived
+//   wallStencilDecalY 1.45            from L.openings; skipped, never
+//                                     squeezed, if a stretch is too short
+//   wallStencilTilt 6                 both kinds: degrees off level, and
+//   wallStencilInk 1                  how much pigment went on
+//   furniture true                    the four props from js/props.js — a seat
+//                                     row and a low table on the right, a
+//                                     child's bike and a bag on the left. All
+//                                     four POSITIONS derived from L.openings
+//   furnitureCollide true             cut their footprints out of the walkable
+//                                     rectangle (see rectMinus)
+//   furnitureUnlit false              the props are the only LIT things out
+//                                     here; this bakes their shading instead
+//   furnitureOffsets {}               by-eye nudges per prop, { z, x, yaw }
 //   roomWidth 3.2 / roomDepth 4       the DEFAULT apartment: along / away from
 //                                     the run
 //   roomSizes [{},{},{}]              per-apartment { w, d } overrides, indexed
@@ -2991,6 +3204,7 @@ const CORRIDOR_GEOM_PROPS = [
   "ventPattern", "ventColor", "ventGrime",
   "gate", "gateLockedRatio", "gateBar", "gateBarThick", "gateStack",
   "gateCells", "gateColor", "gateRust", "gateTrackDepth", "gatePark",
+  "furniture", "furnitureCollide", "furnitureUnlit", "furnitureOffsets",
   "window", "windowWidth", "windowHeight", "windowSill", "windowX",
   "windowRevealColor", "windowSillColor",
   "grilleBar", "grilleSpacingX", "grilleSpacingY", "grilleFrame",
@@ -3006,6 +3220,7 @@ const CORRIDOR_GEOM_PROPS = [
   "wallThickness", "textureSize", "seed", "wallNoiseRes", "wallFlake",
   "roomWallFlake", "wallGrain", "wallStripe", "wallStencils", "wallStencilTilt",
   "wallStencilInk",
+  "wallStencilDecals", "wallStencilDecalWidth", "wallStencilDecalY",
   "wallPalette", "wallPaletteOverride",
   "roomWallPalettes", "tubeSpacing", "tubeColor",
   "frameWidth", "frameDepth", "frameColor", "leafThickness", "doorOpenAngle",
@@ -3093,6 +3308,40 @@ AFRAME.registerComponent("corridor-root", {
     gateRust: { type: "number", default: 0.4 },
     gateTrackDepth: { type: "number", default: 0.05 },
     gatePark: { type: "string", default: "seed" },
+
+    // ---- THE FURNITURE -------------------------------------------------
+    // Four props from js/props.js, put where the DOORS say rather than at
+    // typed coordinates — a seat row and a low table on the right wall in the
+    // stretch before the first closed door, a child's bike and a stuffed bag
+    // on the left between the first two. See furnitureLayout().
+    //
+    //   furnitureCollide  subtract each prop's footprint from the corridor's
+    //                     walkable rectangle, so you cannot walk through them.
+    //                     Off leaves the props as scenery you pass through.
+    //   furnitureUnlit    build them MeshBasic with baked vertex shading
+    //                     instead of MeshLambert. The props are the only lit
+    //                     thing in the corridor — everything else has its light
+    //                     painted into its texture — so this is the switch if
+    //                     they read brighter than the walls they stand against.
+    //   furnitureOffsets  by-eye nudges per prop, keyed seats / table / bike /
+    //                     bag, each { z, x, yaw } in metres and DEGREES,
+    //                     applied after the derivation. An object, or the JSON
+    //                     string an HTML attribute carries — the same
+    //                     parse/stringify pattern roomSizes uses. Any key or
+    //                     any prop may be left out.
+    furniture: { type: "boolean", default: true },
+    furnitureCollide: { type: "boolean", default: true },
+    furnitureUnlit: { type: "boolean", default: false },
+    furnitureOffsets: {
+      default: {},
+      parse: function (v) {
+        if (typeof v !== "string") return v || {};
+        return v ? JSON.parse(v) : {};
+      },
+      stringify: function (v) {
+        return typeof v === "string" ? v : JSON.stringify(v);
+      },
+    },
 
     // The DEFAULT apartment, used by any of the three that does not override it.
     roomWidth: { type: "number", default: 3.2 },
@@ -3192,6 +3441,15 @@ AFRAME.registerComponent("corridor-root", {
     // reads against the wall before the wall starts taking it away. 1 is a
     // fresh-ish coat of spray paint; below that it was thin to begin with.
     wallStencils: { type: "number", default: 0.6 },
+    // THE PLACED STENCILS: numbers on a NAMED stretch of wall — the right
+    // wall between its 1st and 2nd door, the left between its 2nd and 3rd —
+    // rather than in whichever bay the tiled wall canvas happened to put one.
+    // See stencilSpots(). They honour wallStencilInk and wallStencilTilt like
+    // the baked ones do; wallStencils does NOT scale them, because these are
+    // placed and that one is a density.
+    wallStencilDecals: { type: "boolean", default: true },
+    wallStencilDecalWidth: { type: "number", default: 1.7 },
+    wallStencilDecalY: { type: "number", default: 1.45 },
     wallStencilTilt: { type: "number", default: 6 },
     wallStencilInk: { type: "number", default: 1 },
     wallPalette: { type: "string", default: "chungcu" },
@@ -3375,6 +3633,15 @@ AFRAME.registerComponent("corridor-root", {
     this.ventCount = 0;
     this.gates = [];
     this.gateInfo = null;
+    // PropKit groups. They own their own geometries and materials and hand
+    // them back through group.userData.dispose(), so they are tracked
+    // separately from this component's own lists.
+    this.props = [];
+    this.stencilCount = 0;
+    // Textures this component made itself (the props' shared floor mark).
+    // Everything else it draws lives in CorridorTextures' own cache, which
+    // deliberately outlives a rebuild.
+    this.textures = [];
     this.hiddenClickables = []; // clickables parked while the corridor is hidden
     this.built = false;
 
@@ -3484,7 +3751,42 @@ AFRAME.registerComponent("corridor-root", {
   // continuous — the same rule buildRegions() uses for the floorplan's
   // hallways. The closed doors get no throat, which is exactly why they are
   // solid: they sit inside a wall, where there is no rectangle at all.
+  //
+  // THE FURNITURE, and why an obstacle here is a SUBTRACTION. The collider
+  // takes the UNION of these rectangles: anything inside any rectangle is
+  // somewhere you may stand. So there is no such thing as adding a solid — a
+  // prop is made solid by CUTTING ITS FOOTPRINT OUT of the rectangle it stands
+  // in, and rebuilding what is left as the pieces around it. rectMinus() does
+  // that: a rectangle minus a rectangle is up to four rectangles, and because
+  // they are cut on the hole's own edges they tile the remainder exactly and
+  // the union stays continuous — you walk past a prop through pieces that share
+  // their edges, the same way the landing and the run already share z = 0.
+  //
+  // The footprint is inflated by playerRadius first, which is what actually
+  // stops the camera: the collider does not know about the seat row, it knows
+  // there is nowhere to stand within a quarter metre of it.
   // ---------------------------------------------------------------
+
+  // One rectangle minus one rectangle, appended to `out`. Both are
+  // {x0, x1, z0, z1} with any other keys carried through (the tag). Guillotine:
+  // the z-bands clear of the hole survive whole, and inside the hole's own band
+  // only the strips to either side of it in x are left.
+  rectMinus: function (a, h, out) {
+    if (h.x1 <= a.x0 || h.x0 >= a.x1 || h.z1 <= a.z0 || h.z0 >= a.z1) {
+      out.push(a); // no overlap at all
+      return;
+    }
+    const zLo = Math.max(a.z0, h.z0);
+    const zHi = Math.min(a.z1, h.z1);
+    if (a.z0 < zLo) out.push(Object.assign({}, a, { z1: zLo }));
+    if (zHi < a.z1) out.push(Object.assign({}, a, { z0: zHi }));
+    if (a.x0 < h.x0) {
+      out.push(Object.assign({}, a, { z0: zLo, z1: zHi, x1: h.x0 }));
+    }
+    if (h.x1 < a.x1) {
+      out.push(Object.assign({}, a, { z0: zLo, z1: zHi, x0: h.x1 }));
+    }
+  },
   walkableRects: function (opts) {
     const d = this.data;
     const L = this.layout();
@@ -3503,9 +3805,30 @@ AFRAME.registerComponent("corridor-root", {
 
     // The LANDING and the CORRIDOR: one tube, split at z = 0 into two
     // rectangles that share that edge, so each carries its own tag while the
-    // union stays continuous.
-    push(-L.halfW + r, L.halfW - r, 0, L.zBack - r, "corridor:landing");
-    push(-L.halfW + r, L.halfW - r, L.zEnd + r, 0, "corridor:run");
+    // union stays continuous — and then cut around the furniture, which is the
+    // only thing standing in either of them.
+    let open = [
+      { x0: -L.halfW + r, x1: L.halfW - r, z0: 0, z1: L.zBack - r,
+        tag: "corridor:landing" },
+      { x0: -L.halfW + r, x1: L.halfW - r, z0: L.zEnd + r, z1: 0,
+        tag: "corridor:run" },
+    ];
+    if (d.furniture && d.furnitureCollide) {
+      // `false`: this runs on every collider rebuild, and buildFurniture has
+      // already said anything there was to say about where these went.
+      this.furnitureLayout(L, false).forEach((p) => {
+        const hole = {
+          x0: p.x - p.spanX / 2 - r,
+          x1: p.x + p.spanX / 2 + r,
+          z0: p.z - p.spanZ / 2 - r,
+          z1: p.z + p.spanZ / 2 + r,
+        };
+        const cut = [];
+        open.forEach((a) => this.rectMinus(a, hole, cut));
+        open = cut;
+      });
+    }
+    open.forEach((a, i) => push(a.x0, a.x1, a.z0, a.z1, a.tag + "/" + i));
 
     L.rooms.forEach((room) => {
       // The apartment itself.
@@ -3909,6 +4232,8 @@ AFRAME.registerComponent("corridor-root", {
     this.buildSideWall(L, +1);
     this.buildVentMeshes(L);
     this.buildGateMeshes(L);
+    this.buildWallStencils(L);
+    this.buildFurniture(L);
     this.buildTubes(L);
     this.partyWalls = {}; // two abutting apartments share ONE wall - see below
     L.rooms.forEach((r) => this.buildRoom(L, r));
@@ -3953,6 +4278,17 @@ AFRAME.registerComponent("corridor-root", {
             this.gateInfo.angle.toFixed(0) + " deg extended / " +
             this.gateInfo.foldAngle.toFixed(0) + " folded), "
           : "no gates, ") +
+        (this.stencilCount
+          ? this.stencilCount + " placed stencils, "
+          : "") +
+        (this.props.length
+          ? this.props.length + " props (" +
+            this.props.reduce((n, g) => {
+              let k = 0;
+              g.traverse((o) => { if (o.isMesh) k++; });
+              return n + k;
+            }, 0) + " meshes, " + this.props.length + " floor marks), "
+          : "no furniture, ") +
         this.group.children.length + " meshes | textures " +
         allT.ms.toFixed(0) + " ms total, " + wallT.drawn + " wall canvas(es) " +
         (wallT.drawn ? (wallT.ms / wallT.drawn).toFixed(0) : "0") +
@@ -4467,6 +4803,406 @@ AFRAME.registerComponent("corridor-root", {
   },
 
   // ---------------------------------------------------------------
+  // THE PLACED STENCILS — a stencilled phone number on a NAMED stretch of
+  // wall, as against the ones baked into the wall canvas by wallMarks.
+  //
+  // The two do different jobs and both are wanted. wallMarks gives the corridor
+  // its background hum of old advertising: a mark in every bay of the right
+  // variant, masked into the paint stack itself, unaimed by construction
+  // because the canvas it lives on tiles every 3.6 m. These are the ones you
+  // actually walk up to — on the long blank runs of wall between doors, which
+  // is exactly where somebody with a can and a card would put one.
+  //
+  // WHERE, derived like everything else here, from L.openings (which layout()
+  // orders from the corridor's mouth toward the end wall):
+  //   RIGHT wall, between the 1st and 2nd door
+  //   LEFT wall, between the 2nd and 3rd
+  // Both stretches are blank at the shipped settings — the seat row moved down
+  // to the right wall's second gap and the bike sits in the left wall's first —
+  // so a stencil is the only thing on either.
+  //
+  // A stretch too short to carry one is skipped rather than squeezed: a number
+  // crammed between two frames reads as a label, and the whole point of these
+  // is that somebody painted them on a wall nobody was looking after.
+  // ---------------------------------------------------------------
+  stencilSpots: function (L) {
+    const d = this.data;
+    if (!d.wallStencilDecals || d.wallStencilInk <= 0) return [];
+    const fw = d.frameWidth;
+    const out = [];
+    // The gap between opening i and opening j on `side`, measured between their
+    // facing FRAME edges — the frame, not the opening, or a stencil would run
+    // under the timber.
+    const between = (side, i, j) => {
+      const list = L.openings[String(side)] || [];
+      if (list.length <= j) return null;
+      const a = list[i].z - list[i].width / 2 - fw;
+      const b = list[j].z + list[j].width / 2 + fw;
+      return { a: a, b: b, gap: a - b, side: side };
+    };
+    [between(1, 0, 1), between(-1, 1, 2)].forEach((g, k) => {
+      if (!g) return;
+      const width = Math.min(d.wallStencilDecalWidth, g.gap - 0.3);
+      if (width < 0.8) return; // not enough blank wall to be worth one
+      out.push({
+        side: g.side,
+        z: (g.a + g.b) / 2,
+        w: width,
+        h: width / 3.2, // the quad's proportions; the canvas matches
+        seed: this.data.seed * 991 + k * 137,
+      });
+    });
+    return out;
+  },
+
+  buildWallStencils: function (L) {
+    const d = this.data;
+    const spots = this.stencilSpots(L);
+    if (!spots.length) return;
+    const pal = this.corridorPal;
+    spots.forEach((sp) => {
+      const tex = CorridorTextures.stencilDecal(512, 160, sp.seed, {
+        red: pal.stencil.red,
+        dark: pal.stencil.dark,
+        ink: d.wallStencilInk,
+        tilt: d.wallStencilTilt,
+      });
+      // Its edges are soft and its middle is full of holes, so it has to blend
+      // rather than cut: `transparent`, not alphaTest. depthWrite off and a
+      // polygon offset keep it off the wall it lies on — the same treatment
+      // every other soft mark in the exhibition gets (see ContactCue).
+      const mat = this.mat({
+        map: tex,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      const m = this.addPlane(sp.w, sp.h, mat);
+      m.position.set(sp.side * (L.halfW - 0.006), d.wallStencilDecalY, sp.z);
+      // Facing the corridor. The same quarter turn the props take, and it puts
+      // the canvas's left-to-right along the viewer's, so the number reads the
+      // right way round on both walls.
+      m.rotation.y = (-sp.side * Math.PI) / 2;
+    });
+    this.stencilCount = spots.length;
+  },
+
+  // ---------------------------------------------------------------
+  // THE FURNITURE — four props from js/props.js, put where the DOORS say.
+  //
+  // Nothing here is a typed coordinate. The seat row goes in the stretch
+  // between the SECOND and THIRD door on the right — counting every opening
+  // from the mouth, so the third is the apartment doorway; the bike goes
+  // between the first two closed doors on the left. Both come out of
+  // L.openings, so changing doorPitch or lengthening the corridor moves the
+  // furniture with the doors instead of leaving it standing in a doorway.
+  //
+  // WHY THIS IS A PURE FUNCTION AND NOT PART OF THE BUILD. walkableRects() has
+  // to subtract these footprints from the corridor, and rig-collision calls it
+  // whenever IT likes — including before the corridor has ever been built. So
+  // the placement is worked out here, from the layout alone, and both
+  // buildFurniture (which puts the props there) and walkableRects (which cuts
+  // holes in the floor there) ask the same question. Same reason ventRow() and
+  // grilleLattice() are methods: two copies of this arithmetic would drift the
+  // first time anyone touched a size.
+  //
+  // `warn` gates the console, because walkableRects can run many times a second
+  // and buildFurniture runs once.
+  //
+  // Returns [{ key, x, z, yaw, spanX, spanZ, opts }], all in the corridor's
+  // local frame: spanX / spanZ are the prop's WORLD footprint (a prop is yawed
+  // a quarter turn to face the corridor, so its own width becomes spanZ).
+  // ---------------------------------------------------------------
+  PLAYER_R: 0.25, // rig-collision's default, used only to warn about squeezes
+
+  furnitureLayout: function (L, warn) {
+    const d = this.data;
+    if (!d.furniture) return [];
+    // It asks PropKit how big a bike is, so it cannot answer without it. The
+    // collider calls this before anything is built; buildFurniture is where the
+    // missing-script warning lives, so this just declines quietly.
+    if (typeof PropKit === "undefined") return [];
+    const t = L.t;
+    const fw = d.frameWidth;
+    const off = d.furnitureOffsets || {};
+    const nudge = (k) => {
+      const e = off[k] || {};
+      return { z: e.z || 0, x: e.x || 0, yaw: e.yaw || 0 };
+    };
+    // A prop stands against a wall facing the corridor. Its own +z is its
+    // front, so the yaw that turns it to face inward is a quarter turn against
+    // the side — and that same turn puts its WIDTH along the corridor, which is
+    // why spanZ below comes from a prop's width and spanX from its depth.
+    const facing = (side) => (-side * Math.PI) / 2;
+    const WALL_GAP = 0.03; // how far a prop's back stands off the inner face
+    const out = [];
+
+    // ---- THE SEAT ROW + ITS TABLE, on the RIGHT wall -------------------
+    // BETWEEN THE SECOND AND THIRD DOOR, counting from the corridor's mouth.
+    // layout() already orders each wall's openings that way, and this counts
+    // ALL of them — the two closed doors and then the apartment doorway —
+    // because "the third door on the right" is the third thing that looks like
+    // a door as you walk in, whether or not it opens.
+    //
+    // It used to sit in the first stretch, between the mouth and the first
+    // door, where you walked straight into it on arrival.
+    const rightList = L.openings["1"] || [];
+    const seatOpts = {
+      seats: 3, seatWidth: 0.58, seatDepth: 0.55, seatH: 0.42, backH: 0.55,
+      color: "#5a2e1e", color2: "#7a4430", wear: 0.6,
+      seed: d.seed + 11, unlit: d.furnitureUnlit,
+    };
+    const rowW = seatOpts.seats * seatOpts.seatWidth;
+    const rowD = seatOpts.seatDepth;
+    const CLEAR = 0.4; // the elbow room the brief asks for either side of it
+    let rowZ;
+    let placedInLanding = false;
+    if (rightList.length >= 3) {
+      // The gap between their facing FRAME edges — the frame, not the opening,
+      // or the row would touch the timber.
+      const a = rightList[1].z - rightList[1].width / 2 - fw; // 2nd, far edge
+      const b = rightList[2].z + rightList[2].width / 2 + fw; // 3rd, near edge
+      const gap = a - b;
+      if (gap >= rowW + CLEAR) {
+        rowZ = (a + b) / 2;
+      } else {
+        placedInLanding = true;
+        if (warn) {
+          console.warn(
+            "[corridor] no room for the seat row between the second and third " +
+              "doors on the right: the gap is " + gap.toFixed(2) +
+              " m and the row needs " + (rowW + CLEAR).toFixed(2) +
+              " (3 seats of " + seatOpts.seatWidth + " m plus " + CLEAR +
+              " m of elbow room). Standing it on the LANDING's right-hand wall " +
+              "instead. Widen doorPitch (now " + d.doorPitch + ") to put it back."
+          );
+        }
+      }
+    } else {
+      placedInLanding = true;
+      if (warn) {
+        console.warn(
+          "[corridor] the right-hand wall has only " + rightList.length +
+            " opening(s), so there is no gap between a second and a third " +
+            "door for the seat row. Standing it on the landing instead."
+        );
+      }
+    }
+    if (placedInLanding) rowZ = L.zBack / 2;
+    const seatX = L.halfW - WALL_GAP - rowD / 2;
+    const sN = nudge("seats");
+    out.push({
+      key: "seats",
+      x: seatX + sN.x,
+      z: rowZ + sN.z,
+      yaw: facing(1) + (sN.yaw * Math.PI) / 180,
+      spanX: rowD,
+      spanZ: rowW + 0.16, // the plinth runs a little past the chairs
+      opts: seatOpts,
+    });
+
+    // THE TABLE, in front of the row. The brief says "0.45 m in front of the
+    // row's centre"; measured from the CENTRE that lands the table 12 cm inside
+    // the seats, so it is measured from the row's FRONT FACE instead — which is
+    // what the photograph shows anyway, the table almost touching their knees.
+    const tableOpts = {
+      w: 1.1, d: 0.6, h: 0.45, color: "#141414", laminatePeel: 0.6,
+      seed: d.seed + 23, unlit: d.furnitureUnlit,
+    };
+    const TABLE_GAP = 0.45;
+    const rowFront = seatX - rowD / 2;
+    const tN = nudge("table");
+    // ±6 degrees of "somebody moved it and never straightened it", seeded so
+    // it is the same every time this corridor is built.
+    const skew = (CorridorTextures.rand(d.seed * 57 + 3)() - 0.5) * 12;
+    out.push({
+      key: "table",
+      x: rowFront - TABLE_GAP + tN.x,
+      z: rowZ + tN.z,
+      yaw: facing(1) + ((skew + tN.yaw) * Math.PI) / 180,
+      spanX: tableOpts.d,
+      spanZ: tableOpts.w,
+      opts: tableOpts,
+    });
+
+    // ---- THE BIKE + THE BAG, on the LEFT wall --------------------------
+    const leftList = L.openings["-1"] || [];
+    const leftClosed = leftList.filter((o) => !o.open);
+    // WHEEL 0.38, not PropKit's 0.3. Against a 0.9 x 2.1 m door the default
+    // read as a toddler's balance bike; the reference machine is a 16-inch
+    // child's bike, which is what this is. PropKit keeps its own default —
+    // this is the corridor deciding what stands in it.
+    const bikeOpts = {
+      wheel: 0.38, color: "#2b6db3", color2: "#d94b3a", lean: 12,
+      seed: d.seed + 37, unlit: d.furnitureUnlit,
+    };
+    // ...and the bag smaller and duller than PropKit's default, which at
+    // 0.35 x 0.45 in near-white stood nearly as tall as the bike and, being
+    // the only lit near-white thing in a dark corridor, took the eye straight
+    // off it.
+    const bagOpts = {
+      w: 0.3, h: 0.34, color: "#cdc7b7",
+      seed: d.seed + 53, unlit: d.furnitureUnlit,
+    };
+    // HOW BIG A BIKE IS, asked of PropKit rather than worked out again here.
+    // These numbers used to be re-derived in this file from the same fractions
+    // childBike builds with — the wheelbase, the saddle height, the handlebar's
+    // half-width — and a proportion changed in one place and not the other is
+    // exactly how a bike ends up standing through a door frame. bikeMetrics()
+    // answers without building anything, which is what this function needs: it
+    // runs from walkableRects, long before any prop exists.
+    const bm = PropKit.bikeMetrics(bikeOpts);
+    const bikeLen = bm.length;
+    const reach = bm.reach; // how far the LEANING machine gets toward the wall
+    const bikeDepth = bm.depth;
+    let bikeZ;
+    if (leftClosed.length >= 2) {
+      // Midway between the two doors' facing frame edges.
+      const a = leftClosed[0].z - leftClosed[0].width / 2 - fw;
+      const b = leftClosed[1].z + leftClosed[1].width / 2 + fw;
+      bikeZ = (a + b) / 2;
+      // A FOLDED GATE may already be parked in that gap. Ask the gates where
+      // they went (quietly — collectGate already warned once if it had to) and
+      // step the bike clear of any stack that overlaps it.
+      const stacks = [];
+      [leftClosed[0], leftClosed[1]].forEach((op) => {
+        const park = this.gateParkSide(L, -1, op, leftList, false);
+        const half = op.width / 2 + fw;
+        const s0 = op.z + park * half;
+        const s1 = s0 + park * d.gateStack;
+        stacks.push({ lo: Math.min(s0, s1), hi: Math.max(s0, s1) });
+      });
+      const hits = (z) =>
+        stacks.some((s) => z + bikeLen / 2 > s.lo && z - bikeLen / 2 < s.hi);
+      if (d.gate && hits(bikeZ)) {
+        const tryZ = [bikeZ + d.gateStack, bikeZ - d.gateStack].filter(
+          (z) => z - bikeLen / 2 > b && z + bikeLen / 2 < a && !hits(z)
+        );
+        if (tryZ.length) {
+          bikeZ = tryZ[0];
+        } else if (warn) {
+          console.warn(
+            "[corridor] the bike's gap between the first two doors on the " +
+              "left is taken by a folded gate stack, and there is no " +
+              (bikeLen.toFixed(2)) + " m of clear wall either side of it " +
+              "(the gap is " + (a - b).toFixed(2) + " m). Leaving the bike " +
+              "where it is — it will overlap the stack. Widen doorPitch, " +
+              "narrow gateStack, or nudge it with furnitureOffsets.bike.z."
+          );
+        }
+      }
+    } else {
+      bikeZ = L.zEnd / 2;
+      if (warn) {
+        console.warn(
+          "[corridor] fewer than two closed doors on the left wall, so the " +
+            "bike has no gap between doors to lean in. Putting it halfway " +
+            "down the left wall instead."
+        );
+      }
+    }
+    // How far the tyres stand off the wall, so the LEANING top clears it by
+    // WALL_GAP rather than going through it.
+    const bikeX = -(L.halfW - WALL_GAP - reach);
+    const bN = nudge("bike");
+    out.push({
+      key: "bike",
+      x: bikeX + bN.x,
+      z: bikeZ + bN.z,
+      yaw: facing(-1) + (bN.yaw * Math.PI) / 180,
+      spanX: bikeDepth,
+      spanZ: bikeLen,
+      opts: bikeOpts,
+    });
+
+    // THE BAG, on the floor beside the rear wheel — which is the end toward the
+    // MOUTH, the bike's own front pointing away down the corridor.
+    const gN = nudge("bag");
+    out.push({
+      key: "bag",
+      x: -(L.halfW - WALL_GAP - bagOpts.w / 2) + gN.x,
+      z: bikeZ + bikeLen / 2 + bagOpts.w * 0.62 + gN.z,
+      yaw: facing(-1) + (gN.yaw * Math.PI) / 180,
+      spanX: bagOpts.w,
+      spanZ: bagOpts.w,
+      opts: bagOpts,
+    });
+
+    // ONE LAST CHECK: none of this may seal the corridor. A footprint plus a
+    // player radius each side has to leave somebody room to walk past it.
+    if (warn) {
+      out.forEach((p) => {
+        const free =
+          p.x > 0
+            ? p.x - p.spanX / 2 - this.PLAYER_R - (-L.halfW + this.PLAYER_R)
+            : L.halfW - this.PLAYER_R - (p.x + p.spanX / 2 + this.PLAYER_R);
+        if (free < 0.35) {
+          console.warn(
+            "[corridor] the " + p.key + " leaves only " + free.toFixed(2) +
+              " m of walkable corridor beside it (player radius " +
+              this.PLAYER_R + " m). The collider will make it hard or " +
+              "impossible to get past. Widen the corridor (`width` is " +
+              d.width + ") or move it with furnitureOffsets." + p.key + ".x."
+          );
+        }
+      });
+    }
+    return out;
+  },
+
+  // Put them there. Each prop is a THREE.Group from PropKit, added to the
+  // corridor's own group — so it rides `offset`, hides with `shown` and dies in
+  // teardown() — plus one soft floor mark under it.
+  buildFurniture: function (L) {
+    const d = this.data;
+    if (!d.furniture) return;
+    if (typeof PropKit === "undefined") {
+      console.warn(
+        "[corridor] `furniture` is on but PropKit is not loaded. Add " +
+          "<script src=\"js/props.js\"></script> to index.html BEFORE " +
+          "js/zone-a-corridor.js. Building the corridor without it."
+      );
+      return;
+    }
+    const make = {
+      seats: (o) => PropKit.seatRow(o),
+      table: (o) => PropKit.lowTable(o),
+      bike: (o) => PropKit.childBike(o),
+      bag: (o) => PropKit.plasticBag(o),
+    };
+    // ONE floor-mark texture for all of them: the exhibition's shared contact
+    // cue, in SHADOW mode. The corridor is unlit and its floor is dark cement,
+    // so unlike every other cue in the show this one is NOT subscribed to the
+    // environment retune — there is no environment out here to follow, and a
+    // preset that switched cues to glow would light four bright patches in a
+    // corridor whose whole point is that the light is painted on. Same
+    // reasoning, and the same `null` profile, as buildDaylight.
+    const cue = { opacity: 0.35, color: "#000000", mode: "shadow" };
+    const cueTex = ContactCue.makeTexture(0.55);
+    this.textures.push(cueTex);
+    const cueMat = ContactCue.makeMaterial(cue, cueTex);
+    ContactCue.tuneMaterial(cueMat, cue, null);
+    this.materials.push(cueMat);
+
+    this.furnitureLayout(L, true).forEach((p) => {
+      const g = make[p.key](p.opts);
+      g.position.set(p.x, 0, p.z);
+      g.rotation.y = p.yaw;
+      this.group.add(g);
+      this.props.push(g);
+
+      // THE FLOOR MARK: a quad a third larger than the footprint, lying just
+      // above the floor. Axis-aligned to the corridor rather than to the prop,
+      // because it is a smudge of shadow and not a decal of the object.
+      const mark = this.addPlane(p.spanX * 1.3, p.spanZ * 1.3, cueMat);
+      mark.rotation.x = -Math.PI / 2;
+      mark.position.set(p.x, 0.006, p.z);
+    });
+  },
+
+  // ---------------------------------------------------------------
   // THE SCISSOR GATES (cửa kéo)
   //
   // The folding steel gate that stands outside every door in a chung cư:
@@ -4666,7 +5402,7 @@ AFRAME.registerComponent("corridor-root", {
   // clear the corridor says so and parks it where it was asked to. The vent row
   // can never be in the way at any setting — the row lives inside the lintel,
   // between the jambs, and the stack is always outside them.
-  gateParkSide: function (L, side, op, list) {
+  gateParkSide: function (L, side, op, list, warn) {
     const d = this.data;
     const preferred =
       d.gatePark === "far"
@@ -4691,6 +5427,9 @@ AFRAME.registerComponent("corridor-root", {
     };
     if (clear(preferred)) return preferred;
     if (clear(-preferred)) return -preferred;
+    // Quietly, when it is the FURNITURE asking where a stack went rather than
+    // the gate builder deciding: collectGate has already said this once.
+    if (warn === false) return preferred;
     console.warn(
       "[corridor] the folded gate beside the door at z " + op.z.toFixed(2) +
         " has nowhere to park: a " + d.gateStack + " m stack runs into a " +
@@ -4723,7 +5462,7 @@ AFRAME.registerComponent("corridor-root", {
       !op.open &&
       CorridorTextures.rand(this.doorKey(op.z, side) * 733 + 11)() <
         d.gateLockedRatio;
-    const park = this.gateParkSide(L, side, op, list);
+    const park = this.gateParkSide(L, side, op, list, true);
     const half = op.width / 2 + d.frameWidth;
     this.gates.push({
       // The gate's plane: gateTrackDepth out from the wall's inner face, which
@@ -5425,6 +6164,15 @@ AFRAME.registerComponent("corridor-root", {
       im.dispose();
     });
     this.instanced = [];
+    this.props.forEach(function (g) {
+      if (g.userData && g.userData.dispose) g.userData.dispose();
+    });
+    this.props = [];
+    this.stencilCount = 0;
+    this.textures.forEach(function (t) {
+      t.dispose();
+    });
+    this.textures = [];
     this.ventPlacements = {};
     this.ventCount = 0;
     this.gates = [];
