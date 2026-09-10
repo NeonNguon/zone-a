@@ -61,7 +61,7 @@ AFRAME.registerComponent("zone-b-root", {
 //            (a small deterministic PRNG, not Math.random). Debug aid; optional.
 //   backDepth / backColor / backMargin — THE BACK: a plain slab behind the
 //            tiles, from the floor to backMargin above the top row and
-//            backMargin past each end. The wall stands free in the middle of
+//            backMargin past each end. The wall stands free on the square of
 //            the Zone B park now, so it is seen from behind, and a-image is
 //            double-sided: without a back the 100 pictures show MIRRORED from
 //            there. Unlit like the tiles, with a baked tone per face so its

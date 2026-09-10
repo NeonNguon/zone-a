@@ -336,10 +336,11 @@ AFRAME.registerComponent("teleport-terminal", {
 // Placements (all world-space, derived):
 //   Terminal A — a freestanding sign on the Zone B park's square,
 //     terminalAOffset from the square's CENTRE (ParkConfig.center(), derived
-//     live from the floorplan's hallway). The image wall stands on that centre,
-//     so the default offset carries the sign 10 m WEST of it, onto the approach
-//     axis from the hallway mouth: you meet it walking in. Screen facing -x,
-//     toward you as you come.
+//     live from the floorplan's hallway) — deliberately not from the wall, so
+//     the wall can be moved without taking the sign with it. The default
+//     offset puts the sign 10 m WEST of the centre, on the approach axis from
+//     the hallway mouth (the wall stands 10 m EAST of it): you meet it walking
+//     in. Screen facing -x, toward you as you come.
 //   Return terminals — ONE per map edge (near/far/left/right), each `returnInset`
 //     inside its edge midpoint (derived live from the board's width/depth + gap),
 //     children of the map root so they move/hide with the map; every screen faces
@@ -355,9 +356,9 @@ AFRAME.registerComponent("teleport-terminal", {
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-b-teleport", {
   schema: {
-    // From the park square's centre — which is where the image wall stands, so
-    // this cannot be 0: -10 puts the sign halfway between the hallway mouth and
-    // the wall, on the approach axis.
+    // From the park square's centre, not from the wall: -10 puts the sign
+    // halfway between the hallway mouth and the centre, on the approach axis,
+    // 20 m in front of the wall.
     terminalAOffset: { type: "vec3", default: { x: -10, y: 0, z: 0 } },
     mapSpawnOffset: { type: "vec3", default: { x: -0.6, y: 0, z: 0 } },
     returnSpawnOffset: { type: "vec3", default: { x: -1.6, y: 0, z: 0 } },

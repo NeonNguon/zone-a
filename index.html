@@ -1156,20 +1156,24 @@
       </a-entity>
 
       <!-- ============================================================
-           ZONE B — the wall of 100 images (5 rows × 20), standing in the
-           MIDDLE OF THE PARK SQUARE (#zone-b-park above), to the RIGHT of
+           ZONE B — the wall of 100 images (5 rows × 20), standing on the PARK
+           SQUARE (#zone-b-park above), 10 m past its centre, to the RIGHT of
            spawn. zone-b-root offsets the WHOLE assembly as a unit (same
            pattern/intent as zone-a-root) — wall, cues, info terminal B and the
            triptych group all ride it. Tune via the zone-b-root `offset`
            property — not the grid math.
 
-           offset 30.2 3 0 is the square's centre at the defaults: x = the
-           hallway's open end 10.2 + half of squareSize 40, z = the hallway's
-           centre 0 (ParkConfig.center() in the console gives the live
-           figure). y 3 raises the wall's centre; everything on the floor below
-           it counters that with a local y of -3. Change squareSize or move the
-           hallway and this has to follow by hand, the same way Zone C's offset
-           was worked out from its room.
+           offset 40.2 3 0 is the square's centre plus 10 m east, at the
+           defaults: the centre is x = the hallway's open end 10.2 + half of
+           squareSize 40 = 30.2, z = the hallway's centre 0
+           (ParkConfig.center() in the console gives the live figure), and the
+           wall stands 10 m beyond it so the approach from the hallway mouth is
+           30 m long, with Terminal A (which stays on the centre's -10 m
+           mark) 20 m in front of it. The wall's back slab then ends 9.7 m
+           short of the east kerb. y 3 raises the wall's centre; everything on
+           the floor below it counters that with a local y of -3. Change
+           squareSize or move the hallway and this has to follow by hand, the
+           same way Zone C's offset was worked out from its room.
 
            The inner container's `0 -90 0` rotation turns the wall (built FLAT
            by image-wall, facing +z) to face -x, back toward the hallway mouth,
@@ -1192,7 +1196,7 @@
            way Zone A lies from the foyer). The wall runs north-south, so its
            LEFT end as you face it is the north end.
            ============================================================ -->
-      <a-entity id="zone-b" zone-b-root="offset: 30.2 3 0">
+      <a-entity id="zone-b" zone-b-root="offset: 40.2 3 0">
         <!-- `shuffle: true` randomizes the wall's image order per load (seed the
              optional shuffleSeed>0 for a reproducible order). Off by default =
              today's manifest order; the floor map is unaffected (it picks by
@@ -1364,12 +1368,14 @@
            transition-glitch (rig moves at peak obscuration; see
            js/zone-b-teleport.js and js/transition.js).
 
-           Terminal A stands on the park's square 10 m WEST of the image wall,
-           on the approach axis from the hallway mouth, screen toward you — the
-           first thing you meet walking out onto the square. Its spot is read
-           live from the square's centre (ParkConfig, js/zone-b-park.js — no
-           copied numbers), and since the wall stands on that centre,
-           terminalAOffset's default is -10 0 0 rather than zero. Its screen
+           Terminal A stands on the park's square 10 m WEST of the square's
+           centre — 20 m in front of the image wall, which stands 10 m past
+           that centre — on the approach axis from the hallway mouth, screen
+           toward you: the first thing you meet walking out onto the square.
+           Its spot is read live from the square's centre (ParkConfig,
+           js/zone-b-park.js — no copied numbers), NOT from the wall, so moving
+           #zone-b's offset leaves it where it is. terminalAOffset defaults to
+           -10 0 0. Its screen
            shows a central-Saigon detail cropped from the baked map JPEG
            (reusing the existing asset) as a preview of the destination.
            Teleporting back lands you 1.6 m in front of it, facing the wall,
