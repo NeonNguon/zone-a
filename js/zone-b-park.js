@@ -480,7 +480,7 @@ function parkResolve(d, warn) {
 //              (0.12) / treeCueOpacity (0.32)
 //   benches    benches (true) / benchAlong (0.5) / benchInset (1.4)
 //              / benchColor (#3e7a5a) / benchOffsets ({})
-//   collision  collide (true) / wall (#zone-b-wall)
+//   collision  collide (true) / walls (#zone-b-wall, #zone-b-triptych-stack)
 // ================================================================
 AFRAME.registerComponent("park-root", {
   schema: {
@@ -573,9 +573,11 @@ AFRAME.registerComponent("park-root", {
         return typeof v === "string" ? v : JSON.stringify(v);
       },
     },
-    // collision — the wall and the benches are solid (cut out of the square)
+    // collision — the walls and the benches are solid (cut out of the square)
     collide: { type: "boolean", default: true },
-    wall: { type: "string", default: "#zone-b-wall" }, // the image-wall to cut around
+    // The free-standing walls to cut around: a selector list, each matching an
+    // entity whose image-wall or zone-b-triptych answers footprint().
+    walls: { type: "string", default: "#zone-b-wall, #zone-b-triptych-stack" },
   },
 
   init: function () {
@@ -606,6 +608,7 @@ AFRAME.registerComponent("park-root", {
     };
     this.el.sceneEl.addEventListener("imagewallbuilt", this.onWallChange);
     this.el.sceneEl.addEventListener("zonebrootchanged", this.onWallChange);
+    this.el.sceneEl.addEventListener("zonebtriptychbuilt", this.onWallChange);
 
     // The square's position is derived from the floorplan, so a floorplan
     // rebuild means a park rebuild. The collider re-reads its sources on the
@@ -672,11 +675,12 @@ AFRAME.registerComponent("park-root", {
   // solid (see walkableRects in js/zone-a-corridor.js): the collider takes a
   // UNION of rectangles, so an obstacle is not added — its footprint, inflated
   // by the player radius, is CUT OUT of the square, and what is left is rebuilt
-  // as the pieces around it. The image wall and each bench are cut. The trees
-  // need nothing: they stand on the lawn, where there is no rectangle at all.
+  // as the pieces around it. The two free-standing walls — the image wall and
+  // the triptych's — and each bench are cut. The trees need nothing: they stand
+  // on the lawn, where there is no rectangle at all.
   //
-  // Derived live on every collider rebuild — the wall's footprint from
-  // image-wall's own metrics and #zone-b-wall's world transform, the benches'
+  // Derived live on every collider rebuild — each wall's footprint from its own
+  // component (image-wall, zone-b-triptych) and world transform, the benches'
   // from benchLayout, the same function that places them — so the walls you
   // bump into and the objects you see can never disagree.
   // ---------------------------------------------------------------
@@ -686,9 +690,7 @@ AFRAME.registerComponent("park-root", {
     const s = P.square;
     let open = [{ x0: s.x0 + r, x1: s.x1 - r, z0: s.z0 + r, z1: s.z1 - r, tag: "park:square" }];
     if (this.data.collide) {
-      const holes = [];
-      const wall = this.wallFootprint();
-      if (wall) holes.push(wall);
+      const holes = this.wallFootprints();
       this.benchLayout(P).forEach((b) => holes.push(b.box));
       holes.forEach((h) => {
         const hole = { x0: h.x0 - r, x1: h.x1 + r, z0: h.z0 - r, z1: h.z1 + r };
@@ -700,25 +702,32 @@ AFRAME.registerComponent("park-root", {
     return open.map((a, i) => Object.assign({}, a, { tag: "park:square/" + i }));
   },
 
-  // The image wall's floor footprint in WORLD coordinates, or null until the
-  // wall exists: image-wall's local footprint through #zone-b-wall's matrix
-  // (which carries the zone-b-root offset and the 0 -90 0 turn).
-  wallFootprint: function () {
-    const el = this.data.wall && document.querySelector(this.data.wall);
-    const iw = el && el.components && el.components["image-wall"];
-    if (!iw || typeof iw.footprint !== "function") return null;
-    const f = iw.footprint();
-    el.object3D.updateWorldMatrix(true, false);
+  // The free-standing walls' floor footprints in WORLD coordinates, one per
+  // entity in `walls` that exists yet: each component's local footprint()
+  // (image-wall's, zone-b-triptych's) through its entity's matrix, which
+  // carries the zone-b-root offset and any turn — the image wall's 0 -90 0.
+  wallFootprints: function () {
+    const out = [];
+    if (!this.data.walls) return out;
     const v = new THREE.Vector3();
-    const box = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
-    [[f.x0, f.z0], [f.x1, f.z0], [f.x0, f.z1], [f.x1, f.z1]].forEach((c) => {
-      v.set(c[0], 0, c[1]).applyMatrix4(el.object3D.matrixWorld);
-      box.x0 = Math.min(box.x0, v.x);
-      box.x1 = Math.max(box.x1, v.x);
-      box.z0 = Math.min(box.z0, v.z);
-      box.z1 = Math.max(box.z1, v.z);
+    document.querySelectorAll(this.data.walls).forEach((el) => {
+      const comps = (el.components && [el.components["image-wall"],
+        el.components["zone-b-triptych"]]) || [];
+      const c = comps.find((k) => k && typeof k.footprint === "function");
+      const f = c && c.footprint();
+      if (!f) return;
+      el.object3D.updateWorldMatrix(true, false);
+      const box = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
+      [[f.x0, f.z0], [f.x1, f.z0], [f.x0, f.z1], [f.x1, f.z1]].forEach((p) => {
+        v.set(p[0], 0, p[1]).applyMatrix4(el.object3D.matrixWorld);
+        box.x0 = Math.min(box.x0, v.x);
+        box.x1 = Math.max(box.x1, v.x);
+        box.z0 = Math.min(box.z0, v.z);
+        box.z1 = Math.max(box.z1, v.z);
+      });
+      out.push(box);
     });
-    return box;
+    return out;
   },
 
   // ---------------------------------------------------------------
@@ -1338,6 +1347,7 @@ AFRAME.registerComponent("park-root", {
     if (this.cueTex) this.cueTex.dispose();
     this.el.sceneEl.removeEventListener("imagewallbuilt", this.onWallChange);
     this.el.sceneEl.removeEventListener("zonebrootchanged", this.onWallChange);
+    this.el.sceneEl.removeEventListener("zonebtriptychbuilt", this.onWallChange);
     this.el.removeObject3D("ground");
     this.el.removeObject3D("far");
     if (ParkConfig.component === this) ParkConfig.component = null;

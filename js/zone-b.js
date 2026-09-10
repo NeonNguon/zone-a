@@ -72,6 +72,34 @@ AFRAME.registerComponent("zone-b-root", {
 // hover frame (wall-tile-hover, 1 cm), so a hovered tile's frame stays in front.
 const WALL_BACK_GAP = 0.02;
 
+// A plain slab standing behind a set of hung pictures, in the pictures' OWN
+// frame (they face +z from z 0): `width` wide, `bottom` to `top`, `depth` deep,
+// its front face WALL_BACK_GAP behind the picture plane. Unlit like the
+// a-image pictures, with a baked tone per face in vertex colours — ends darker
+// than the faces, the top lightest — so its edges read without a light. Shared
+// by image-wall and the triptych (js/zone-b-triptych.js), so the two walls
+// standing on the park's square are one construction.
+function wallBackMesh(width, bottom, top, depth, color) {
+  const geo = new THREE.BoxGeometry(width, top - bottom, depth);
+  geo.translate(0, (top + bottom) / 2, -WALL_BACK_GAP - depth / 2);
+  // BoxGeometry's faces, 4 vertices each: +x -x +y -y +z(front) -z(back).
+  const tones = [0.82, 0.82, 1.0, 0.6, 0.96, 0.9];
+  const cols = [];
+  tones.forEach((k) => {
+    for (let v = 0; v < 4; v++) cols.push(k, k, k);
+  });
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+  const mat = new THREE.MeshBasicMaterial({ color: color, vertexColors: true });
+  return new THREE.Mesh(geo, mat);
+}
+
+// World floor (y 0) in `el`'s local frame — where a back slab has to reach
+// down to when its pictures hang off a raised root.
+function wallBackFloor(el) {
+  el.object3D.updateWorldMatrix(true, false);
+  return el.object3D.worldToLocal(new THREE.Vector3(0, 0, 0)).y;
+}
+
 // Small deterministic PRNG (mulberry32) for seeded, reproducible shuffles.
 // Only used when shuffleSeed > 0; the default (seed 0) path uses Math.random.
 function mulberry32(seed) {
@@ -258,21 +286,13 @@ AFRAME.registerComponent("image-wall", {
     const d = this.data;
     if (!(d.backDepth > 0)) return;
     m = m || this.metrics();
-    this.el.object3D.updateWorldMatrix(true, false);
-    const floor = this.el.object3D.worldToLocal(new THREE.Vector3(0, 0, 0)).y;
-    const top = m.height / 2 + d.backMargin;
-    const bottom = Math.min(floor, -m.height / 2);
-    const geo = new THREE.BoxGeometry(m.width + 2 * d.backMargin, top - bottom, d.backDepth);
-    geo.translate(0, (top + bottom) / 2, -WALL_BACK_GAP - d.backDepth / 2);
-    // BoxGeometry's faces, 4 vertices each: +x -x +y -y +z(front) -z(back).
-    const tones = [0.82, 0.82, 1.0, 0.6, 0.96, 0.9];
-    const cols = [];
-    tones.forEach((k) => {
-      for (let v = 0; v < 4; v++) cols.push(k, k, k);
-    });
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-    const mat = new THREE.MeshBasicMaterial({ color: d.backColor, vertexColors: true });
-    this.back = new THREE.Mesh(geo, mat);
+    this.back = wallBackMesh(
+      m.width + 2 * d.backMargin,
+      Math.min(wallBackFloor(this.el), -m.height / 2),
+      m.height / 2 + d.backMargin,
+      d.backDepth,
+      d.backColor
+    );
     this.el.setObject3D("back", this.back);
   },
 

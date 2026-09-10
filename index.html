@@ -431,10 +431,12 @@
 
            AND SOLID BY SUBTRACTION, the way the corridor makes its furniture
            solid. The collider takes a UNION of rectangles, so an obstacle is a
-           hole: the image wall's footprint and each bench's, inflated by the
-           player radius, are cut out of the square and the rest is rebuilt as
-           the pieces around them. The wall's comes from image-wall's own
-           metrics through #zone-b-wall's world transform; a bench's from
+           hole: the footprints of the two free-standing walls (the image
+           wall's and the triptych's) and of each bench, inflated by the player
+           radius, are cut out of the square and the rest is rebuilt as the
+           pieces around them. A wall's comes from its own component
+           (image-wall, zone-b-triptych) through its entity's world transform;
+           a bench's from
            terrazzo-bench's schema and the same benchLayout that places it — so
            nothing here is a copied number, and both re-derive when the wall
            moves or rebuilds. A bench's back stands ~1.05 m off the kerb, which
@@ -451,7 +453,8 @@
                sky       1 mesh            1 call    960 triangles
                skyline   12 panels        24 calls
                benches   96 meshes       104 calls   8 × (11 parts + a cue)
-             plus the wall's back slab on #zone-b-wall: 1 mesh, 1 call.
+             plus the two back slabs, the image wall's and the triptych's:
+             1 mesh and 1 call each.
              More calls than meshes because three draws a TRANSPARENT
              DOUBLE-SIDED material in two passes, back faces then front — the
              skyline panels and every contact cue are both, so each costs two.
@@ -560,9 +563,10 @@
                         (1 = the -x end) and w1 w2 / e1 e2 (1 = the -z end),
                         each { along, in, yaw } in metres and DEGREES, e.g.
                         benchOffsets: {"w2": {"along": 1.5}, "n1": {"yaw": -6}}
-             collision  collide true   cut the wall and the benches out of the
+             collision  collide true   cut the walls and the benches out of the
                         walkable square
-                        wall #zone-b-wall   the image-wall to cut around
+                        walls "#zone-b-wall, #zone-b-triptych-stack"   the
+                        free-standing walls to cut around, as a selector list
            ============================================================ -->
       <a-entity id="zone-b-park" park-root></a-entity>
 
@@ -1190,7 +1194,8 @@
            tiles, a baked tone per face so its edges read. Tunables on
            image-wall: backDepth .3 (0 removes it) / backColor #e6e2da /
            backMargin .25. The park cuts the slab's whole footprint out of the
-           walkable square, so you walk round it, not through it.
+           walkable square, so you walk round it, not through it. The
+           triptych stands on the same kind of slab — see its note below.
 
            Compass, for the notes below: -z is NORTH (A-Frame's forward, the
            way Zone A lies from the foyer). The wall runs north-south, so its
@@ -1242,6 +1247,13 @@
              lines up with info-terminal-b's wall clearance; z -13.9 stands
              the group 2.4 m clear of the back slab's end, and the whole group
              sits 4.7 m inside the square's north kerb, clear of the benches.
+             Like the image wall, the stack is a FIXED WALL now: the same pale
+             slab (wallBackMesh in js/zone-b.js) stands behind the three images,
+             floor to a quarter metre above the top one and past each side, so
+             from behind it is a wall rather than three mirrored pictures, and
+             the park cuts it out of the walkable square. Tunables on
+             zone-b-triptych: backDepth .3 (0 removes it) / backColor #e6e2da /
+             backMargin .25.
              NUDGE BY EYE via this position/rotation (the whole sub-zone moves
              as a unit). Stack tunables (imageScale / bottomHeight / stackGap)
              live on zone-b-triptych. -->
@@ -1269,15 +1281,16 @@
 
           <!-- Triptych info terminal: to the stack's RIGHT as a visitor
                faces the sub-zone (the stack sits at group-local x -3.0,
-               this terminal at -1.4), screen facing the same way as the
-               images. Its hit box (~0.57 m half-width) clears the stack's
-               images by ~0.2 m.
+               this terminal at -1.2), screen facing the same way as the
+               images. Its hit box (~0.57 m half-width) clears the end of the
+               stack's back slab by ~0.17 m (it stood at -1.4, 0.2 m closer,
+               before the stack had a slab to clear).
                NUDGE BY EYE via position/rotation (the placement-offset
                tunable for this terminal). -->
           <a-entity
             id="info-terminal-d"
             info-terminal="key: d"
-            position="-1.4 0 0"
+            position="-1.2 0 0"
             rotation="0 0 0"
             spot-contact-cue
           ></a-entity>
