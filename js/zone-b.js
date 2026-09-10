@@ -59,7 +59,18 @@ AFRAME.registerComponent("zone-b-root", {
 //            FILE ID (dataset.file), not by wall grid index.
 //   shuffleSeed — 0 = fresh random each load; >0 = seeded, reproducible order
 //            (a small deterministic PRNG, not Math.random). Debug aid; optional.
+//   backDepth / backColor / backMargin — THE BACK: a plain slab behind the
+//            tiles, from the floor to backMargin above the top row and
+//            backMargin past each end. The wall stands free in the middle of
+//            the Zone B park now, so it is seen from behind, and a-image is
+//            double-sided: without a back the 100 pictures show MIRRORED from
+//            there. Unlit like the tiles, with a baked tone per face so its
+//            edges read. backDepth 0 removes it.
 // ----------------------------------------------------------------
+
+// How far behind the tile plane the back slab's front face stands: behind the
+// hover frame (wall-tile-hover, 1 cm), so a hovered tile's frame stays in front.
+const WALL_BACK_GAP = 0.02;
 
 // Small deterministic PRNG (mulberry32) for seeded, reproducible shuffles.
 // Only used when shuffleSeed > 0; the default (seed 0) path uses Math.random.
@@ -84,12 +95,25 @@ AFRAME.registerComponent("image-wall", {
     basePath: { type: "string", default: "web4map-512/" }, // prefix for tile URLs
     shuffle: { type: "boolean", default: false }, // randomize order per load
     shuffleSeed: { type: "number", default: 0 }, // 0 = fresh random; >0 = seeded
+    backDepth: { type: "number", default: 0.3 }, // m; 0 = no back slab
+    backColor: { type: "color", default: "#e6e2da" },
+    backMargin: { type: "number", default: 0.25 }, // m past the tiles, ends + top
   },
 
   init: function () {
     this.tiles = []; // a-image elements this component created
     this.entries = null; // manifest entries { file, title }, in MANIFEST order
     this.displayEntries = null; // the order build() lays out from (maybe shuffled)
+    this.back = null; // the back slab mesh, if any
+
+    // The back reaches down to the FLOOR, which in this frame depends on how
+    // high the root raises the wall — so it re-derives when the root moves.
+    this.onRootMoved = () => {
+      if (this.tiles.length) this.buildBack();
+    };
+    if (this.el.parentNode) {
+      this.el.parentNode.addEventListener("zonebrootchanged", this.onRootMoved);
+    }
 
     // Fetch the manifest once, then build. update() re-lays-out on later prop
     // tweaks (it no-ops until this resolves). The manifest is an array of
@@ -202,11 +226,54 @@ AFRAME.registerComponent("image-wall", {
   },
 
   // What the wall occupies on the floor, in its OWN local frame (x along its
-  // width, +z the way the tiles face), for a collider: the tile plane at z 0
-  // and the hover frame 1 cm behind it.
+  // width, +z the way the tiles face), for a collider: the tile plane at z 0,
+  // and behind it either the back slab or, with no back, the hover frame 1 cm
+  // behind the tiles.
   footprint: function () {
     const m = this.metrics();
+    const d = this.data;
+    if (d.backDepth > 0) {
+      return {
+        x0: -m.width / 2 - d.backMargin, x1: m.width / 2 + d.backMargin,
+        z0: -WALL_BACK_GAP - d.backDepth, z1: 0,
+      };
+    }
     return { x0: -m.width / 2, x1: m.width / 2, z0: -0.01, z1: 0 };
+  },
+
+  // THE BACK: one box behind the tiles, its front face WALL_BACK_GAP behind the
+  // tile plane — behind the hover frame (1 cm) so a hovered tile's black frame
+  // still draws in front of it — and its foot on the world floor. It shows
+  // between the tiles as a pale mat around each picture, and from behind as a
+  // plain wall. Unlit (MeshBasic, like the a-image tiles), so each face carries
+  // a baked tone in vertex colours: ends darker than the faces, the top
+  // lightest, which is what makes its edges read on the square.
+  buildBack: function (m) {
+    if (this.back) {
+      this.el.removeObject3D("back");
+      this.back.geometry.dispose();
+      this.back.material.dispose();
+      this.back = null;
+    }
+    const d = this.data;
+    if (!(d.backDepth > 0)) return;
+    m = m || this.metrics();
+    this.el.object3D.updateWorldMatrix(true, false);
+    const floor = this.el.object3D.worldToLocal(new THREE.Vector3(0, 0, 0)).y;
+    const top = m.height / 2 + d.backMargin;
+    const bottom = Math.min(floor, -m.height / 2);
+    const geo = new THREE.BoxGeometry(m.width + 2 * d.backMargin, top - bottom, d.backDepth);
+    geo.translate(0, (top + bottom) / 2, -WALL_BACK_GAP - d.backDepth / 2);
+    // BoxGeometry's faces, 4 vertices each: +x -x +y -y +z(front) -z(back).
+    const tones = [0.82, 0.82, 1.0, 0.6, 0.96, 0.9];
+    const cols = [];
+    tones.forEach((k) => {
+      for (let v = 0; v < 4; v++) cols.push(k, k, k);
+    });
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+    const mat = new THREE.MeshBasicMaterial({ color: d.backColor, vertexColors: true });
+    this.back = new THREE.Mesh(geo, mat);
+    this.el.setObject3D("back", this.back);
   },
 
   build: function () {
@@ -284,6 +351,8 @@ AFRAME.registerComponent("image-wall", {
         `tile ${tileW.toFixed(2)}×${tileH.toFixed(2)} m, gap ${gapAbs.toFixed(3)} m.`
     );
 
+    this.buildBack(m);
+
     // Tell Zone B's contact cues the wall (re)built, so their count + positions
     // follow the current grid without hardcoding cols or wall height.
     this.el.emit("imagewallbuilt", { cols: cols, rows: rows });
@@ -292,6 +361,15 @@ AFRAME.registerComponent("image-wall", {
   remove: function () {
     this.tiles.forEach((t) => t.parentNode && t.parentNode.removeChild(t));
     this.tiles = [];
+    if (this.el.parentNode) {
+      this.el.parentNode.removeEventListener("zonebrootchanged", this.onRootMoved);
+    }
+    if (this.back) {
+      this.el.removeObject3D("back");
+      this.back.geometry.dispose();
+      this.back.material.dispose();
+      this.back = null;
+    }
   },
 });
 

@@ -1122,6 +1122,17 @@
            square, its width spanning the view. All wall tunables (width / gap
            / rows / cols / aspect) live on the image-wall component.
 
+           THE WALL HAS A BACK now. It stands free in the open, so it is seen
+           from behind — and a-image is double-sided, so from there the 100
+           pictures showed MIRRORED. image-wall builds a plain pale slab 2 cm
+           behind the tiles (behind their hover frames), from the floor to a
+           quarter metre above the top row and past each end: a mat between
+           the pictures from the front, a wall from behind. Unlit like the
+           tiles, a baked tone per face so its edges read. Tunables on
+           image-wall: backDepth .3 (0 removes it) / backColor #e6e2da /
+           backMargin .25. The park cuts the slab's whole footprint out of the
+           walkable square, so you walk round it, not through it.
+
            Compass, for the notes below: -z is NORTH (A-Frame's forward, the
            way Zone A lies from the foyer). The wall runs north-south, so its
            LEFT end as you face it is the north end.
@@ -1146,31 +1157,35 @@
              Tunables: radius / opacity / softness / yoffset. -->
         <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
 
-        <!-- Zone B info terminal: at the wall's LEFT edge (the teleport
-             terminal holds the right edge), angled 45° from the wall's -x
-             facing toward the spawn point (which sits almost exactly on
-             that diagonal from this corner). Local to #zone-b: y -3
-             counteracts the root's raised y (floor). NUDGE BY EYE via
-             position/rotation. -->
+        <!-- Zone B info terminal: at the wall's SOUTH end (its right end as
+             you face it; the triptych holds the north end), 1.2 m out in
+             front of the wall line and just past the back slab's end, angled
+             45° off the wall's -x facing toward the approach from the hallway
+             mouth — yaw -135 turns the screen to face west-north-west, back
+             along the diagonal a visitor walks in on. Its hit box clears the
+             slab's end by ~0.17 m. Local to #zone-b: y -3 counteracts the
+             root's raised y (floor). NUDGE BY EYE via position/rotation. -->
         <a-entity
           id="info-terminal-b"
           info-terminal="key: b"
-          position="-1.2 -3 -12.23"
-          rotation="0 -45 0"
+          position="-1.2 -3 12.23"
+          rotation="0 -135 0"
           spot-contact-cue
         ></a-entity>
 
         <!-- TRIPTYCH SUB-ZONE — three stacked Ticket 485496 images just past
-             the wall's LEFT end (opposite Terminal A's side, beyond
-             info-terminal-b), turned 90° to the wall: at yaw 0 the stack
-             faces +z, back along the wall's axis, so it reads face-on as
-             you walk the wall toward its left end (it is edge-on from
-             spawn — by design). Local to #zone-b: y -3 counteracts the
-             root's raised y (floor); x -1.2 lines up with the terminals'
-             wall clearance; z -13.9 clears info-terminal-b's hit box by
-             ~1 m. PLACEHOLDER — NUDGE BY EYE via this position/rotation
-             (the whole sub-zone moves as a unit). Stack tunables
-             (imageScale / bottomHeight / stackGap) live on zone-b-triptych. -->
+             the wall's NORTH end (its left end as you face it; info-terminal-b
+             holds the south end), turned 90° to the wall: at yaw 0 the stack
+             faces +z, back along the wall's axis, so it reads face-on as you
+             walk the wall toward its north end (it is edge-on from the hallway
+             mouth — by design, the same as it was in the room). Local to
+             #zone-b: y -3 counteracts the root's raised y (floor); x -1.2
+             lines up with info-terminal-b's wall clearance; z -13.9 stands
+             the group 2.4 m clear of the back slab's end, and the whole group
+             sits 4.7 m inside the square's north kerb, clear of the benches.
+             NUDGE BY EYE via this position/rotation (the whole sub-zone moves
+             as a unit). Stack tunables (imageScale / bottomHeight / stackGap)
+             live on zone-b-triptych. -->
         <a-entity id="zone-b-triptych" position="-1.2 -3 -13.9" rotation="0 0 0">
           <!-- wall-focus is the wall's own capture-and-restore lightbox,
                reused UNFORKED: it delegates clicks from its child tiles, so
@@ -1197,7 +1212,7 @@
                faces the sub-zone (the stack sits at group-local x -3.0,
                this terminal at -1.4), screen facing the same way as the
                images. Its hit box (~0.57 m half-width) clears the stack's
-               images by ~0.2 m and stays ~1 m from info-terminal-b's.
+               images by ~0.2 m.
                NUDGE BY EYE via position/rotation (the placement-offset
                tunable for this terminal). -->
           <a-entity
@@ -1294,13 +1309,19 @@
            transition-glitch (rig moves at peak obscuration; see
            js/zone-b-teleport.js and js/transition.js).
 
-           Terminal A is a freestanding sign in the MIDDLE of the Zone B room
-           (its centre read live from the floorplan — no copied numbers); its
-           screen shows a central-Saigon detail cropped from the baked map JPEG
+           Terminal A stands on the park's square 10 m WEST of the image wall,
+           on the approach axis from the hallway mouth, screen toward you — the
+           first thing you meet walking out onto the square. Its spot is read
+           live from the square's centre (ParkConfig, js/zone-b-park.js — no
+           copied numbers), and since the wall stands on that centre,
+           terminalAOffset's default is -10 0 0 rather than zero. Its screen
+           shows a central-Saigon detail cropped from the baked map JPEG
            (reusing the existing asset) as a preview of the destination.
-           Teleporting back lands you at this same spot.
+           Teleporting back lands you 1.6 m in front of it, facing the wall,
+           with the collider back on and the square's walls restored.
 
-           Tunables on zone-b-teleport: terminalAOffset (from the room centre) /
+           Tunables on zone-b-teleport: terminalAOffset (from the square's
+           centre, -10 0 0) /
            mapSpawnOffset / returnSpawnOffset / returnInset (each return terminal's
            inset inside its map edge) / returnY. Terminal geometry + hit sizes,
            and the return terminals' accent / beacon / beaconHeight / beaconWidth /
