@@ -397,13 +397,49 @@
            no texture memory whatever. No scene fog anywhere: the distance is
            all in the haze colour and opacity.
 
-           WALKABLE: the concrete only. The square registers one rectangle with
+           TREES — sixteen, on the lawn only: seeded rejection sampling keeps
+           every trunk 3 m off the kerb's outer face, 4 m off the building, 2 m
+           inside the lawn's edges and 7 m from every other trunk, and each tree
+           draws its own trunk height and girth, canopy size and two or three
+           flattened canopy blobs from the same seed. Nothing fits west of the
+           square at the defaults (the strip beside the hallway is narrower
+           than the two clearances), so they stand north, south and east of it.
+           Unlit like everything out here: trunks darken toward the ground and
+           every blob toward its underside through vertex colours, and each
+           tree takes its own tint through the instance colour. The whole wood
+           is THREE draw calls — trunks, canopy blobs and floor cues are each
+           one InstancedMesh. The cues are the shared contact-cue kit in shadow
+           mode, not following the environment retune: the lawn belongs to no
+           preset, the same reasoning as the corridor's props.
+
+           BENCHES — eight terrazzo-benches, two to each side, just inside the
+           kerb and facing into the square, backs to the kerb. Placed from the
+           square, not typed: each pair stands ±half of half a side from that
+           side's middle (so the west pair flanks the hallway mouth, 10 m
+           either side of it) and 1.4 m in from the kerb's face. benchOffsets
+           nudges any of them after the derivation, the corridor's
+           furnitureOffsets idea. Each carries a spot-contact-cue. They are
+           children of #zone-b-park, rebuilt with it.
+
+           WALKABLE: the concrete only. The square registers with
            rig-collision's RigRegions registry — the square inset by the player
            radius on every side, x 10.45..49.95, z -19.75..19.75 at the
-           defaults — and it overlaps the hallway's own rectangle (which runs
-           to x 10.825, doorOverlap past the open end), so foyer, hallway and
-           square are one continuous floor. The lawn is scenery; you can look
-           at it, not stand on it.
+           defaults — and overlaps the hallway's own rectangle (which runs to x
+           10.825, doorOverlap past the open end), so foyer, hallway and square
+           are one continuous floor. The lawn is scenery; you can look at it,
+           not stand on it.
+
+           AND SOLID BY SUBTRACTION, the way the corridor makes its furniture
+           solid. The collider takes a UNION of rectangles, so an obstacle is a
+           hole: the image wall's footprint and each bench's, inflated by the
+           player radius, are cut out of the square and the rest is rebuilt as
+           the pieces around them. The wall's comes from image-wall's own
+           metrics through #zone-b-wall's world transform; a bench's from
+           terrazzo-bench's schema and the same benchLayout that places it — so
+           nothing here is a copied number, and both re-derive when the wall
+           moves or rebuilds. A bench's back stands ~1.05 m off the kerb, which
+           leaves a lane behind it: you can walk the full length of every kerb
+           and all the way round the wall. collide: false turns the cuts off.
 
            ?zoneb=debug on the URL puts you on the square's west edge facing
            east, the same convention as ?zonea=debug.
@@ -448,6 +484,30 @@
                         width follows from its picture. The count per band is
                         derived — as many as close the ring — and the max only
                         caps it; a capped band logs the size of its gaps
+             trees      trees true / treeCount 16 / treeSeed 11   a new seed
+                        replants the whole park
+                        treeScale 1   trunk and canopy together
+                        treeKerbClearance 3   trunk to the kerb's outer face
+                        treeBuildingClearance 4 / treeEdgeInset 2
+                        treeSpacing 7   trunk to trunk; if fewer than treeCount
+                        fit, the log says how many did
+                        trunkColor #5b4a3b / canopyColor #4f7337
+                        canopyUnderside .55   the underside's tone as a
+                        fraction of the top's
+                        treeTone .12   how much the trees differ in brightness
+                        treeCueOpacity .32
+             benches    benches true / benchColor #3e7a5a
+                        benchAlong .5   the pair on each side stands ± this ×
+                        half the side from its middle
+                        benchInset 1.4   bench centre to the kerb's face — keep
+                        it above ~1.2 or the lane behind a bench closes
+                        benchOffsets {}   by-eye nudges, keyed n1 n2 / s1 s2
+                        (1 = the -x end) and w1 w2 / e1 e2 (1 = the -z end),
+                        each { along, in, yaw } in metres and DEGREES, e.g.
+                        benchOffsets: {"w2": {"along": 1.5}, "n1": {"yaw": -6}}
+             collision  collide true   cut the wall and the benches out of the
+                        walkable square
+                        wall #zone-b-wall   the image-wall to cut around
            ============================================================ -->
       <a-entity id="zone-b-park" park-root></a-entity>
 

@@ -178,6 +178,37 @@ AFRAME.registerComponent("image-wall", {
     return 22.46;
   },
 
+  // The wall's size from its DATA alone — no manifest needed — so anything that
+  // has to know how big the wall is can ask before a single tile exists: the
+  // Zone B park cuts the wall's footprint out of the square's walkable ground
+  // (js/zone-b-park.js), and rig-collision can rebuild long before the manifest
+  // fetch resolves. build() lays the tiles out from exactly these numbers.
+  //
+  // Cell / tile geometry. `gap` is a fraction of the horizontal cell; the same
+  // ABSOLUTE gap is reused vertically so spacing reads evenly while the tiles
+  // keep their aspect. Height derives from all of this.
+  metrics: function () {
+    const d = this.data;
+    const width = this.resolveWidth();
+    const cellW = width / d.cols;
+    const gapAbs = d.gap * cellW;
+    const tileW = cellW - gapAbs;
+    const tileH = tileW / d.aspect;
+    const cellH = tileH + gapAbs;
+    return {
+      width: width, cellW: cellW, gapAbs: gapAbs,
+      tileW: tileW, tileH: tileH, cellH: cellH, height: d.rows * cellH,
+    };
+  },
+
+  // What the wall occupies on the floor, in its OWN local frame (x along its
+  // width, +z the way the tiles face), for a collider: the tile plane at z 0
+  // and the hover frame 1 cm behind it.
+  footprint: function () {
+    const m = this.metrics();
+    return { x0: -m.width / 2, x1: m.width / 2, z0: -0.01, z1: 0 };
+  },
+
   build: function () {
     // Clear tiles from any previous build (supports live re-layout).
     this.tiles.forEach((t) => t.parentNode && t.parentNode.removeChild(t));
@@ -187,17 +218,14 @@ AFRAME.registerComponent("image-wall", {
     const rows = d.rows;
     const cols = d.cols;
     const slots = rows * cols;
-    const width = this.resolveWidth();
-
-    // Cell / tile geometry. `gap` is a fraction of the horizontal cell; the
-    // same ABSOLUTE gap is reused vertically so spacing reads evenly while the
-    // tiles keep their 4:3 aspect. Height derives from all of this.
-    const cellW = width / cols;
-    const gapAbs = d.gap * cellW;
-    const tileW = cellW - gapAbs;
-    const tileH = tileW / d.aspect;
-    const cellH = tileH + gapAbs;
-    const height = rows * cellH;
+    const m = this.metrics();
+    const width = m.width;
+    const cellW = m.cellW;
+    const gapAbs = m.gapAbs;
+    const tileW = m.tileW;
+    const tileH = m.tileH;
+    const cellH = m.cellH;
+    const height = m.height;
 
     // Expose the computed tile geometry for other Zone B furniture: the
     // triptych (zone-b-triptych.js) sizes its images from these, so the wall
