@@ -441,6 +441,61 @@
            leaves a lane behind it: you can walk the full length of every kerb
            and all the way round the wall. collide: false turns the cuts off.
 
+           WHAT THE PARK COSTS, measured — everything drawn at once from a
+           camera 700 m up, renderer.info with each group switched off in turn:
+             115 meshes in #zone-b-park, 8 244 triangles, 136 draw calls
+               ground    3 meshes          3 calls   concrete, lawn, kerb
+               trees     3 InstancedMeshes 4 calls   74 instances: 16 trunks,
+                                                     42 canopy blobs, 16 cues;
+                                                     5 264 triangles
+               sky       1 mesh            1 call    960 triangles
+               skyline   12 panels        24 calls
+               benches   96 meshes       104 calls   8 × (11 parts + a cue)
+             plus the wall's back slab on #zone-b-wall: 1 mesh, 1 call.
+             More calls than meshes because three draws a TRANSPARENT
+             DOUBLE-SIDED material in two passes, back faces then front — the
+             skyline panels and every contact cue are both, so each costs two.
+           TEXTURES: 19 canvases referenced, 34.9 MB with mipmaps, of which only
+           13 canvases and 10.0 MB are the park's own: the concrete (1024², 5.3
+           MB), the lawn (512², 1.3 MB), the sky (4 × 512, nothing), the trees'
+           cue, and nine 256² squares for the benches — eight cue canvases and
+           one for their green terrazzo body. The four skyline pictures, 24.2
+           MB, are the corridor window's canvases and already resident; the
+           benches' white rolls and grey legs are the Zone C benches' canvases.
+           Drawing the park's own canvases takes ~100 ms, once, at load on a
+           desktop (concrete 62 ms, lawn 37, sky under 1); a rebuild that
+           reuses them takes 3.
+
+           WHAT TO TUNE BY EYE FIRST, in this order: the sky colours (skyTop,
+           skyHorizon, skyGround — they set the whole mood, and skyGround has to
+           sit between the lawn and the city's haze), the haze (skylineHaze and
+           skylineHazeOpacity on each band; the far band should always read
+           paler than the near one), treeScale (the trees against a 5 m wall
+           and a 40 m city), and then the concrete's tone (concreteColor,
+           slabTone, jointColor — it is the largest bright surface in view, so
+           it is the one that clips first on the headset).
+
+           WATCH ON THE QUEST:
+             THE BENCHES are 104 of the 136 draw calls. You rarely see all eight
+             — frustum culling takes care of the rest — but from the middle of
+             the square you see four. The cheap lever is stripe: false on
+             terrazzo-bench (four boxes a bench, 32 calls for the eight); the
+             real one is merging each bench into one geometry per material.
+             THE SKYLINE'S OVERDRAW: twelve large blended quads, two bands deep
+             all the way round, each still about half sky after the top trim.
+             They face the centre and you are always inside the ring, so their
+             back faces are never seen: switching their material to side: front
+             would halve their 24 calls with no visible change, and is the first
+             thing to try. After that, skylineHazeOpacity2 or skylinePanelsMax2.
+             THE SKY SPHERE fills every pixel nothing opaque covers — most of the
+             upper half of both eyes out on the square. It is one unlit texture
+             lookup, drawn LAST in the opaque pass (renderOrder 1) so early depth
+             rejection skips whatever is in front of it; if it ever shows up in a
+             frame, check nothing has pushed it back up the sort.
+             THE CONCRETE CANVAS is the one build-time cost worth a thought on
+             the headset's slower CPU: textureSize 512 quarters both its drawing
+             time and its 5.3 MB.
+
            ?zoneb=debug on the URL puts you on the square's west edge facing
            east, the same convention as ?zonea=debug.
 
