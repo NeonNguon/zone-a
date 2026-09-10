@@ -39,12 +39,14 @@ const ENV_CYCLE_ENABLED = false;
 const CYCLE_ORDER = ["void", "dataspace", "cityroom"];
 
 // Ground plane size, metres square, CENTRED on the origin (so it reaches
-// ±GROUND_SIZE/2 on both axes). It must cover the whole floorplan: the binding
-// constraint is Zone B's far wall, whose outer face sits at x 28.275 (see
-// js/floorplan.js — room zoneB, cx 19.2 + w/2 9 + half a wall thickness), so
-// anything under ~56.6 leaves rooms standing on nothing. 64 clears every outer
-// wall face with ~3.7 m to spare — the margin matters because locomotion is
-// free-fly: you can rise above the open-topped rooms and see the floor's edge.
+// ±GROUND_SIZE/2 on both axes). It must cover the whole floorplan. The constraint
+// that set it — Zone B's far wall, outer face at x 28.275 — no longer exists:
+// Zone B left the building for a park (js/zone-b-park.js), and the park lays its
+// OWN ground, a concrete square in a lawn that covers everything east of the
+// building out to x 70. What still stands on this plane is the foyer and Zones A
+// and C (Zone C's outer -x face, x -22.375, is now the furthest), so 64 m is kept
+// rather than re-derived: it clears them with room to spare, and under the park
+// the lawn simply sits a few millimetres above it.
 // Was 30, which predates the rooms and only covered the central area.
 const GROUND_SIZE = 64;
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps

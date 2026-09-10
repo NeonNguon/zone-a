@@ -27,10 +27,6 @@
     <!-- Shared terminal furniture (pedestal + screen + hover + hit box),
          used by the teleport terminals and the per-zone info terminals. -->
     <script src="js/terminal-kit.js"></script>
-    <!-- Zone B teleport terminals (wall <-> floor map). AFTER zone-b-map.js
-         and transition.js: it reads their live config and triggers the
-         camera's glitch. -->
-    <script src="js/zone-b-teleport.js"></script>
     <!-- Zone B triptych sub-zone (three stacked Ticket 485496 images).
          AFTER zone-b.js: it sizes its images from the wall's live tile
          metrics and reuses its hover/focus components. -->
@@ -72,6 +68,19 @@
          re-reads on the floorplan's `floorplanbuilt` event. See
          js/rig-collision.js. -->
     <script src="js/rig-collision.js"></script>
+    <!-- Zone B park: the concrete square, lawn, kerb, sky, skyline, trees and
+         benches the lottery now stands in, plus window.ParkConfig (the square,
+         live, for anything placed on it). AFTER bench.js (the benches are
+         terrazzo-bench instances) and rig-collision.js (RigRegions — the square
+         registers its walkable ground there), BEFORE zone-b-teleport.js, whose
+         Terminal A reads the square's centre from ParkConfig. -->
+    <script src="js/zone-b-park.js"></script>
+    <!-- Zone B teleport terminals (square <-> floor map). Moved down here from
+         beside zone-b-map.js so it loads after the park; it still comes after
+         zone-b-map.js and transition.js (it reads their live config and
+         triggers the camera's glitch), and before zone-a-corridor.js, which
+         reuses its teleport-terminal. -->
+    <script src="js/zone-b-teleport.js"></script>
     <!-- Zone A V2: the chung cư corridor sub-space (the nine images' new home,
          parked 400 m out) and the booth pair that teleports you in and out.
          LAST of the scene scripts, because it needs all of these registered
@@ -221,8 +230,11 @@
       <a-entity id="environment" environment-manager="preset: void"></a-entity>
 
       <!-- ============================================================
-           FLOORPLAN — the architecture: four white-walled rooms (foyer/central
-           + one per zone) joined by low hallways. Every wall is generated at
+           FLOORPLAN — the architecture: three white-walled rooms (foyer/central,
+           Zone A and Zone C) joined by low hallways, plus one hallway that
+           leads OUT of the building — central-zoneB names only the foyer's
+           wall, and its far end is left open onto the Zone B park (see
+           #zone-b-park below). Every wall is generated at
            runtime from the component's room/hallway config — primitives only,
            no asset files (same no-asset approach as the contact cues). It
            builds NO floor: the environment preset's ground plane is the floor,
@@ -230,11 +242,11 @@
 
            Heights are per-room, and the hallways are deliberately LOWER than
            the rooms, so you duck through a passage and the space opens up:
-           foyer 5 m and Zone A 5 m; Zones B & C 10 m (their screen / image wall
-           top out at ~7.1 m / ~4.9 m); hallways 3 m, with a lintel of wall
-           carried over each doorway. Every room is ceilinged and every hallway
-           roofed, so the exhibition is a closed white interior throughout — the
-           environment preset's sky is never seen from inside.
+           foyer 5 m and Zone A 5 m; Zone C 10 m (its screen tops out at ~7.1 m);
+           hallways 3 m, with a lintel of wall carried over each doorway. Every
+           room is ceilinged and every hallway roofed, so the building is a
+           closed interior throughout — the environment preset's sky is never
+           seen from inside, and the only sky in the exhibition is the park's.
 
            A SIBLING of #environment, not a child: the walls are architecture,
            so they must PERSIST across environment switches (env teardown only
@@ -256,7 +268,7 @@
            ZONE C DARK FLOOR — a LOCAL dark inverted-terrazzo plane over just
            the Zone C footprint. The exhibition floor is ONE global 64 m ground
            plane shared by every room (js/environment.js), so it cannot be
-           darkened without darkening Zones A/B too; this lays a second, small
+           darkened without darkening the foyer and Zone A too; this lays a second, small
            near-black terrazzo plane covering only Zone C, sized LIVE from the
            floorplan's zoneC room config and re-derived on `floorplanbuilt`.
 
@@ -274,21 +286,115 @@
            inner-face to inner-face, abutting the Zone C room floor at one end and
            stopping at the foyer doorway threshold at the other. -->
       <a-entity id="zone-c-hall-floor" tinted-floor="hallway: central-zoneC"></a-entity>
-      <!-- Zone B (the lottery): soft-coral terrazzo over the room footprint AND
-           its approach hallway, matching the coral walls/ceiling. Same
-           tinted-floor component with a coral palette (body a touch deeper than
-           the walls, lighter + darker flecks for speckle). Lighting is unchanged
-           in Zone B, so the floor reads as soft coral. The hall strip abuts the
-           Zone B room floor at one end and stops at the foyer threshold at the
-           other. -->
-      <a-entity
-        id="zone-b-floor"
-        tinted-floor="room: zoneB; base: #eeaaa6; fleck1: #ffd0cc; fleck2: #db938e"
-      ></a-entity>
+      <!-- Zone B (the lottery): soft-coral terrazzo down its approach hallway,
+           matching the coral side walls and roof. Same tinted-floor component
+           with a coral palette (body a touch deeper than the walls, lighter +
+           darker flecks for speckle). Zone B has no room any more, so there is
+           no room patch: the strip runs from the foyer threshold to the
+           hallway's OPEN end at x 10.2, where the park's concrete square begins
+           (tinted-floor stops flush with the side walls there — it does not
+           overhang an end with no wall to tuck under). -->
       <a-entity
         id="zone-b-hall-floor"
         tinted-floor="hallway: central-zoneB; base: #eeaaa6; fleck1: #ffd0cc; fleck2: #db938e"
       ></a-entity>
+
+      <!-- ============================================================
+           ZONE B PARK — "The Lottery of Forgotten Dreams" outdoors. The coral
+           room is gone. You walk out of the foyer down the same coral hallway,
+           and where it ends the city opens up: a 40 × 40 m square of poured
+           concrete, a kerb, a lawn around it, and the Saigon skyline in haze a
+           long way off on every side. The image wall, its cues, info terminal
+           B, the triptych and Terminal A all stand on the square now (see
+           #zone-b and #zone-b-teleport below); the floor map is still a
+           teleport sub-space and did not move.
+
+           A SIBLING of #floorplan, not a child of #environment: it is ground
+           and scenery, so it persists across environment switches exactly as
+           the walls and the cues do. The entity sits at the world origin with
+           no transform, so everything in js/zone-b-park.js is built in world
+           coordinates.
+
+           NOTHING HERE IS TYPED IN AS A COORDINATE. The square's west edge is
+           the hallway's OPEN END (x 10.2 — the hallway now names one wall, the
+           foyer's, and floorplan.js leaves its far end open), its centre line
+           is the hallway's centre (z 0), and the lawn starts at the building's
+           furthest +x outer wall face. That face is Zone A's, x 5.675, not the
+           foyer's 5.075: Zone A is 1.2 m wider than the foyer, and a lawn laid
+           from the foyer's face would show through Zone A's floor along its +x
+           wall. It leaves a 0.6 m apron of gallery terrazzo along the outside
+           of the foyer, beside the hallway mouth. Anything else that stands on
+           the square reads it from window.ParkConfig — square() and center().
+
+           THE GROUND STACK, bottom to top: the gallery's terrazzo plane at 0,
+           the lawn at 0.003, the concrete at 0.005, the coral hallway strip at
+           0.008 and the contact cues at 0.02. The lawn is four strips laid
+           AROUND the square rather than one sheet under it, so the lawn and
+           the concrete never overlap and cannot fight; the one overlap that
+           has to hold at range, lawn over terrazzo, is within ~40 m of
+           anywhere you can stand, where 3 mm is roughly three times what the
+           Quest's depth buffer resolves.
+
+           THE KERB stands outside the square, so its inner face IS the
+           square's edge. It is a ring of four butted boxes, one mesh, lit by
+           nothing: the top and the two facings carry different baked tones so
+           the edge reads without a light. The west run stops for the hallway
+           mouth — the passage's full outer width, side walls included.
+
+           UNLIT, ALL OF IT — the corridor's rule, for the same reason. The
+           void preset's light rig is built for white rooms (a lamp per room,
+           two directionals aimed so corners read); an outdoor square that
+           depended on it would change every time that rig was retuned. So the
+           concrete, the lawn, the kerb and the sky have their tone painted in:
+           per-slab tone, a trowelled lean across each slab, saw-cut joints
+           with a lighter lip, a mottle; the lawn's patches lean yellow where
+           they are light, the way dry grass goes.
+
+           THE SKY is an inverted sphere around the square with a vertical
+           gradient: pale grey at the horizon to an overcast blue overhead,
+           most of the change high up. The scene's clear colour stays BLACK —
+           deliberately, see the void preset in js/environment.js: a render
+           hitch on the Quest shows the clear colour, and black is the one that
+           cannot flash. The sphere hides itself whenever the camera is outside
+           it, because the floor map and the corridor are both 400 m out, and a
+           250 m sphere seen from out there is a grey disc on their horizon.
+
+           WALKABLE: the concrete only. The square registers one rectangle with
+           rig-collision's RigRegions registry — the square inset by the player
+           radius on every side, x 10.45..49.95, z -19.75..19.75 at the
+           defaults — and it overlaps the hallway's own rectangle (which runs
+           to x 10.825, doorOverlap past the open end), so foyer, hallway and
+           square are one continuous floor. The lawn is scenery; you can look
+           at it, not stand on it.
+
+           ?zoneb=debug on the URL puts you on the square's west edge facing
+           east, the same convention as ?zonea=debug.
+
+           Tunables (all on park-root, all with defaults — see js/zone-b-park.js):
+             placement  hallway central-zoneB   the passage the square is laid
+                                                at the end of
+                        squareSize 40
+                        squareWest auto   the hallway's open end (x 10.2);
+                                          a number overrides it, and the kerb
+                                          then only opens for the mouth if the
+                                          hallway still reaches the edge
+                        squareZ auto      the hallway's centre (z 0)
+                        lawnWest auto     the furthest +x outer wall face
+                        lawnEast 70 / lawnHalfDepth 40
+             stack      concreteLift .005 / lawnLift .003
+             kerb       kerbHeight .12 / kerbWidth .25 / kerbColor #bdb8ae
+             concrete   slabSize 2 / slabsPerTile 7   the canvas holds 7 × 7
+                                          slabs, a 14 m repeat, which does not
+                                          divide the 40 m square
+                        concreteColor #cdc8bf / jointColor #8f897f
+                        jointWidth .015 / slabTone .045 / concreteGrain .05
+                        concreteSeed 3 / textureSize 1024
+             lawn       lawnColor #6b8a47 / lawnSpeckle 1 / lawnSeed 5
+                        lawnTile 3.7   metres per repeat, again no divisor
+                        lawnTextureSize 512
+             sky        skyRadius 250 / skyTop #9fb1be / skyHorizon #dde2e3
+           ============================================================ -->
+      <a-entity id="zone-b-park" park-root></a-entity>
 
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
@@ -880,18 +986,32 @@
       </a-entity>
 
       <!-- ============================================================
-           ZONE B — a 10×10 wall of 100 images, to the RIGHT of spawn.
-           zone-b-root offsets the WHOLE wall as a unit (same pattern/intent as
-           zone-a-root); default ~6 3 0 places it to the right (+x) and raised.
-           Tune via the zone-b-root `offset` property — not the grid math.
+           ZONE B — the wall of 100 images (5 rows × 20), standing in the
+           MIDDLE OF THE PARK SQUARE (#zone-b-park above), to the RIGHT of
+           spawn. zone-b-root offsets the WHOLE assembly as a unit (same
+           pattern/intent as zone-a-root) — wall, cues, info terminal B and the
+           triptych group all ride it. Tune via the zone-b-root `offset`
+           property — not the grid math.
+
+           offset 30.2 3 0 is the square's centre at the defaults: x = the
+           hallway's open end 10.2 + half of squareSize 40, z = the hallway's
+           centre 0 (ParkConfig.center() in the console gives the live
+           figure). y 3 raises the wall's centre; everything on the floor below
+           it counters that with a local y of -3. Change squareSize or move the
+           hallway and this has to follow by hand, the same way Zone C's offset
+           was worked out from its room.
 
            The inner container's `0 -90 0` rotation turns the wall (built FLAT
-           by image-wall, facing +z) to face -x, back toward spawn. So facing
-           -z you see Zone A; turn right 90° (face +x) and the wall is dead
-           ahead, its width spanning the view. All wall tunables (width / gap /
-           rows / cols / aspect) live on the image-wall component.
+           by image-wall, facing +z) to face -x, back toward the hallway mouth,
+           so you walk out of the passage with the wall dead ahead across the
+           square, its width spanning the view. All wall tunables (width / gap
+           / rows / cols / aspect) live on the image-wall component.
+
+           Compass, for the notes below: -z is NORTH (A-Frame's forward, the
+           way Zone A lies from the foyer). The wall runs north-south, so its
+           LEFT end as you face it is the north end.
            ============================================================ -->
-      <a-entity id="zone-b" zone-b-root="offset: 25 3 -1.2">
+      <a-entity id="zone-b" zone-b-root="offset: 30.2 3 0">
         <!-- `shuffle: true` randomizes the wall's image order per load (seed the
              optional shuffleSeed>0 for a reproducible order). Off by default =
              today's manifest order; the floor map is unaffected (it picks by

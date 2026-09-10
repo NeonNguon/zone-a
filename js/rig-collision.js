@@ -27,7 +27,10 @@
 //     both rooms it joins (past their inset edges) so the union stays
 //     continuous through every doorway — you can walk room -> hall -> room.
 // The doorway edges themselves are deliberately NOT inset: the corridor rect
-// bridging into the room is what keeps the opening passable.
+// bridging into the room is what keeps the opening passable. A hallway with ONE
+// opening (central-zoneB, which leads out of the building) gets the identical
+// rect: at its open end the same extension simply reaches past the passage onto
+// whatever registered ground lies beyond it — the Zone B park's square.
 //
 // On top of that, SUB-SPACES outside the floorplan can register their own
 // rectangles through RigRegions (see the block below this comment) — that is
