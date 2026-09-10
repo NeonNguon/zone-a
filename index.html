@@ -1213,13 +1213,19 @@
           wall-focus
         ></a-entity>
 
-        <!-- Per-tile floor contact cue under the wall's BOTTOM ROW. Lives under
-             #zone-b so it PERSISTS across environment switches (env teardown
-             only touches #environment); it reuses Zone A's cue machinery via the
-             shared ContactCue kit and retunes to each preset's ground profile.
-             Count + positions derive from the wall's live grid (#zone-b-wall).
-             Tunables: radius / opacity / softness / yoffset. -->
-        <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
+        <!-- ONE soft contact shadow along the foot of the wall's back slab —
+             was a row of twenty little round per-tile pools (wall-contact-cue),
+             which made sense when the pictures hung in the air and read as
+             twenty separate shadows once the wall stood on a slab. Sized from
+             the slab's own footprint (image-wall.footprint(): width + backMargin,
+             backDepth) plus `pad` all round, with rounded ends that fade over
+             the same distance as the sides — see slab-contact-cue in
+             js/zone-b.js. One mesh, one draw call (the old row was forty).
+             Lives under #zone-b so it PERSISTS across environment switches and
+             retunes to each preset's ground profile like every other cue.
+             Tunables: pad .4 / intensity 1.8 / softness .25 / opacity /
+             yoffset. -->
+        <a-entity slab-contact-cue="target: #zone-b-wall"></a-entity>
 
         <!-- Zone B info terminal: at the wall's SOUTH end (its right end as
              you face it; the triptych holds the north end), 1.2 m out in
@@ -1263,11 +1269,14 @@
                a second instance on the stack gives the triptych the exact
                same focus grammar (VR fly-out + web blurred overlay, one at
                a time — each instance's `focused` guard keeps them apart). -->
-          <!-- One elliptical floor cue under the stack footprint: the shared
-               spot-contact-cue (same kit + env-switch retune as every other
-               cue; it persists across environment switches because it lives
-               under #zone-b, not #environment). Width spans the stack's
-               ~1.62 m of images with margin; size/opacity BY EYE.
+          <!-- The floor cue under the stack's back slab: slab-contact-cue on
+               the stack itself (no target = this entity), the same stadium
+               shadow as the image wall's, sized from the triptych's own
+               footprint (the images' width + backMargin, backDepth) plus `pad`
+               — it replaced a 2.1 × 0.9 m oval that faded out before the
+               slab's ends. Same kit + env-switch retune as every other cue;
+               it persists across environment switches because it lives under
+               #zone-b, not #environment. Tunables: pad / intensity / softness.
                The stack sits LEFT of the info terminal as a visitor faces
                the sub-zone (group-local -x): x -3.0 keeps ~0.2 m between
                the images' edge and the terminal's hit box. -->
@@ -1276,7 +1285,7 @@
             position="-3.0 0 0"
             zone-b-triptych="wall: #zone-b-wall; imageScale: 1.5"
             wall-focus
-            spot-contact-cue="width: 2.1; depth: 0.9; opacity: 0.3"
+            slab-contact-cue
           ></a-entity>
 
           <!-- Triptych info terminal: to the stack's RIGHT as a visitor

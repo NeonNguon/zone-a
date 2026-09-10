@@ -462,6 +462,11 @@ AFRAME.registerComponent("wall-tile-hover", {
 //
 // Tunables (eyeball live via setAttribute / inspector), same as Zone A:
 //   radius / opacity / softness / yoffset  (+ color / mode fallbacks).
+//
+// NO LONGER MOUNTED. Per-tile pools were right for pictures hanging in the air;
+// since the wall stands on a back slab (image-wall backDepth), a row of twenty
+// little round shadows along its foot read as exactly that, so #zone-b uses
+// slab-contact-cue below instead. Kept for a wall hung WITHOUT a back.
 // ----------------------------------------------------------------
 AFRAME.registerComponent("wall-contact-cue", {
   schema: {
@@ -596,6 +601,167 @@ AFRAME.registerComponent("wall-contact-cue", {
     if (this.geometry) this.geometry.dispose();
     if (this.material) this.material.dispose();
     if (this.texture) this.texture.dispose();
+  },
+});
+
+// ----------------------------------------------------------------
+// slab-contact-cue — ONE soft contact shadow under a free-standing slab: the
+// image wall's back, or the triptych's. Sized from the slab's own footprint,
+// so it follows backDepth / backMargin / the wall's width without a number
+// copied here.
+//
+// THE SHAPE is a stadium, not an ellipse. A single radial pool stretched 23 m
+// long fades along the whole length — dark in the middle, gone well before the
+// wall's ends — so the quad is cut into three along its length: two end caps,
+// each as long as the shadow is half-deep, take the two halves of the shared
+// radial texture (u 0..0.5 and 0.5..1), and the middle section samples only
+// its centre column (u 0.5). The result is the same soft falloff across the
+// slab everywhere along it, with rounded ends that fade over the same metric
+// distance as the sides. Same texture, same material and the same environment
+// retune as every other cue (the ContactCue kit, js/components.js).
+//
+// ONE mesh and ONE draw call, where wall-contact-cue was twenty meshes (and,
+// the kit's material being transparent and double-sided, forty passes). This
+// one is only ever seen from above, so it draws FrontSide, in one pass.
+//
+// Placement: the footprint centre, taken from the target's local frame to the
+// world, dropped to the floor (world y = yoffset) and into this entity's frame;
+// the target's yaw relative to this entity turns the quad along the slab. So
+// the cue can sit on the slab's own entity (the triptych stack) or anywhere
+// else (#zone-b, for the wall, whose container is turned 90 degrees).
+//
+// Tunables: target (selector; empty = this entity) / pad (m the shadow reaches
+// past the footprint on every side) / opacity / intensity (multiplies the
+// profile's opacity — one long pool reads fainter than a small one) / softness
+// / yoffset (+ color / mode fallbacks).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("slab-contact-cue", {
+  schema: {
+    target: { type: "string", default: "" }, // the image-wall / zone-b-triptych entity
+    pad: { type: "number", default: 0.4 },
+    opacity: { type: "number", default: 0.3 },
+    // Tuned by eye on the pale concrete: ~0.28 opacity at the slab's face,
+    // fading to nothing `pad` beyond it.
+    intensity: { type: "number", default: 1.8 },
+    softness: { type: "number", default: 0.25 },
+    yoffset: { type: "number", default: 0.02 },
+    color: { type: "color", default: "#000000" },
+    mode: { type: "string", default: "shadow" },
+  },
+
+  init: function () {
+    this.curProfile = ContactCue.currentProfile();
+    this.texture = ContactCue.makeTexture(this.data.softness);
+    this.material = ContactCue.makeMaterial(this.data, this.texture);
+    this.material.side = THREE.FrontSide; // seen from above only: one pass
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
+    this.el.setObject3D("slabcue", this.mesh);
+    this.tune();
+
+    this.onEnvChange = (e) => {
+      this.curProfile = (e.detail && e.detail.profile) || null;
+      this.tune();
+    };
+    this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
+    // The slab changes size when its wall or triptych rebuilds, and moves with
+    // the Zone B root; all three events bubble to the scene.
+    this.onChange = () => this.layout();
+    ["imagewallbuilt", "zonebtriptychbuilt", "zonebrootchanged"].forEach((ev) =>
+      this.el.sceneEl.addEventListener(ev, this.onChange)
+    );
+    if (this.el.sceneEl.hasLoaded) this.layout();
+    else this.el.sceneEl.addEventListener("loaded", this.onChange, { once: true });
+  },
+
+  update: function (oldData) {
+    if (Object.keys(oldData).length === 0) return; // init did it
+    if (oldData.softness !== this.data.softness) {
+      const old = this.texture;
+      this.texture = ContactCue.makeTexture(this.data.softness);
+      this.material.map = this.texture;
+      this.material.needsUpdate = true;
+      old.dispose();
+    }
+    this.tune();
+    this.layout();
+  },
+
+  // The kit's retune, with the profile's opacity scaled by `intensity`.
+  tune: function () {
+    const p = this.curProfile;
+    const profile = p
+      ? Object.assign({}, p, {
+          opacity: (p.opacity != null ? p.opacity : this.data.opacity) * this.data.intensity,
+        })
+      : { opacity: this.data.opacity * this.data.intensity };
+    ContactCue.tuneMaterial(this.material, this.data, profile);
+  },
+
+  targetEl: function () {
+    return this.data.target ? document.querySelector(this.data.target) : this.el;
+  },
+
+  layout: function () {
+    const t = this.targetEl();
+    if (!t || !t.components) return;
+    const comp = [t.components["image-wall"], t.components["zone-b-triptych"]].find(
+      (c) => c && typeof c.footprint === "function"
+    );
+    const f = comp && comp.footprint();
+    if (!f) return;
+    const d = this.data;
+
+    // The stadium, flat in x/z facing +y: length along x, depth along z.
+    const hl = (f.x1 - f.x0) / 2 + d.pad; // half length
+    const hd = (f.z1 - f.z0) / 2 + d.pad; // half depth = the end caps' length
+    const core = Math.max(0, hl - hd);
+    const xs = [-hl, -core, core, hl];
+    const us = [0, 0.5, 0.5, 1];
+    const pos = [];
+    const uv = [];
+    xs.forEach((x, i) => {
+      pos.push(x, 0, -hd, x, 0, hd);
+      uv.push(us[i], 0, us[i], 1);
+    });
+    const index = [];
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2; // (x_i, -hd)
+      const b = a + 1; // (x_i, +hd)
+      const c = a + 3; // (x_i+1, +hd)
+      const e = a + 2; // (x_i+1, -hd)
+      index.push(a, b, c, a, c, e);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(index);
+    geo.computeBoundingSphere();
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = geo;
+
+    // Footprint centre: target-local -> world -> the floor -> this entity.
+    t.object3D.updateWorldMatrix(true, false);
+    this.el.object3D.updateWorldMatrix(true, false);
+    const c = new THREE.Vector3((f.x0 + f.x1) / 2, 0, (f.z0 + f.z1) / 2);
+    t.object3D.localToWorld(c);
+    c.y = d.yoffset;
+    this.el.object3D.worldToLocal(c);
+    this.mesh.position.copy(c);
+    // Turned the way the slab runs: the target's world rotation relative to ours.
+    const qe = this.el.object3D.getWorldQuaternion(new THREE.Quaternion());
+    const qt = t.object3D.getWorldQuaternion(new THREE.Quaternion());
+    this.mesh.quaternion.copy(qe.invert().multiply(qt));
+  },
+
+  remove: function () {
+    this.el.sceneEl.removeEventListener("environmentchanged", this.onEnvChange);
+    ["imagewallbuilt", "zonebtriptychbuilt", "zonebrootchanged", "loaded"].forEach((ev) =>
+      this.el.sceneEl.removeEventListener(ev, this.onChange)
+    );
+    this.el.removeObject3D("slabcue");
+    this.mesh.geometry.dispose();
+    this.material.dispose();
+    this.texture.dispose();
   },
 });
 
