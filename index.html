@@ -352,12 +352,50 @@
 
            THE SKY is an inverted sphere around the square with a vertical
            gradient: pale grey at the horizon to an overcast blue overhead,
-           most of the change high up. The scene's clear colour stays BLACK —
+           most of the change high up. Below the horizon it turns, within
+           under a degree, to a muted ground-haze green-grey: that sliver is
+           only ever seen between the foot of the skyline and the lawn's far
+           edge, and left pale it read as a white ribbon under the city. The
+           scene's clear colour stays BLACK —
            deliberately, see the void preset in js/environment.js: a render
            hitch on the Quest shows the clear colour, and black is the one that
            cannot flash. The sphere hides itself whenever the camera is outside
            it, because the floor map and the corridor are both 400 m out, and a
            250 m sphere seen from out there is a grey disc on their horizon.
+
+           THE SKYLINE rings the whole square: Saigon in haze in every
+           direction, in two depth bands — the corridor window's near and far
+           bands, turned through 360 degrees. The near band stands 130 m out
+           and 40 m tall, the far band 180 m out, 60 m tall and paler, turned
+           half a panel against the near one so their seams never line up; the
+           four pictures alternate so no two neighbours match, across the
+           ring's closing seam too. Six panels a band close each ring, with
+           neighbouring edges crossing slightly rather than leaving a slot of
+           sky.
+
+           WHY THAT TALL. The pictures are mostly sky — measured, their spires
+           reach 44-51% of the height left after SKYLINE_CROP, their rooftops
+           16-26% — so a "30 m" panel is a 13 m city, and at 130 m that sits
+           entirely under the foyer's roof as seen from the square. So the
+           empty top is trimmed off too (skylineTopTrim, the same rule as the
+           crop: the plane shortens with it, nothing squashes, and each panel
+           stops paying fill for 45% of nothing), and the bands are sized to
+           the building: from the middle of the square the foyer's roof is ~7
+           degrees up and Zone C's ~12.7, and the rooftops land around 6-7
+           degrees with the spires at 13-15. Looking west, the city stands above
+           the foyer and the hallway and Zone C's black box cuts into it;
+           looking anywhere else, it is the horizon.
+
+           The panels are the environment layer's own: skylinePanel(), the four
+           PNGs and the SKYLINE_CROP treatment, handed over by SkylineKit in
+           js/environment.js rather than copied. The HAZE is the one thing that
+           builder could not do alone — the PNGs are black, and a tint multiplies,
+           so a black city cannot go grey-blue. The corridor's window already
+           solved that by lifting each PNG into a WHITE canvas
+           (CorridorTextures.silhouette), and the ring uses those very canvases,
+           cropped through its own uv transform — so the skyline costs the park
+           no texture memory whatever. No scene fog anywhere: the distance is
+           all in the haze colour and opacity.
 
            WALKABLE: the concrete only. The square registers one rectangle with
            rig-collision's RigRegions registry — the square inset by the player
@@ -393,6 +431,23 @@
                         lawnTile 3.7   metres per repeat, again no divisor
                         lawnTextureSize 512
              sky        skyRadius 250 / skyTop #9fb1be / skyHorizon #dde2e3
+                        skyGround #9ba399   below the horizon: the strip
+                        between the skyline's foot and the lawn's edge
+             skyline    skyline true   false removes the ring
+                        skylineLift .05   the panels' bases above the ground
+                        line
+                        skylineTopTrim .45   fraction of the cropped picture
+                        taken off the top — sky only, the spires stop at 51%
+                        near band: skylineRadius 130 / skylineHeight 40 /
+                        skylineHaze #7f8b94 / skylineHazeOpacity .85 /
+                        skylinePanelsMax 16
+                        far band:  skylineRadius2 180 / skylineHeight2 60 /
+                        skylineHaze2 #a7b1b8 / skylineHazeOpacity2 .7 /
+                        skylinePanelsMax2 16
+                        Heights are VISIBLE heights (after the crop); a panel's
+                        width follows from its picture. The count per band is
+                        derived — as many as close the ring — and the max only
+                        caps it; a capped band logs the size of its gaps
            ============================================================ -->
       <a-entity id="zone-b-park" park-root></a-entity>
 

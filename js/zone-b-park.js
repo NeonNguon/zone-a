@@ -264,16 +264,27 @@ const ParkTextures = {
   // the bottom — the order SphereGeometry's v runs in, so the canvas maps onto
   // the sphere by latitude with no maths at the mesh. Above the horizon the
   // colour eases from the horizon's pale grey toward the zenith's blue (most of
-  // the change high up, the way an overcast sky holds its light low); below it,
-  // the horizon colour darkens slightly, which is what the ground haze beyond
-  // the lawn's edge reads as. 4 px wide — width buys nothing on a gradient.
-  sky: function (top, horizon, h) {
+  // the change high up, the way an overcast sky holds its light low).
+  //
+  // BELOW the horizon it turns to `ground`, and FAST — finished 0.7° under the
+  // sphere's equator. That lower band is seen in exactly one place, the thin
+  // strip between the foot of the skyline and the lawn's far edge, and it has
+  // to read as land in the haze. Left at the horizon's pale grey (measured: the
+  // same pixels with the skyline hidden and shown) it was the brightest thing
+  // in the frame and read as a white ribbon under a dark city. The turn can
+  // start right at the equator because the eye is 1.6 m above the sphere's
+  // centre: eye-level horizon lands 0.37° ABOVE the equator, so the sky you
+  // see over the city never gets any of it. The canvas has 2.8 px per degree,
+  // so the turn is a soft two pixels. 4 px wide — width buys nothing on a
+  // gradient.
+  sky: function (top, horizon, ground, h) {
     const canvas = document.createElement("canvas");
     canvas.width = 4;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
     const t0 = parkRGB(top);
     const h0 = parkRGB(horizon);
+    const g0 = parkRGB(ground);
     for (let y = 0; y < h; y++) {
       const e = 1 - (2 * (y + 0.5)) / h; // +1 zenith, 0 horizon, -1 nadir
       let c;
@@ -281,8 +292,9 @@ const ParkTextures = {
         const m = Math.pow(e, 0.55);
         c = h0.map((v, i) => v + (t0[i] - v) * m);
       } else {
-        const m = Math.min(1, -e * 4) * 0.08;
-        c = h0.map((v) => v * (1 - m));
+        const deg = -e * 90; // degrees below the sphere's equator
+        const m = Math.max(0, Math.min(1, (deg - 0.1) / 0.6));
+        c = h0.map((v, i) => v + (g0[i] - v) * m);
       }
       ctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
       ctx.fillRect(0, y, 4, 1);
@@ -415,6 +427,12 @@ function parkResolve(d, warn) {
 //   lawn       lawnColor (#6b8a47) / lawnSpeckle (1) / lawnTile (3.7)
 //              / lawnSeed (5) / lawnTextureSize (512)
 //   sky        skyRadius (250) / skyTop (#9fb1be) / skyHorizon (#dde2e3)
+//              / skyGround (#9ba399)
+//   skyline    skyline (true) / skylineLift (0.05) / skylineTopTrim (0.45)
+//              near: skylineRadius (130) / skylineHeight (40) / skylineHaze
+//              (#7f8b94) / skylineHazeOpacity (0.85) / skylinePanelsMax (16)
+//              far:  skylineRadius2 (180) / skylineHeight2 (60) / skylineHaze2
+//              (#a7b1b8) / skylineHazeOpacity2 (0.7) / skylinePanelsMax2 (16)
 // ================================================================
 AFRAME.registerComponent("park-root", {
   schema: {
@@ -455,6 +473,26 @@ AFRAME.registerComponent("park-root", {
     skyRadius: { type: "number", default: 250 },
     skyTop: { type: "color", default: "#9fb1be" },
     skyHorizon: { type: "color", default: "#dde2e3" },
+    skyGround: { type: "color", default: "#9ba399" }, // below the horizon
+    // skyline — two rings of silhouette panels around the square's centre.
+    // Heights are the VISIBLE (cropped) height; width follows from the picture.
+    skyline: { type: "boolean", default: true },
+    skylineLift: { type: "number", default: 0.05 },
+    // Fraction of the picture (what SKYLINE_CROP leaves of it) trimmed off the
+    // TOP. Measured: the four PNGs' tallest spires reach 44-51% of that height,
+    // and everything above is empty — so 0.45 drops only sky, and with it about
+    // half of every panel's transparent overdraw.
+    skylineTopTrim: { type: "number", default: 0.45 },
+    skylineRadius: { type: "number", default: 130 }, // near band
+    skylineHeight: { type: "number", default: 40 },
+    skylineHaze: { type: "color", default: "#7f8b94" },
+    skylineHazeOpacity: { type: "number", default: 0.85 },
+    skylinePanelsMax: { type: "int", default: 16 },
+    skylineRadius2: { type: "number", default: 180 }, // far band
+    skylineHeight2: { type: "number", default: 60 },
+    skylineHaze2: { type: "color", default: "#a7b1b8" },
+    skylineHazeOpacity2: { type: "number", default: 0.7 },
+    skylinePanelsMax2: { type: "int", default: 16 },
   },
 
   init: function () {
@@ -470,6 +508,9 @@ AFRAME.registerComponent("park-root", {
     this.el.setObject3D("far", this.far);
     this._cam = new THREE.Vector3();
     this.built = false;
+    this.skylineEl = null; // the ring's container entity (panels are a-planes)
+    this.skylineToken = 0; // invalidates a previous build's pending attaches
+    this.skylineCrops = {}; // src -> the cropped clone every panel of it shares
 
     // The square's position is derived from the floorplan, so a floorplan
     // rebuild means a park rebuild. The collider re-reads its sources on the
@@ -674,8 +715,8 @@ AFRAME.registerComponent("park-root", {
 
     // --- THE SKY
     const skyTex = this.canvasTexture(
-      "sky", [d.skyTop, d.skyHorizon].join("|"),
-      () => ParkTextures.sky(d.skyTop, d.skyHorizon, 512), false
+      "sky", [d.skyTop, d.skyHorizon, d.skyGround].join("|"),
+      () => ParkTextures.sky(d.skyTop, d.skyHorizon, d.skyGround, 512), false
     );
     const skyGeo = new THREE.SphereGeometry(d.skyRadius, 32, 16);
     skyGeo.translate(s.cx, 0, s.cz);
@@ -688,6 +729,9 @@ AFRAME.registerComponent("park-root", {
     sky.renderOrder = 1;
     this.skyCenter = new THREE.Vector3(s.cx, 0, s.cz);
 
+    // --- THE SKYLINE
+    this.buildSkyline(s);
+
     this.built = true;
     console.log(
       `[park] square x ${s.x0.toFixed(3)}..${s.x1.toFixed(3)} z ${s.z0.toFixed(2)}..${s.z1.toFixed(2)}` +
@@ -697,7 +741,183 @@ AFRAME.registerComponent("park-root", {
     this.el.emit("zonebparkchanged");
   },
 
-  // The sky (and everything else in `far`) only when the camera is inside it.
+  // ---------------------------------------------------------------
+  // THE SKYLINE — Saigon in haze all the way round the square: a full ring of
+  // silhouette panels in two depth bands, the corridor window's near/far idea
+  // turned through 360 degrees.
+  //
+  // THE PANELS ARE THE ENVIRONMENT LAYER'S. SkylineKit (js/environment.js)
+  // hands over skylinePanel(), the four pictures and SKYLINE_CROP, so each
+  // panel is the same a-plane the skyline preset builds, cropped the same way:
+  // the black foreground band cut off the bottom and the plane shortened by the
+  // same fraction, smooth alpha (alphaTest 0), no depth write.
+  //
+  // PLUS A TOP TRIM, by the same rule. The pictures are mostly sky: measured,
+  // the spires reach 44-51% of the cropped height and the rooftops (the height
+  // at which a fifth of the columns are still building) 16-26%. skylineTopTrim
+  // takes the empty top off and shortens the plane to match, so the city keeps
+  // its proportions and a panel stops paying fill for 45% of nothing.
+  //
+  // WHY THE BANDS ARE THIS TALL: they have to read above the building from the
+  // square. Seen from its centre, the foyer's roof is ~7 degrees up and Zone
+  // C's ~12.7. At 40 m (near) and 60 m (far) the spires land around 13 and 15
+  // degrees and the rooftops around 6 and 7 — so the city stands above the
+  // roofline, and Zone C, the tallest box, cuts into it rather than hiding it.
+  // (30 m panels put the whole city under the foyer's roof: most of every
+  // panel is sky.)
+  //
+  // THE HAZE NEEDS A WHITE PICTURE. The PNGs are black-on-transparent, and a
+  // tint multiplies, so a black silhouette cannot be pushed toward grey-blue —
+  // the corridor hit exactly this. Its answer, CorridorTextures.silhouette, lifts
+  // each PNG into a canvas filled white through its own alpha, and this ring
+  // uses THOSE canvases rather than lifting its own: the same four pictures, so
+  // the park adds no texture memory for them at all. Each band crops through
+  // its own uv transform, which means a CLONE per picture (sharing the canvas
+  // and the GPU storage) — and a clone only once the picture has arrived; see
+  // the READY note on silhouette(). Until then a panel stays hidden, since a
+  // mapless haze-coloured plane is a solid grey rectangle. If the corridor's
+  // file is ever not loaded, the ring falls back to the black PNGs, untinted.
+  //
+  // HOW MANY PANELS: as many as it takes to close the ring. A flat panel of
+  // width w facing the centre from radius R covers 2·atan(w / 2R) of arc, so a
+  // band needs ceil(π / atan(w / 2R)) of them — 6 each at the defaults, with
+  // the neighbours' edges crossing slightly rather than leaving a slot of sky.
+  // skylinePanelsMax caps it; a capped band leaves gaps, which the build log
+  // reports in metres. The far band is turned half a panel against the near one
+  // so their seams never line up, and the pictures alternate so no two
+  // neighbours match — including across the ring's closing seam.
+  //
+  // Everything stands inside the sky sphere — the far band's top corners, the
+  // furthest point of the ring, are ~230 m from the centre against its 250 —
+  // and nothing comes within 200 m of the 400 m teleport sub-spaces. The ring
+  // hides with the sky whenever the camera is outside the sphere. The build log
+  // prints each band's farthest point, and warns if one ever pokes through.
+  // ---------------------------------------------------------------
+  buildSkyline: function (s) {
+    const d = this.data;
+    const token = ++this.skylineToken;
+    if (this.skylineEl && this.skylineEl.parentNode) {
+      this.skylineEl.parentNode.removeChild(this.skylineEl);
+    }
+    this.skylineEl = null;
+    this.skylineInfo = [];
+    Object.keys(this.skylineCrops).forEach((k) => this.skylineCrops[k].dispose());
+    this.skylineCrops = {};
+    const kit = window.SkylineKit;
+    if (!d.skyline) return;
+    if (!kit) {
+      console.warn("[park] no SkylineKit (js/environment.js); no skyline");
+      return;
+    }
+    const lifter = typeof CorridorTextures !== "undefined" ? CorridorTextures : null;
+    if (!lifter) console.warn("[park] no CorridorTextures; skyline stays black, untinted");
+
+    const root = document.createElement("a-entity");
+    root.setAttribute("data-park", "skyline");
+    this.el.appendChild(root);
+    this.skylineEl = root;
+
+    // The texture window: from SKYLINE_CROP up, minus the top trim.
+    const keep = (1 - kit.crop) * (1 - d.skylineTopTrim);
+    // One cropped clone per picture, shared by every panel showing it.
+    const cropped = (src) => {
+      const base = lifter.silhouette(src);
+      return base.userData.ready.then(() => {
+        if (token !== this.skylineToken) return null;
+        if (!this.skylineCrops[src]) {
+          const t = base.clone();
+          t.repeat.set(1, keep);
+          t.offset.set(0, kit.crop);
+          this.skylineCrops[src] = t;
+        }
+        return this.skylineCrops[src];
+      });
+    };
+
+    const band = (label, R, h, haze, opacity, max, phase, first, order) => {
+      const w = (h / keep) * kit.aspect;
+      const need = Math.ceil(Math.PI / Math.atan(w / (2 * R)));
+      const n = Math.max(3, Math.min(max, need));
+      // Alternate the four pictures; if the ring's closing seam would put the
+      // same one either side of it, the last panel takes one that is neither.
+      const pics = [];
+      for (let i = 0; i < n; i++) pics.push((first + i) % kit.srcs.length);
+      if (pics[n - 1] === pics[0]) {
+        for (let k = 0; k < kit.srcs.length; k++) {
+          if (k !== pics[0] && k !== pics[n - 2]) {
+            pics[n - 1] = k;
+            break;
+          }
+        }
+      }
+      for (let i = 0; i < n; i++) {
+        const deg = (360 / n) * (i + phase);
+        const t = THREE.MathUtils.degToRad(deg);
+        const src = kit.srcs[pics[i]];
+        const panel = kit.panel(lifter ? "" : src, w, h, {
+          repeat: "1 " + keep,
+          offset: "0 " + kit.crop,
+          alphaTest: 0,
+          depthWrite: false,
+          color: lifter ? haze : null,
+          opacity: lifter ? opacity : null,
+        });
+        // Base on the ground line (+ lift), facing the square's centre.
+        panel.setAttribute(
+          "position",
+          `${(s.cx + R * Math.sin(t)).toFixed(3)} ${(h / 2 + d.skylineLift).toFixed(3)} ` +
+            `${(s.cz - R * Math.cos(t)).toFixed(3)}`
+        );
+        panel.setAttribute("rotation", `0 ${(-deg).toFixed(3)} 0`);
+        if (lifter) panel.setAttribute("visible", false);
+        root.appendChild(panel);
+        const onLoaded = () => {
+          const mesh = panel.getObject3D("mesh");
+          if (!mesh) return;
+          // Far band first, then near, then every other transparent thing
+          // (the cues on the ground are all nearer).
+          mesh.renderOrder = order;
+          if (!lifter) return;
+          cropped(src).then((tex) => {
+            if (!tex || token !== this.skylineToken) return;
+            mesh.material.map = tex;
+            mesh.material.needsUpdate = true;
+            panel.setAttribute("visible", true);
+          });
+        };
+        if (panel.hasLoaded) onLoaded();
+        else panel.addEventListener("loaded", onLoaded, { once: true });
+      }
+      const cover = 2 * THREE.MathUtils.radToDeg(Math.atan(w / (2 * R)));
+      const gap = Math.max(0, 2 * R * Math.tan(Math.PI / n) - w);
+      // The ring's farthest point: a panel's top corner.
+      const reach = Math.sqrt(R * R + (w / 2) * (w / 2) + (h + d.skylineLift) * (h + d.skylineLift));
+      this.skylineInfo.push({
+        band: label, radius: R, height: h, panelWidth: +w.toFixed(1),
+        panels: n, needed: need, degEach: +cover.toFixed(1), gapM: +gap.toFixed(1),
+        reach: +reach.toFixed(1),
+      });
+    };
+    band("far", d.skylineRadius2, d.skylineHeight2, d.skylineHaze2,
+      d.skylineHazeOpacity2, d.skylinePanelsMax2, 0.5, 2, -2);
+    band("near", d.skylineRadius, d.skylineHeight, d.skylineHaze,
+      d.skylineHazeOpacity, d.skylinePanelsMax, 0, 0, -1);
+    console.log(
+      "[park] skyline " + this.skylineInfo.map((b) =>
+        `${b.band} ${b.panels} × ${b.panelWidth} m at ${b.radius} m, reaching ${b.reach} m` +
+          (b.gapM > 0 ? ` (GAPS of ${b.gapM} m — raise skylinePanelsMax)` : "")
+      ).join(", ")
+    );
+    this.skylineInfo.forEach((b) => {
+      if (b.reach >= d.skyRadius) {
+        console.warn(`[park] the ${b.band} skyline band reaches ${b.reach} m, ` +
+          `through the ${d.skyRadius} m sky — lower its height or radius`);
+      }
+    });
+  },
+
+  // The sky, the skyline and anything else far off, only while the camera is
+  // inside the sky sphere.
   tick: function () {
     if (!this.built) return;
     const cam = this.el.sceneEl.camera;
@@ -705,7 +925,10 @@ AFRAME.registerComponent("park-root", {
     cam.getWorldPosition(this._cam);
     const r = this.data.skyRadius * 0.98;
     const inside = this._cam.distanceToSquared(this.skyCenter) < r * r;
-    if (this.far.visible !== inside) this.far.visible = inside;
+    if (this.far.visible !== inside) {
+      this.far.visible = inside;
+      if (this.skylineEl) this.skylineEl.object3D.visible = inside;
+    }
   },
 
   remove: function () {
@@ -715,6 +938,13 @@ AFRAME.registerComponent("park-root", {
     this.teardownMeshes();
     Object.keys(this.canvasTex).forEach((k) => this.canvasTex[k].tex.dispose());
     this.canvasTex = {};
+    this.skylineToken++;
+    if (this.skylineEl && this.skylineEl.parentNode) {
+      this.skylineEl.parentNode.removeChild(this.skylineEl);
+    }
+    // The clones only: their canvases belong to CorridorTextures' cache.
+    Object.keys(this.skylineCrops).forEach((k) => this.skylineCrops[k].dispose());
+    this.skylineCrops = {};
     this.el.removeObject3D("ground");
     this.el.removeObject3D("far");
     if (ParkConfig.component === this) ParkConfig.component = null;
