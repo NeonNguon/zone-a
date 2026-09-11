@@ -2637,6 +2637,18 @@ const CorridorTextures = {
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     this.cache.set(key, tex);
     this.timings[key] = 0;
+    // READY resolves once the real picture is in the canvas and the placeholder
+    // storage has been dropped. The Zone B park rings its square with these same
+    // canvases (js/zone-b-park.js), cropped through its own uv transform — so it
+    // CLONES the texture, and a clone must not exist before this point: if the
+    // clone reached the GPU at 4x4 too, its reference would keep that immutable
+    // storage alive past the dispose() below, and the re-upload would fail for
+    // both of them. Sharing rather than lifting its own copies saves the park
+    // the 18 MB these four pictures cost.
+    let ready;
+    tex.userData.ready = new Promise((resolve) => {
+      ready = resolve;
+    });
     const img = new Image();
     img.onload = () => {
       c.width = img.width;
@@ -2649,6 +2661,7 @@ const CorridorTextures = {
       ctx.globalCompositeOperation = "source-over";
       tex.dispose(); // see the note above: the placeholder's storage is immutable
       tex.needsUpdate = true;
+      ready(tex);
     };
     img.onerror = () => {
       console.warn("[corridor] skyline image failed to load: " + src);

@@ -59,7 +59,46 @@ AFRAME.registerComponent("zone-b-root", {
 //            FILE ID (dataset.file), not by wall grid index.
 //   shuffleSeed — 0 = fresh random each load; >0 = seeded, reproducible order
 //            (a small deterministic PRNG, not Math.random). Debug aid; optional.
+//   backDepth / backColor / backMargin — THE BACK: a plain slab behind the
+//            tiles, from the floor to backMargin above the top row and
+//            backMargin past each end. The wall stands free on the square of
+//            the Zone B park now, so it is seen from behind, and a-image is
+//            double-sided: without a back the 100 pictures show MIRRORED from
+//            there. Unlit like the tiles, with a baked tone per face so its
+//            edges read. backDepth 0 removes it.
 // ----------------------------------------------------------------
+
+// How far behind the tile plane the back slab's front face stands: behind the
+// hover frame (wall-tile-hover, 1 cm), so a hovered tile's frame stays in front.
+const WALL_BACK_GAP = 0.02;
+
+// A plain slab standing behind a set of hung pictures, in the pictures' OWN
+// frame (they face +z from z 0): `width` wide, `bottom` to `top`, `depth` deep,
+// its front face WALL_BACK_GAP behind the picture plane. Unlit like the
+// a-image pictures, with a baked tone per face in vertex colours — ends darker
+// than the faces, the top lightest — so its edges read without a light. Shared
+// by image-wall and the triptych (js/zone-b-triptych.js), so the two walls
+// standing on the park's square are one construction.
+function wallBackMesh(width, bottom, top, depth, color) {
+  const geo = new THREE.BoxGeometry(width, top - bottom, depth);
+  geo.translate(0, (top + bottom) / 2, -WALL_BACK_GAP - depth / 2);
+  // BoxGeometry's faces, 4 vertices each: +x -x +y -y +z(front) -z(back).
+  const tones = [0.82, 0.82, 1.0, 0.6, 0.96, 0.9];
+  const cols = [];
+  tones.forEach((k) => {
+    for (let v = 0; v < 4; v++) cols.push(k, k, k);
+  });
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+  const mat = new THREE.MeshBasicMaterial({ color: color, vertexColors: true });
+  return new THREE.Mesh(geo, mat);
+}
+
+// World floor (y 0) in `el`'s local frame — where a back slab has to reach
+// down to when its pictures hang off a raised root.
+function wallBackFloor(el) {
+  el.object3D.updateWorldMatrix(true, false);
+  return el.object3D.worldToLocal(new THREE.Vector3(0, 0, 0)).y;
+}
 
 // Small deterministic PRNG (mulberry32) for seeded, reproducible shuffles.
 // Only used when shuffleSeed > 0; the default (seed 0) path uses Math.random.
@@ -84,12 +123,25 @@ AFRAME.registerComponent("image-wall", {
     basePath: { type: "string", default: "web4map-512/" }, // prefix for tile URLs
     shuffle: { type: "boolean", default: false }, // randomize order per load
     shuffleSeed: { type: "number", default: 0 }, // 0 = fresh random; >0 = seeded
+    backDepth: { type: "number", default: 0.3 }, // m; 0 = no back slab
+    backColor: { type: "color", default: "#e6e2da" },
+    backMargin: { type: "number", default: 0.25 }, // m past the tiles, ends + top
   },
 
   init: function () {
     this.tiles = []; // a-image elements this component created
     this.entries = null; // manifest entries { file, title }, in MANIFEST order
     this.displayEntries = null; // the order build() lays out from (maybe shuffled)
+    this.back = null; // the back slab mesh, if any
+
+    // The back reaches down to the FLOOR, which in this frame depends on how
+    // high the root raises the wall — so it re-derives when the root moves.
+    this.onRootMoved = () => {
+      if (this.tiles.length) this.buildBack();
+    };
+    if (this.el.parentNode) {
+      this.el.parentNode.addEventListener("zonebrootchanged", this.onRootMoved);
+    }
 
     // Fetch the manifest once, then build. update() re-lays-out on later prop
     // tweaks (it no-ops until this resolves). The manifest is an array of
@@ -178,6 +230,72 @@ AFRAME.registerComponent("image-wall", {
     return 22.46;
   },
 
+  // The wall's size from its DATA alone — no manifest needed — so anything that
+  // has to know how big the wall is can ask before a single tile exists: the
+  // Zone B park cuts the wall's footprint out of the square's walkable ground
+  // (js/zone-b-park.js), and rig-collision can rebuild long before the manifest
+  // fetch resolves. build() lays the tiles out from exactly these numbers.
+  //
+  // Cell / tile geometry. `gap` is a fraction of the horizontal cell; the same
+  // ABSOLUTE gap is reused vertically so spacing reads evenly while the tiles
+  // keep their aspect. Height derives from all of this.
+  metrics: function () {
+    const d = this.data;
+    const width = this.resolveWidth();
+    const cellW = width / d.cols;
+    const gapAbs = d.gap * cellW;
+    const tileW = cellW - gapAbs;
+    const tileH = tileW / d.aspect;
+    const cellH = tileH + gapAbs;
+    return {
+      width: width, cellW: cellW, gapAbs: gapAbs,
+      tileW: tileW, tileH: tileH, cellH: cellH, height: d.rows * cellH,
+    };
+  },
+
+  // What the wall occupies on the floor, in its OWN local frame (x along its
+  // width, +z the way the tiles face), for a collider: the tile plane at z 0,
+  // and behind it either the back slab or, with no back, the hover frame 1 cm
+  // behind the tiles.
+  footprint: function () {
+    const m = this.metrics();
+    const d = this.data;
+    if (d.backDepth > 0) {
+      return {
+        x0: -m.width / 2 - d.backMargin, x1: m.width / 2 + d.backMargin,
+        z0: -WALL_BACK_GAP - d.backDepth, z1: 0,
+      };
+    }
+    return { x0: -m.width / 2, x1: m.width / 2, z0: -0.01, z1: 0 };
+  },
+
+  // THE BACK: one box behind the tiles, its front face WALL_BACK_GAP behind the
+  // tile plane — behind the hover frame (1 cm) so a hovered tile's black frame
+  // still draws in front of it — and its foot on the world floor. It shows
+  // between the tiles as a pale mat around each picture, and from behind as a
+  // plain wall. Unlit (MeshBasic, like the a-image tiles), so each face carries
+  // a baked tone in vertex colours: ends darker than the faces, the top
+  // lightest, which is what makes its edges read on the square.
+  buildBack: function (m) {
+    if (this.back) {
+      this.el.removeObject3D("back");
+      this.back.geometry.dispose();
+      this.back.material.dispose();
+      this.back = null;
+    }
+    const d = this.data;
+    if (!(d.backDepth > 0)) return;
+    m = m || this.metrics();
+    this.back = wallBackMesh(
+      m.width + 2 * d.backMargin,
+      Math.min(wallBackFloor(this.el), -m.height / 2),
+      m.height / 2 + d.backMargin,
+      d.backDepth,
+      d.backColor
+    );
+    this.el.setObject3D("back", this.back);
+  },
+
   build: function () {
     // Clear tiles from any previous build (supports live re-layout).
     this.tiles.forEach((t) => t.parentNode && t.parentNode.removeChild(t));
@@ -187,17 +305,14 @@ AFRAME.registerComponent("image-wall", {
     const rows = d.rows;
     const cols = d.cols;
     const slots = rows * cols;
-    const width = this.resolveWidth();
-
-    // Cell / tile geometry. `gap` is a fraction of the horizontal cell; the
-    // same ABSOLUTE gap is reused vertically so spacing reads evenly while the
-    // tiles keep their 4:3 aspect. Height derives from all of this.
-    const cellW = width / cols;
-    const gapAbs = d.gap * cellW;
-    const tileW = cellW - gapAbs;
-    const tileH = tileW / d.aspect;
-    const cellH = tileH + gapAbs;
-    const height = rows * cellH;
+    const m = this.metrics();
+    const width = m.width;
+    const cellW = m.cellW;
+    const gapAbs = m.gapAbs;
+    const tileW = m.tileW;
+    const tileH = m.tileH;
+    const cellH = m.cellH;
+    const height = m.height;
 
     // Expose the computed tile geometry for other Zone B furniture: the
     // triptych (zone-b-triptych.js) sizes its images from these, so the wall
@@ -256,6 +371,8 @@ AFRAME.registerComponent("image-wall", {
         `tile ${tileW.toFixed(2)}×${tileH.toFixed(2)} m, gap ${gapAbs.toFixed(3)} m.`
     );
 
+    this.buildBack(m);
+
     // Tell Zone B's contact cues the wall (re)built, so their count + positions
     // follow the current grid without hardcoding cols or wall height.
     this.el.emit("imagewallbuilt", { cols: cols, rows: rows });
@@ -264,6 +381,15 @@ AFRAME.registerComponent("image-wall", {
   remove: function () {
     this.tiles.forEach((t) => t.parentNode && t.parentNode.removeChild(t));
     this.tiles = [];
+    if (this.el.parentNode) {
+      this.el.parentNode.removeEventListener("zonebrootchanged", this.onRootMoved);
+    }
+    if (this.back) {
+      this.el.removeObject3D("back");
+      this.back.geometry.dispose();
+      this.back.material.dispose();
+      this.back = null;
+    }
   },
 });
 
@@ -336,6 +462,11 @@ AFRAME.registerComponent("wall-tile-hover", {
 //
 // Tunables (eyeball live via setAttribute / inspector), same as Zone A:
 //   radius / opacity / softness / yoffset  (+ color / mode fallbacks).
+//
+// NO LONGER MOUNTED. Per-tile pools were right for pictures hanging in the air;
+// since the wall stands on a back slab (image-wall backDepth), a row of twenty
+// little round shadows along its foot read as exactly that, so #zone-b uses
+// slab-contact-cue below instead. Kept for a wall hung WITHOUT a back.
 // ----------------------------------------------------------------
 AFRAME.registerComponent("wall-contact-cue", {
   schema: {
@@ -470,6 +601,167 @@ AFRAME.registerComponent("wall-contact-cue", {
     if (this.geometry) this.geometry.dispose();
     if (this.material) this.material.dispose();
     if (this.texture) this.texture.dispose();
+  },
+});
+
+// ----------------------------------------------------------------
+// slab-contact-cue — ONE soft contact shadow under a free-standing slab: the
+// image wall's back, or the triptych's. Sized from the slab's own footprint,
+// so it follows backDepth / backMargin / the wall's width without a number
+// copied here.
+//
+// THE SHAPE is a stadium, not an ellipse. A single radial pool stretched 23 m
+// long fades along the whole length — dark in the middle, gone well before the
+// wall's ends — so the quad is cut into three along its length: two end caps,
+// each as long as the shadow is half-deep, take the two halves of the shared
+// radial texture (u 0..0.5 and 0.5..1), and the middle section samples only
+// its centre column (u 0.5). The result is the same soft falloff across the
+// slab everywhere along it, with rounded ends that fade over the same metric
+// distance as the sides. Same texture, same material and the same environment
+// retune as every other cue (the ContactCue kit, js/components.js).
+//
+// ONE mesh and ONE draw call, where wall-contact-cue was twenty meshes (and,
+// the kit's material being transparent and double-sided, forty passes). This
+// one is only ever seen from above, so it draws FrontSide, in one pass.
+//
+// Placement: the footprint centre, taken from the target's local frame to the
+// world, dropped to the floor (world y = yoffset) and into this entity's frame;
+// the target's yaw relative to this entity turns the quad along the slab. So
+// the cue can sit on the slab's own entity (the triptych stack) or anywhere
+// else (#zone-b, for the wall, whose container is turned 90 degrees).
+//
+// Tunables: target (selector; empty = this entity) / pad (m the shadow reaches
+// past the footprint on every side) / opacity / intensity (multiplies the
+// profile's opacity — one long pool reads fainter than a small one) / softness
+// / yoffset (+ color / mode fallbacks).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("slab-contact-cue", {
+  schema: {
+    target: { type: "string", default: "" }, // the image-wall / zone-b-triptych entity
+    pad: { type: "number", default: 0.4 },
+    opacity: { type: "number", default: 0.3 },
+    // Tuned by eye on the pale concrete: ~0.28 opacity at the slab's face,
+    // fading to nothing `pad` beyond it.
+    intensity: { type: "number", default: 1.8 },
+    softness: { type: "number", default: 0.25 },
+    yoffset: { type: "number", default: 0.02 },
+    color: { type: "color", default: "#000000" },
+    mode: { type: "string", default: "shadow" },
+  },
+
+  init: function () {
+    this.curProfile = ContactCue.currentProfile();
+    this.texture = ContactCue.makeTexture(this.data.softness);
+    this.material = ContactCue.makeMaterial(this.data, this.texture);
+    this.material.side = THREE.FrontSide; // seen from above only: one pass
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
+    this.el.setObject3D("slabcue", this.mesh);
+    this.tune();
+
+    this.onEnvChange = (e) => {
+      this.curProfile = (e.detail && e.detail.profile) || null;
+      this.tune();
+    };
+    this.el.sceneEl.addEventListener("environmentchanged", this.onEnvChange);
+    // The slab changes size when its wall or triptych rebuilds, and moves with
+    // the Zone B root; all three events bubble to the scene.
+    this.onChange = () => this.layout();
+    ["imagewallbuilt", "zonebtriptychbuilt", "zonebrootchanged"].forEach((ev) =>
+      this.el.sceneEl.addEventListener(ev, this.onChange)
+    );
+    if (this.el.sceneEl.hasLoaded) this.layout();
+    else this.el.sceneEl.addEventListener("loaded", this.onChange, { once: true });
+  },
+
+  update: function (oldData) {
+    if (Object.keys(oldData).length === 0) return; // init did it
+    if (oldData.softness !== this.data.softness) {
+      const old = this.texture;
+      this.texture = ContactCue.makeTexture(this.data.softness);
+      this.material.map = this.texture;
+      this.material.needsUpdate = true;
+      old.dispose();
+    }
+    this.tune();
+    this.layout();
+  },
+
+  // The kit's retune, with the profile's opacity scaled by `intensity`.
+  tune: function () {
+    const p = this.curProfile;
+    const profile = p
+      ? Object.assign({}, p, {
+          opacity: (p.opacity != null ? p.opacity : this.data.opacity) * this.data.intensity,
+        })
+      : { opacity: this.data.opacity * this.data.intensity };
+    ContactCue.tuneMaterial(this.material, this.data, profile);
+  },
+
+  targetEl: function () {
+    return this.data.target ? document.querySelector(this.data.target) : this.el;
+  },
+
+  layout: function () {
+    const t = this.targetEl();
+    if (!t || !t.components) return;
+    const comp = [t.components["image-wall"], t.components["zone-b-triptych"]].find(
+      (c) => c && typeof c.footprint === "function"
+    );
+    const f = comp && comp.footprint();
+    if (!f) return;
+    const d = this.data;
+
+    // The stadium, flat in x/z facing +y: length along x, depth along z.
+    const hl = (f.x1 - f.x0) / 2 + d.pad; // half length
+    const hd = (f.z1 - f.z0) / 2 + d.pad; // half depth = the end caps' length
+    const core = Math.max(0, hl - hd);
+    const xs = [-hl, -core, core, hl];
+    const us = [0, 0.5, 0.5, 1];
+    const pos = [];
+    const uv = [];
+    xs.forEach((x, i) => {
+      pos.push(x, 0, -hd, x, 0, hd);
+      uv.push(us[i], 0, us[i], 1);
+    });
+    const index = [];
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2; // (x_i, -hd)
+      const b = a + 1; // (x_i, +hd)
+      const c = a + 3; // (x_i+1, +hd)
+      const e = a + 2; // (x_i+1, -hd)
+      index.push(a, b, c, a, c, e);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(index);
+    geo.computeBoundingSphere();
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = geo;
+
+    // Footprint centre: target-local -> world -> the floor -> this entity.
+    t.object3D.updateWorldMatrix(true, false);
+    this.el.object3D.updateWorldMatrix(true, false);
+    const c = new THREE.Vector3((f.x0 + f.x1) / 2, 0, (f.z0 + f.z1) / 2);
+    t.object3D.localToWorld(c);
+    c.y = d.yoffset;
+    this.el.object3D.worldToLocal(c);
+    this.mesh.position.copy(c);
+    // Turned the way the slab runs: the target's world rotation relative to ours.
+    const qe = this.el.object3D.getWorldQuaternion(new THREE.Quaternion());
+    const qt = t.object3D.getWorldQuaternion(new THREE.Quaternion());
+    this.mesh.quaternion.copy(qe.invert().multiply(qt));
+  },
+
+  remove: function () {
+    this.el.sceneEl.removeEventListener("environmentchanged", this.onEnvChange);
+    ["imagewallbuilt", "zonebtriptychbuilt", "zonebrootchanged", "loaded"].forEach((ev) =>
+      this.el.sceneEl.removeEventListener(ev, this.onChange)
+    );
+    this.el.removeObject3D("slabcue");
+    this.mesh.geometry.dispose();
+    this.material.dispose();
+    this.texture.dispose();
   },
 });
 

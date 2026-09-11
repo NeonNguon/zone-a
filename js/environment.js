@@ -39,12 +39,14 @@ const ENV_CYCLE_ENABLED = false;
 const CYCLE_ORDER = ["void", "dataspace", "cityroom"];
 
 // Ground plane size, metres square, CENTRED on the origin (so it reaches
-// ±GROUND_SIZE/2 on both axes). It must cover the whole floorplan: the binding
-// constraint is Zone B's far wall, whose outer face sits at x 28.275 (see
-// js/floorplan.js — room zoneB, cx 19.2 + w/2 9 + half a wall thickness), so
-// anything under ~56.6 leaves rooms standing on nothing. 64 clears every outer
-// wall face with ~3.7 m to spare — the margin matters because locomotion is
-// free-fly: you can rise above the open-topped rooms and see the floor's edge.
+// ±GROUND_SIZE/2 on both axes). It must cover the whole floorplan. The constraint
+// that set it — Zone B's far wall, outer face at x 28.275 — no longer exists:
+// Zone B left the building for a park (js/zone-b-park.js), and the park lays its
+// OWN ground, a concrete square in a lawn that covers everything east of the
+// building out to x 70. What still stands on this plane is the foyer and Zones A
+// and C (Zone C's outer -x face, x -22.375, is now the furthest), so 64 m is kept
+// rather than re-derived: it clears them with room to spare, and under the park
+// the lawn simply sits a few millimetres above it.
 // Was 30, which predates the rooms and only covered the central area.
 const GROUND_SIZE = 64;
 const PARTICLE_COUNT = 1500; // THREE.Points count — tune for density/fps
@@ -563,6 +565,12 @@ function setFog(scene, opts) {
 //   alphaTest  (default 0.5) — 0 = smooth alpha BLEND (no cutout sparkle)
 //   depthWrite (default true) — false avoids transparent depth artefacts
 //   repeat/offset (default "1 1" / "0 0") — texture crop window
+//   color / opacity (default unset) — a tint and a strength. The PNGs are black,
+//     and black times any tint is black, so these only mean something to a
+//     caller that supplies a WHITE silhouette as the map itself — which is what
+//     an empty `src` is for: the plane is built with no map, and the caller
+//     attaches one (the Zone B park does, see js/zone-b-park.js). Every preset
+//     here passes a src and neither option, and gets the identical material.
 function skylinePanel(src, w, h, opts) {
   opts = opts || {};
   const alphaTest = opts.alphaTest == null ? 0.5 : opts.alphaTest;
@@ -573,14 +581,27 @@ function skylinePanel(src, w, h, opts) {
     width: w,
     height: h,
     material:
-      "src: " + src +
-      "; shader: flat; transparent: true; side: double" +
+      (src ? "src: " + src + "; " : "") +
+      "shader: flat; transparent: true; side: double" +
       "; alphaTest: " + alphaTest +
       "; depthWrite: " + depthWrite +
       "; repeat: " + repeat +
-      "; offset: " + offset,
+      "; offset: " + offset +
+      (opts.color ? "; color: " + opts.color : "") +
+      (opts.opacity != null ? "; opacity: " + opts.opacity : ""),
   });
 }
+
+// The skyline kit, for scenery that lives OUTSIDE the environment layer. The
+// Zone B park rings its square with these same panels in two depth bands, so it
+// takes the builder, the four pictures and the crop from here rather than
+// keeping a second copy of any of them. Read-only: nothing writes to it.
+window.SkylineKit = {
+  panel: skylinePanel,
+  srcs: SAIGON_SRCS,
+  aspect: SKYLINE_ASPECT,
+  crop: SKYLINE_CROP,
+};
 
 // A floating red label so a STUB look is obviously a stub in-headset.
 function stubLabel(text) {

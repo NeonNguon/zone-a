@@ -13,8 +13,9 @@
 // it, exactly like the walls.
 //
 // Used for the Zone C dark screening-room floor (near-black default palette) and
-// the Zone B soft-coral floor (palette overridden per instance) — and their
-// approach hallways.
+// its approach hallway, and for the Zone B soft-coral hallway (palette
+// overridden per instance). Zone B has no room patch any more: its hallway leads
+// out of the building to the park (js/zone-b-park.js), which lays its own ground.
 //
 // Placement is read LIVE from #floorplan's config (cx/cz/w/d/thickness), the same
 // contract room-fixtures follows — never a copied number — and it re-derives on
@@ -87,9 +88,16 @@ AFRAME.registerComponent("tinted-floor", {
       // thickness lands exactly on the two rooms' inner faces (the same lo/hi
       // the floorplan uses to place the corridor side-walls), so the strip abuts
       // the room floor at one end and the foyer threshold at the other.
+      // An OPEN end (a hallway leading out of the building — floorplan.js's
+      // corridorOpenEnds) has no room face to reach, so the strip stops at the
+      // span's end, flush with where the side walls stop.
       const half = t / 2;
-      const lo = Math.min(h.corridor.from, h.corridor.to) - half;
-      const hi = Math.max(h.corridor.from, h.corridor.to) + half;
+      const open =
+        typeof corridorOpenEnds === "function"
+          ? corridorOpenEnds(h, attr.rooms)
+          : { lo: false, hi: false };
+      const lo = Math.min(h.corridor.from, h.corridor.to) - (open.lo ? 0 : half);
+      const hi = Math.max(h.corridor.from, h.corridor.to) + (open.hi ? 0 : half);
       const runAxis = h.openings[0].side.charAt(1); // 'x' or 'z'
       const mid = (lo + hi) / 2;
       const span = hi - lo;
