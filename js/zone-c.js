@@ -11,7 +11,8 @@
 // Single swappable video source. The final video may move to a CDN later —
 // change ONLY this constant. Same-origin today, but the <video> element is
 // created with crossorigin="anonymous" so a CDN swap needs no code change.
-const VIDEO_URL = "video/GoEastV2.mp4";
+// local fallback: const VIDEO_URL = "video/GoEastV2.mp4";
+const VIDEO_URL = "https://player.vimeo.com/progressive_redirect/playback/1207425973/rendition/1080p/file.mp4%20%281080p%29.mp4?loc=external&log_user=0&signature=f17fff79325d5f892d5acc0269ba586a4bdca6af723f5c65356ac94aa692c701";
 // Pre-play thumbnail shown on the screen until the first frame takes over.
 const POSTER_URL = "video/thumbnail.jpg";
 
