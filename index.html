@@ -14,8 +14,9 @@
     <script src="js/captions.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/components.js"></script>
-    <!-- Zone B (10×10 image wall). AFTER components.js so it can read Zone A's
-         ring radius to auto-size the wall. -->
+    <!-- Zone B (10×10 image wall). AFTER components.js: it reuses that file's
+         hover/focus components (its wall width is pinned in the tag below —
+         the old auto-size-from-Zone-A's-ring path died with the ring). -->
     <script src="js/zone-b.js"></script>
     <!-- Zone B floor map (100 locations behind the wall). AFTER zone-b.js so
          it can read the wall's placement + width as its own defaults. -->
@@ -26,10 +27,6 @@
     <!-- Shared terminal furniture (pedestal + screen + hover + hit box),
          used by the teleport terminals and the per-zone info terminals. -->
     <script src="js/terminal-kit.js"></script>
-    <!-- Zone B teleport terminals (wall <-> floor map). AFTER zone-b-map.js
-         and transition.js: it reads their live config and triggers the
-         camera's glitch. -->
-    <script src="js/zone-b-teleport.js"></script>
     <!-- Zone B triptych sub-zone (three stacked Ticket 485496 images).
          AFTER zone-b.js: it sizes its images from the wall's live tile
          metrics and reuses its hover/focus components. -->
@@ -42,6 +39,13 @@
     <!-- Reusable đá mài terrazzo park bench (primitives + runtime canvas
          texture, zone-agnostic — instances are placed per zone). -->
     <script src="js/bench.js"></script>
+    <!-- PropKit — the small furniture (seat row, low table, child's bike,
+         plastic bag), primitives + runtime canvases like the bench, but as
+         plain BUILDERS returning a THREE.Group rather than as components:
+         corridor-root puts them inside its own group so they ride its offset,
+         hide with its `shown` and go in its teardown. AFTER bench.js (same
+         family, same rules) and BEFORE zone-a-corridor.js, which calls it. -->
+    <script src="js/props.js"></script>
     <!-- Local tinted-terrazzo floor patches (per-room/-hallway colourways over
          the shared global floor). AFTER bench.js: reuses makeTerrazzoTexture.
          Used by Zone C (dark) and Zone B (soft coral). See js/tinted-floor.js. -->
@@ -64,6 +68,32 @@
          re-reads on the floorplan's `floorplanbuilt` event. See
          js/rig-collision.js. -->
     <script src="js/rig-collision.js"></script>
+    <!-- Zone B park: the concrete square, lawn, kerb, sky, skyline, trees and
+         benches the lottery now stands in, plus window.ParkConfig (the square,
+         live, for anything placed on it). AFTER bench.js (the benches are
+         terrazzo-bench instances) and rig-collision.js (RigRegions — the square
+         registers its walkable ground there), BEFORE zone-b-teleport.js, whose
+         Terminal A reads the square's centre from ParkConfig. -->
+    <script src="js/zone-b-park.js"></script>
+    <!-- Zone B teleport terminals (square <-> floor map). Moved down here from
+         beside zone-b-map.js so it loads after the park; it still comes after
+         zone-b-map.js and transition.js (it reads their live config and
+         triggers the camera's glitch), and before zone-a-corridor.js, which
+         reuses its teleport-terminal. -->
+    <script src="js/zone-b-teleport.js"></script>
+    <!-- Zone A V2: the chung cư corridor sub-space (the nine images' new home,
+         parked 400 m out) and the booth pair that teleports you in and out.
+         LAST of the scene scripts, because it needs all of these registered
+         first: teleport-terminal + TerminalKit (booth furniture), TeleportRig +
+         transition-glitch (the masked jump), floorplan (the Zone A room centre)
+         and rig-collision (the walkable-region registry it adds itself to). -->
+    <!-- The corridor's field recordings: the flat's television on the
+         bicycle, the two Saigon streets behind the window. AFTER zone-c.js
+         (it shares the AudioListener that file's cinema first needed, now
+         owned by AudioKit in js/audio.js) and BEFORE zone-a-corridor.js,
+         whose teleport starts and stops it from inside the arrival click. -->
+    <script src="js/corridor-audio.js"></script>
+    <script src="js/zone-a-corridor.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -190,7 +220,7 @@
       <!-- ============================================================
            ENVIRONMENT LAYER — everything atmospheric (background/sky,
            fog, lights, ground, grid, particles), swappable as one unit.
-           The ring NEVER sets any of these. environment-manager builds the
+           The zones NEVER set any of these. environment-manager builds the
            active preset's children in here and tears them down on switch.
            FIXED on "void" (the migrated white look): runtime preset switching
            via the `e` key / right-hand `B` button is DISABLED
@@ -200,8 +230,11 @@
       <a-entity id="environment" environment-manager="preset: void"></a-entity>
 
       <!-- ============================================================
-           FLOORPLAN — the architecture: four white-walled rooms (foyer/central
-           + one per zone) joined by low hallways. Every wall is generated at
+           FLOORPLAN — the architecture: three white-walled rooms (foyer/central,
+           Zone A and Zone C) joined by low hallways, plus one hallway that
+           leads OUT of the building — central-zoneB names only the foyer's
+           wall, and its far end is left open onto the Zone B park (see
+           #zone-b-park below). Every wall is generated at
            runtime from the component's room/hallway config — primitives only,
            no asset files (same no-asset approach as the contact cues). It
            builds NO floor: the environment preset's ground plane is the floor,
@@ -209,11 +242,11 @@
 
            Heights are per-room, and the hallways are deliberately LOWER than
            the rooms, so you duck through a passage and the space opens up:
-           foyer 5 m and Zone A 5 m; Zones B & C 10 m (their screen / image wall
-           top out at ~7.1 m / ~4.9 m); hallways 3 m, with a lintel of wall
-           carried over each doorway. Every room is ceilinged and every hallway
-           roofed, so the exhibition is a closed white interior throughout — the
-           environment preset's sky is never seen from inside.
+           foyer 5 m and Zone A 5 m; Zone C 10 m (its screen tops out at ~7.1 m);
+           hallways 3 m, with a lintel of wall carried over each doorway. Every
+           room is ceilinged and every hallway roofed, so the building is a
+           closed interior throughout — the environment preset's sky is never
+           seen from inside, and the only sky in the exhibition is the park's.
 
            A SIBLING of #environment, not a child: the walls are architecture,
            so they must PERSIST across environment switches (env teardown only
@@ -221,7 +254,9 @@
 
            Visual only here — this entity builds no collision. Walkability is
            enforced by #rig's rig-collision component, which reads THIS
-           floorplan's own room/hallway config (js/rig-collision.js).
+           floorplan's own room/hallway config (js/rig-collision.js). Spaces
+           OUTSIDE the floorplan — the Zone A corridor — add their own walkable
+           rectangles to that same collider through its RigRegions registry.
 
            Tunables (no code edits — setAttribute on #floorplan): height /
            thickness / color / shader, plus the full `rooms` and `hallways`
@@ -233,7 +268,7 @@
            ZONE C DARK FLOOR — a LOCAL dark inverted-terrazzo plane over just
            the Zone C footprint. The exhibition floor is ONE global 64 m ground
            plane shared by every room (js/environment.js), so it cannot be
-           darkened without darkening Zones A/B too; this lays a second, small
+           darkened without darkening the foyer and Zone A too; this lays a second, small
            near-black terrazzo plane covering only Zone C, sized LIVE from the
            floorplan's zoneC room config and re-derived on `floorplanbuilt`.
 
@@ -251,27 +286,295 @@
            inner-face to inner-face, abutting the Zone C room floor at one end and
            stopping at the foyer doorway threshold at the other. -->
       <a-entity id="zone-c-hall-floor" tinted-floor="hallway: central-zoneC"></a-entity>
-      <!-- Zone B (the lottery): soft-coral terrazzo over the room footprint AND
-           its approach hallway, matching the coral walls/ceiling. Same
-           tinted-floor component with a coral palette (body a touch deeper than
-           the walls, lighter + darker flecks for speckle). Lighting is unchanged
-           in Zone B, so the floor reads as soft coral. The hall strip abuts the
-           Zone B room floor at one end and stops at the foyer threshold at the
-           other. -->
-      <a-entity
-        id="zone-b-floor"
-        tinted-floor="room: zoneB; base: #eeaaa6; fleck1: #ffd0cc; fleck2: #db938e"
-      ></a-entity>
+      <!-- Zone B (the lottery): soft-coral terrazzo down its approach hallway,
+           matching the coral side walls and roof. Same tinted-floor component
+           with a coral palette (body a touch deeper than the walls, lighter +
+           darker flecks for speckle). Zone B has no room any more, so there is
+           no room patch: the strip runs from the foyer threshold to the
+           hallway's OPEN end at x 10.2, where the park's concrete square begins
+           (tinted-floor stops flush with the side walls there — it does not
+           overhang an end with no wall to tuck under). -->
       <a-entity
         id="zone-b-hall-floor"
         tinted-floor="hallway: central-zoneB; base: #eeaaa6; fleck1: #ffd0cc; fleck2: #db938e"
       ></a-entity>
 
       <!-- ============================================================
+           ZONE B PARK — "The Lottery of Forgotten Dreams" outdoors. The coral
+           room is gone. You walk out of the foyer down the same coral hallway,
+           and where it ends the city opens up: a 40 × 40 m square of poured
+           concrete, a kerb, a lawn around it, and the Saigon skyline in haze a
+           long way off on every side. The image wall, its cues, info terminal
+           B, the triptych and Terminal A all stand on the square now (see
+           #zone-b and #zone-b-teleport below); the floor map is still a
+           teleport sub-space and did not move.
+
+           A SIBLING of #floorplan, not a child of #environment: it is ground
+           and scenery, so it persists across environment switches exactly as
+           the walls and the cues do. The entity sits at the world origin with
+           no transform, so everything in js/zone-b-park.js is built in world
+           coordinates.
+
+           NOTHING HERE IS TYPED IN AS A COORDINATE. The square's west edge is
+           the hallway's OPEN END (x 10.2 — the hallway now names one wall, the
+           foyer's, and floorplan.js leaves its far end open), its centre line
+           is the hallway's centre (z 0), and the lawn starts at the building's
+           furthest +x outer wall face. That face is Zone A's, x 5.675, not the
+           foyer's 5.075: Zone A is 1.2 m wider than the foyer, and a lawn laid
+           from the foyer's face would show through Zone A's floor along its +x
+           wall. It leaves a 0.6 m apron of gallery terrazzo along the outside
+           of the foyer, beside the hallway mouth. Anything else that stands on
+           the square reads it from window.ParkConfig — square() and center().
+
+           THE GROUND STACK, bottom to top: the gallery's terrazzo plane at 0,
+           the lawn at 0.003, the concrete at 0.005, the coral hallway strip at
+           0.008 and the contact cues at 0.02. The lawn is four strips laid
+           AROUND the square rather than one sheet under it, so the lawn and
+           the concrete never overlap and cannot fight; the one overlap that
+           has to hold at range, lawn over terrazzo, is within ~40 m of
+           anywhere you can stand, where 3 mm is roughly three times what the
+           Quest's depth buffer resolves.
+
+           THE KERB stands outside the square, so its inner face IS the
+           square's edge. It is a ring of four butted boxes, one mesh, lit by
+           nothing: the top and the two facings carry different baked tones so
+           the edge reads without a light. The west run stops for the hallway
+           mouth — the passage's full outer width, side walls included.
+
+           UNLIT, ALL OF IT — the corridor's rule, for the same reason. The
+           void preset's light rig is built for white rooms (a lamp per room,
+           two directionals aimed so corners read); an outdoor square that
+           depended on it would change every time that rig was retuned. So the
+           concrete, the lawn, the kerb and the sky have their tone painted in:
+           per-slab tone, a trowelled lean across each slab, saw-cut joints
+           with a lighter lip, a mottle; the lawn's patches lean yellow where
+           they are light, the way dry grass goes.
+
+           THE SKY is an inverted sphere around the square with a vertical
+           gradient: pale grey at the horizon to an overcast blue overhead,
+           most of the change high up. Below the horizon it turns, within
+           under a degree, to a muted ground-haze green-grey: that sliver is
+           only ever seen between the foot of the skyline and the lawn's far
+           edge, and left pale it read as a white ribbon under the city. The
+           scene's clear colour stays BLACK —
+           deliberately, see the void preset in js/environment.js: a render
+           hitch on the Quest shows the clear colour, and black is the one that
+           cannot flash. The sphere hides itself whenever the camera is outside
+           it, because the floor map and the corridor are both 400 m out, and a
+           250 m sphere seen from out there is a grey disc on their horizon.
+
+           THE SKYLINE rings the whole square: Saigon in haze in every
+           direction, in two depth bands — the corridor window's near and far
+           bands, turned through 360 degrees. The near band stands 130 m out
+           and 40 m tall, the far band 180 m out, 60 m tall and paler, turned
+           half a panel against the near one so their seams never line up; the
+           four pictures alternate so no two neighbours match, across the
+           ring's closing seam too. Six panels a band close each ring, with
+           neighbouring edges crossing slightly rather than leaving a slot of
+           sky.
+
+           WHY THAT TALL. The pictures are mostly sky — measured, their spires
+           reach 44-51% of the height left after SKYLINE_CROP, their rooftops
+           16-26% — so a "30 m" panel is a 13 m city, and at 130 m that sits
+           entirely under the foyer's roof as seen from the square. So the
+           empty top is trimmed off too (skylineTopTrim, the same rule as the
+           crop: the plane shortens with it, nothing squashes, and each panel
+           stops paying fill for 45% of nothing), and the bands are sized to
+           the building: from the middle of the square the foyer's roof is ~7
+           degrees up and Zone C's ~12.7, and the rooftops land around 6-7
+           degrees with the spires at 13-15. Looking west, the city stands above
+           the foyer and the hallway and Zone C's black box cuts into it;
+           looking anywhere else, it is the horizon.
+
+           The panels are the environment layer's own: skylinePanel(), the four
+           PNGs and the SKYLINE_CROP treatment, handed over by SkylineKit in
+           js/environment.js rather than copied. The HAZE is the one thing that
+           builder could not do alone — the PNGs are black, and a tint multiplies,
+           so a black city cannot go grey-blue. The corridor's window already
+           solved that by lifting each PNG into a WHITE canvas
+           (CorridorTextures.silhouette), and the ring uses those very canvases,
+           cropped through its own uv transform — so the skyline costs the park
+           no texture memory whatever. No scene fog anywhere: the distance is
+           all in the haze colour and opacity.
+
+           TREES — sixteen, on the lawn only: seeded rejection sampling keeps
+           every trunk 3 m off the kerb's outer face, 4 m off the building, 2 m
+           inside the lawn's edges and 7 m from every other trunk, and each tree
+           draws its own trunk height and girth, canopy size and two or three
+           flattened canopy blobs from the same seed. Nothing fits west of the
+           square at the defaults (the strip beside the hallway is narrower
+           than the two clearances), so they stand north, south and east of it.
+           Unlit like everything out here: trunks darken toward the ground and
+           every blob toward its underside through vertex colours, and each
+           tree takes its own tint through the instance colour. The whole wood
+           is THREE draw calls — trunks, canopy blobs and floor cues are each
+           one InstancedMesh. The cues are the shared contact-cue kit in shadow
+           mode, not following the environment retune: the lawn belongs to no
+           preset, the same reasoning as the corridor's props.
+
+           BENCHES — eight terrazzo-benches, two to each side, just inside the
+           kerb and facing into the square, backs to the kerb. Placed from the
+           square, not typed: each pair stands ±half of half a side from that
+           side's middle (so the west pair flanks the hallway mouth, 10 m
+           either side of it) and 1.4 m in from the kerb's face. benchOffsets
+           nudges any of them after the derivation, the corridor's
+           furnitureOffsets idea. Each carries a spot-contact-cue. They are
+           children of #zone-b-park, rebuilt with it.
+
+           WALKABLE: the concrete only. The square registers with
+           rig-collision's RigRegions registry — the square inset by the player
+           radius on every side, x 10.45..49.95, z -19.75..19.75 at the
+           defaults — and overlaps the hallway's own rectangle (which runs to x
+           10.825, doorOverlap past the open end), so foyer, hallway and square
+           are one continuous floor. The lawn is scenery; you can look at it,
+           not stand on it.
+
+           AND SOLID BY SUBTRACTION, the way the corridor makes its furniture
+           solid. The collider takes a UNION of rectangles, so an obstacle is a
+           hole: the footprints of the two free-standing walls (the image
+           wall's and the triptych's) and of each bench, inflated by the player
+           radius, are cut out of the square and the rest is rebuilt as the
+           pieces around them. A wall's comes from its own component
+           (image-wall, zone-b-triptych) through its entity's world transform;
+           a bench's from
+           terrazzo-bench's schema and the same benchLayout that places it — so
+           nothing here is a copied number, and both re-derive when the wall
+           moves or rebuilds. A bench's back stands ~1.05 m off the kerb, which
+           leaves a lane behind it: you can walk the full length of every kerb
+           and all the way round the wall. collide: false turns the cuts off.
+
+           WHAT THE PARK COSTS, measured — everything drawn at once from a
+           camera 700 m up, renderer.info with each group switched off in turn:
+             115 meshes in #zone-b-park, 8 244 triangles, 136 draw calls
+               ground    3 meshes          3 calls   concrete, lawn, kerb
+               trees     3 InstancedMeshes 4 calls   74 instances: 16 trunks,
+                                                     42 canopy blobs, 16 cues;
+                                                     5 264 triangles
+               sky       1 mesh            1 call    960 triangles
+               skyline   12 panels        24 calls
+               benches   96 meshes       104 calls   8 × (11 parts + a cue)
+             plus the two back slabs, the image wall's and the triptych's:
+             1 mesh and 1 call each.
+             More calls than meshes because three draws a TRANSPARENT
+             DOUBLE-SIDED material in two passes, back faces then front — the
+             skyline panels and every contact cue are both, so each costs two.
+           TEXTURES: 19 canvases referenced, 34.9 MB with mipmaps, of which only
+           13 canvases and 10.0 MB are the park's own: the concrete (1024², 5.3
+           MB), the lawn (512², 1.3 MB), the sky (4 × 512, nothing), the trees'
+           cue, and nine 256² squares for the benches — eight cue canvases and
+           one for their green terrazzo body. The four skyline pictures, 24.2
+           MB, are the corridor window's canvases and already resident; the
+           benches' white rolls and grey legs are the Zone C benches' canvases.
+           Drawing the park's own canvases takes ~100 ms, once, at load on a
+           desktop (concrete 62 ms, lawn 37, sky under 1); a rebuild that
+           reuses them takes 3.
+
+           WHAT TO TUNE BY EYE FIRST, in this order: the sky colours (skyTop,
+           skyHorizon, skyGround — they set the whole mood, and skyGround has to
+           sit between the lawn and the city's haze), the haze (skylineHaze and
+           skylineHazeOpacity on each band; the far band should always read
+           paler than the near one), treeScale (the trees against a 5 m wall
+           and a 40 m city), and then the concrete's tone (concreteColor,
+           slabTone, jointColor — it is the largest bright surface in view, so
+           it is the one that clips first on the headset).
+
+           WATCH ON THE QUEST:
+             THE BENCHES are 104 of the 136 draw calls. You rarely see all eight
+             — frustum culling takes care of the rest — but from the middle of
+             the square you see four. The cheap lever is stripe: false on
+             terrazzo-bench (four boxes a bench, 32 calls for the eight); the
+             real one is merging each bench into one geometry per material.
+             THE SKYLINE'S OVERDRAW: twelve large blended quads, two bands deep
+             all the way round, each still about half sky after the top trim.
+             They face the centre and you are always inside the ring, so their
+             back faces are never seen: switching their material to side: front
+             would halve their 24 calls with no visible change, and is the first
+             thing to try. After that, skylineHazeOpacity2 or skylinePanelsMax2.
+             THE SKY SPHERE fills every pixel nothing opaque covers — most of the
+             upper half of both eyes out on the square. It is one unlit texture
+             lookup, drawn LAST in the opaque pass (renderOrder 1) so early depth
+             rejection skips whatever is in front of it; if it ever shows up in a
+             frame, check nothing has pushed it back up the sort.
+             THE CONCRETE CANVAS is the one build-time cost worth a thought on
+             the headset's slower CPU: textureSize 512 quarters both its drawing
+             time and its 5.3 MB.
+
+           ?zoneb=debug on the URL puts you on the square's west edge facing
+           east, the same convention as ?zonea=debug.
+
+           Tunables (all on park-root, all with defaults — see js/zone-b-park.js):
+             placement  hallway central-zoneB   the passage the square is laid
+                                                at the end of
+                        squareSize 40
+                        squareWest auto   the hallway's open end (x 10.2);
+                                          a number overrides it, and the kerb
+                                          then only opens for the mouth if the
+                                          hallway still reaches the edge
+                        squareZ auto      the hallway's centre (z 0)
+                        lawnWest auto     the furthest +x outer wall face
+                        lawnEast 70 / lawnHalfDepth 40
+             stack      concreteLift .005 / lawnLift .003
+             kerb       kerbHeight .12 / kerbWidth .25 / kerbColor #bdb8ae
+             concrete   slabSize 2 / slabsPerTile 7   the canvas holds 7 × 7
+                                          slabs, a 14 m repeat, which does not
+                                          divide the 40 m square
+                        concreteColor #cdc8bf / jointColor #8f897f
+                        jointWidth .015 / slabTone .045 / concreteGrain .05
+                        concreteSeed 3 / textureSize 1024
+             lawn       lawnColor #6b8a47 / lawnSpeckle 1 / lawnSeed 5
+                        lawnTile 3.7   metres per repeat, again no divisor
+                        lawnTextureSize 512
+             sky        skyRadius 250 / skyTop #9fb1be / skyHorizon #dde2e3
+                        skyGround #9ba399   below the horizon: the strip
+                        between the skyline's foot and the lawn's edge
+             skyline    skyline true   false removes the ring
+                        skylineLift .05   the panels' bases above the ground
+                        line
+                        skylineTopTrim .45   fraction of the cropped picture
+                        taken off the top — sky only, the spires stop at 51%
+                        near band: skylineRadius 130 / skylineHeight 40 /
+                        skylineHaze #7f8b94 / skylineHazeOpacity .85 /
+                        skylinePanelsMax 16
+                        far band:  skylineRadius2 180 / skylineHeight2 60 /
+                        skylineHaze2 #a7b1b8 / skylineHazeOpacity2 .7 /
+                        skylinePanelsMax2 16
+                        Heights are VISIBLE heights (after the crop); a panel's
+                        width follows from its picture. The count per band is
+                        derived — as many as close the ring — and the max only
+                        caps it; a capped band logs the size of its gaps
+             trees      trees true / treeCount 16 / treeSeed 11   a new seed
+                        replants the whole park
+                        treeScale 1   trunk and canopy together
+                        treeKerbClearance 3   trunk to the kerb's outer face
+                        treeBuildingClearance 4 / treeEdgeInset 2
+                        treeSpacing 7   trunk to trunk; if fewer than treeCount
+                        fit, the log says how many did
+                        trunkColor #5b4a3b / canopyColor #4f7337
+                        canopyUnderside .55   the underside's tone as a
+                        fraction of the top's
+                        treeTone .12   how much the trees differ in brightness
+                        treeCueOpacity .32
+             benches    benches true / benchColor #3e7a5a
+                        benchAlong .5   the pair on each side stands ± this ×
+                        half the side from its middle
+                        benchInset 1.4   bench centre to the kerb's face — keep
+                        it above ~1.2 or the lane behind a bench closes
+                        benchOffsets {}   by-eye nudges, keyed n1 n2 / s1 s2
+                        (1 = the -x end) and w1 w2 / e1 e2 (1 = the -z end),
+                        each { along, in, yaw } in metres and DEGREES, e.g.
+                        benchOffsets: {"w2": {"along": 1.5}, "n1": {"yaw": -6}}
+             collision  collide true   cut the walls and the benches out of the
+                        walkable square
+                        walls "#zone-b-wall, #zone-b-triptych-stack"   the
+                        free-standing walls to cut around, as a selector list
+           ============================================================ -->
+      <a-entity id="zone-b-park" park-root></a-entity>
+
+      <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:
            the same three lines floating ~3.5 m in front of spawn at eye
-           height, facing spawn, WORLD-FIXED (clear of Zone A's ring, whose
-           nearest image sits ~4.3 m out). Activates when the scene loads
+           height, facing spawn, WORLD-FIXED, standing clear in the foyer
+           (nothing else is within ~5 m of it). Activates when the scene loads
            (in sync with the splash fade) and dissolves on the first
            exploration input — or after holdDuration on its own. One-shot;
            zero per-frame cost once gone. Tunables: holdDuration /
@@ -281,48 +584,624 @@
       <a-entity id="exhibition-title" exhibition-title></a-entity>
 
       <!-- ============================================================
-           ZONE A — the exhibition itself: ONLY the ring, its nine images
-           and their audio. Sets no background / fog / lights / ground.
-           zone-a-root offsets the WHOLE assembly (ring + cues + audio/focus
-           triggers) as a unit; default 4 m back (-z) to make room for Zones
-           B & C. Tune via the zone-a-root `offset` property — never the ring
-           math or the nine coordinates.
+           ZONE A — "All the Places I Have Lived". The room is now EMPTY.
+
+           V1 stood the nine images in here, in a half-circle ring around the
+           middle of the room. V2 takes them out of the gallery entirely: the
+           work is about nine Saigon neighbourhoods lived in, so the images now
+           hang in a place rather than in a white room — three one-room
+           apartments off the corridor of an old chung cư (see
+           #zone-a-corridor below). The ring, its layout component and its
+           floor cues are gone from the codebase; only the shared image config
+           (COUNT / IMG_SIZE / IMG_Y / ASSET_PREFIX in js/components.js)
+           survives, and the corridor's apartment walls read it.
+
+           So this room holds exactly two things: the info terminal (the work's
+           statement) and — as a SIBLING entity, because it stands in world
+           coordinates derived from the floorplan rather than from this root —
+           the teleport booth that takes you to the corridor.
+
+           zone-a-root still offsets everything parented HERE as one unit;
+           default 12.5 m back (-z), which is where the room is. Sets no
+           background / fog / lights / ground, like every zone root.
            ============================================================ -->
       <a-entity id="zone-a" zone-a-root="offset: 0 0 -12.5">
-        <!-- Ring container: ring-layout fills it with nine image entities. -->
-        <a-entity ring-layout position="0 0 0"></a-entity>
-
-        <!-- Per-image floor contact cue. Lives under #zone-a so it PERSISTS
-             across environment switches (env teardown only touches
-             #environment); it retunes its material to each preset's profile.
-             Tunables: radius / opacity / softness / yoffset / color / mode. -->
-        <a-entity ring-contact-cue position="0 0 0"></a-entity>
-
-        <!-- Zone A info terminal: beside the ring's right end, screen facing
-             spawn (+z). NUDGE BY EYE via position/rotation (local; the
-             zone-a-root offset carries it). Cue = shared spot-contact-cue. -->
+        <!-- Zone A info terminal: screen facing spawn (+z), off to the +x side
+             of the now-empty room and forward toward the doorway, so you pass
+             it on the way in and it never crowds the booth in the middle
+             (~2.5 m of clear floor between the two hit boxes). NUDGE BY EYE via
+             position/rotation (local; the zone-a-root offset carries it).
+             Cue = shared spot-contact-cue. -->
         <a-entity
           id="info-terminal-a"
           info-terminal="key: a"
-          position="4.6 0 1.2"
+          position="3.4 0 1.9"
           rotation="0 0 0"
           spot-contact-cue
         ></a-entity>
       </a-entity>
 
       <!-- ============================================================
-           ZONE B — a 10×10 wall of 100 images, to the RIGHT of spawn.
-           zone-b-root offsets the WHOLE wall as a unit (same pattern/intent as
-           zone-a-root); default ~6 3 0 places it to the right (+x) and raised.
-           Tune via the zone-b-root `offset` property — not the grid math.
+           ZONE A TELEPORT — the booth pair linking the (empty) Zone A room to
+           the chung cư corridor parked 400 m out, each jump masked by the
+           camera's transition-glitch exactly like the Zone B map jump.
+           A SIBLING of #zone-a, not a child, for the same reason
+           #zone-b-teleport is a sibling of #zone-b: the manager places its
+           terminals in WORLD coordinates it derives itself.
+
+           The OUTBOUND booth (#terminal-a2) stands in the MIDDLE of the Zone A
+           room — its centre read live from the floorplan's rooms.zoneA, so no
+           coordinate is copied here — screen facing +z, back toward the
+           doorway from the foyer, so it is the first thing you read walking in.
+           Its screen carries the work's TITLE, which the manager reads from
+           js/zone-texts.js (the same single source the info terminal uses); the
+           label is deliberately NOT written here, so the string exists once.
+
+           The RETURN booth lives inside #zone-a-corridor (it must hide and
+           relocate with it) — see that block below.
+
+           Tunables on zone-a-teleport: boothOffset (from the room centre).
+           Terminal geometry + hit sizes on the teleport-terminal itself;
+           glitch dur / intensity / color / style / sound on the camera's
+           transition-glitch.
+           ============================================================ -->
+      <a-entity id="zone-a-teleport" zone-a-teleport>
+        <a-entity id="terminal-a2" teleport-terminal spot-contact-cue></a-entity>
+      </a-entity>
+
+      <!-- ============================================================
+           ZONE A CORRIDOR — the nine images’ actual home: the long corridor
+           of an old Saigon chung cư (apartment block), with three one-room
+           apartments off its far end holding three images each.
+
+           A TELEPORT SUB-SPACE, built on exactly the pattern the Zone B floor
+           map established: the root offset parks the whole thing 400 m out on
+           +z — the floor map is 400 m out on −z, so the two sub-spaces can
+           never meet, and neither is reachable on foot from the gallery — and
+           `shown: false` hides it. That hiding is a PURE visibility flip: every
+           procedural canvas texture stays resident on the GPU, so the first
+           teleport in has no hitch. (It also strips the pictures’ clickable
+           class while hidden, so no stray desktop ray can reach a picture
+           parked behind the gallery.)
+
+           Root-local frame: the landing is z 0..landingDepth, closed behind
+           you; the corridor runs from z 0 out to z −length; x 0 is the
+           centreline; the floor is y 0 and the ceiling y height.
+
+           EVERYTHING here is generated at runtime from the schema — geometry
+           from primitives, and every surface from a seeded canvas texture (no
+           image assets, the same approach as the contact cues and the terrazzo
+           bench). All of it is UNLIT (`shader: flat`): the gallery’s lights
+           only exist over the floorplan’s rooms, so 400 m out the corridor
+           bakes its own light into the textures instead — darker toward the
+           ceiling, a pool under every tube, dark margins along the floor edges.
+           That makes it independent of the active environment preset and free
+           per frame.
+
+           THE WALLS are a stack of five coats of paint — plaster, an old ochre
+           scheme, a deep cerulean, the pale lime-wash, a thin top wash — worn
+           back through each other, each with its own noise-driven coverage
+           mask, hard proud edges, vertical brush grain, grime in the breaks,
+           and the stencilled phone-number ads that are on every wall in Saigon
+           — numbers only, never lettering, painted a few degrees off level and
+           always partial: a mark is destroyed by the same flaking that shaped
+           the wall, and never leaves more than seven of ten digits readable.
+           The colours are a PALETTE the generator takes as an argument, so the
+           same code paints any scheme — see WALL_PALETTES in
+           js/zone-a-corridor.js. The three apartments are painted in their own
+           schemes — colonial yellow, oxide red, faded jade — which is what
+           roomWallPalettes below does. Building the wall canvases is the
+           corridor’s one real cost: six of them at ~105 ms each on a desktop,
+           once, at load; the whole texture set is about 59 MB (24 MB of it the
+           walls, 18 MB the four skyline PNGs).
+
+           EVERY DOOR IS THREE THINGS. The painted two-leaf door itself, from
+           an atlas of four; a row of pierced bông gió concrete blocks in the
+           wall ABOVE its frame; and a folding steel scissor gate (cửa kéo)
+           standing 5 cm off the wall in front of it. The vent row is a REAL
+           hole — the lintel is built as a band, the row and a band with
+           nothing behind it, and the apartments cut the same hole in the skin
+           they paint on their side of the wall — so from inside a flat you see
+           corridor light coming through the blocks over your own door. The
+           gate is stretched across and padlocked on some of the closed doors
+           and folded into a stack against the jamb on the rest, ~30% locked,
+           decided per door from the corridor's seed so the same corridor
+           always locks the same doors; the three apartment doorways are always
+           folded open, their pictures being the point. The apartments' doors
+           also carry a PAINTED BACK now — plainer than the front, no number
+           plate, a bolt at handle height, grime up the bottom third — because
+           the side you stand next to is the one inside the room.
+
+           None of it is expensive. The vent blocks are two geometries and up
+           to four materials for the whole corridor, drawn as InstancedMeshes;
+           the gates are 40 bars each but two shared geometries, so all seven
+           gates plus their tracks and padlocks are FOUR draw calls however
+           long the corridor gets.
+
+           SOMEBODY LIVES HERE. Four props stand in the run, built from
+           primitives and runtime canvases by PropKit (js/props.js) and taken
+           from two of the reference photographs: a three-seat row of brown
+           pleated vinyl chairs with a peeling black oval table in front of
+           them against the RIGHT wall, and a child's bike leaning on the LEFT
+           wall with a stuffed plastic bag beside it. Where they stand is
+           DERIVED from the doors, not typed — the seats go in the stretch
+           between the SECOND and THIRD door on the right (counting every
+           opening as you walk in, so the third is the apartment doorway), the
+           bike between the first two on the left — so lengthening the corridor
+           or changing doorPitch moves the furniture with them. The bike even
+           asks the gates where they parked and steps clear of a folded stack.
+
+           They are the only LIT things out here. Everything else in the
+           corridor has its light painted into its texture; a small object with
+           real curvature is worth handing to the gallery's global lights,
+           which do reach 400 m out even though its room lamps do not. Each
+           gets a soft dark floor mark from the exhibition's shared contact-cue
+           kit, in shadow mode and deliberately NOT following the environment
+           retune — there is no environment out here to follow.
+
+           They are solid: rig-collision takes a union of walkable rectangles,
+           so each footprint is CUT OUT of the corridor's, leaving the pieces
+           around it. The narrowest way past anything is 2.57 m.
+
+           AND TWO PAINTED PHONE NUMBERS on the long blank stretches of wall
+           the furniture leaves — the right wall between its 1st and 2nd door,
+           the left between its 2nd and 3rd. These are a different mechanism
+           from the ads already on every wall: those are painted INTO the wall
+           canvas and masked into its paint stack, which is what makes them
+           read as paint rather than as stickers, and is also why they cannot
+           be aimed (that canvas is one bay long and tiles every 3.6 m, so a
+           mark on it turns up in every bay of that variant and nowhere in
+           particular). These are quads with their own canvas, put where
+           somebody with a can and a card would put one. Both kinds share the
+           same number generator and the same rules: numbers only, never level,
+           and never a complete number — the run of digits that has to go is
+           simply erased, so the wall shows through where the ad has gone.
+
+           WHAT THE WHOLE CORRIDOR COSTS, measured: 159 objects in its group,
+           204 meshes, 8 800 triangles, 24 canvases at 85 MB with mipmaps. The
+           four props are 43 of those meshes and the bike alone is 24 of them —
+           worth it, as it is the only object down there with no flat faces.
+
+           THE WINDOW at the far end is what the run is walking toward. A
+           2.8 × 1.5 m opening in the dead-end wall, a welded security grille
+           over it, Saigon in the haze behind it and a patch of sun on the floor
+           in front of it carrying the grille’s shadow. The end wall is built as
+           four boxes around the hole so the paint runs on across it unbroken;
+           the ~30 grille bars are merged into ONE draw call; the city is
+           silhouette panels standing outside the wall, and the sky behind them
+           is sized from the actual cone of sight through the opening rather
+           than from a guess — at the sill you can see nearly 80 degrees off
+           axis, and anything smaller shows the scene background at exactly the
+           angles a visitor will try. Nothing out there is reachable: it adds no
+           walkable rectangles at all, and hides with the rest of the corridor.
+           The whole window group is +26 meshes and +19 draw calls.
+
+           WHAT TO TUNE BY EYE FIRST, in this order: daylightOpacity (the patch
+           is clear up close and faint from 5 m back, which is the trade),
+           viewBottom (how far down you look on the city — it decides whether
+           you are on a high floor or a low one), viewDistance, and viewPanelsMax
+           if 18 skyline panels is too many draw calls on the headset.
+
+           TUNING ON THE HEADSET — no code edits, both on this tag: if the
+           build pause is noticeable on the Quest, set wallNoiseRes to 4 (the
+           noise fields drop to a quarter resolution; coat edges stay crisp
+           because they are thresholded after the interpolation, and the cost
+           per wall canvas falls by about a third). If it is still slow, set
+           textureSize to 512, which quarters both the drawing and the texture
+           memory. ?zonea=debug prints a per-phase millisecond breakdown for
+           every wall canvas.
+
+           ?zonea=debug on the URL shows the corridor on load and drops you on
+           the landing facing down it — the iteration path, same convention as
+           environment.js’s ?env= / ?debug.
+
+           Tunables (all on corridor-root, all with defaults — see the full
+           annotated list in js/zone-a-corridor.js):
+             placement   offset (0 0 400) / shown (false)
+             the box     length 16 / width 4.4 / height 3 / landingDepth 2
+                         width was 2.2 and read as a tunnel; 4.4 is set on the
+                         tag and everything follows it — floor tile columns,
+                         tube length, the end walls, the collider
+             openings    doorPitch 3.2 / doorWidth 0.9 / doorHeight 2.1
+                         transomHeight is GONE: the louvred fanlight it sized
+                         has been replaced by the vent row below, which is a
+                         real hole in the wall rather than joinery in the frame
+             ventilation vent true   a row of pierced bông gió concrete blocks
+                         in the wall ABOVE every door frame, open doorway or
+                         closed door alike — a real hole right through, so the
+                         corridor is visible from inside an apartment through it
+                         ventBlock .2 / ventCols 4 / ventRows 1   the row is
+                         centred on the door and clamped to fit inside the
+                         opening's own width
+                         ventGap .15   frame head to the row's bottom
+                         ventDepth 0 (auto = wallThickness)
+                         ventPattern "mixed"   circle | flower | diamond |
+                         mixed (one of the three per door, seeded from the same
+                         number its paint colour comes from)
+                         ventColor #bfb8a8 / ventGrime .5
+             gates       gate true   the scissor gate (cửa kéo) outside every
+                         door, on the corridor side, standing off the wall
+                         gateLockedRatio .3   how many of the CLOSED doors are
+                         stretched across and padlocked rather than folded into
+                         a stack beside the jamb. Seeded PER DOOR from the same
+                         number the door's paint colour and vent pattern come
+                         from, so the same corridor always locks the same doors
+                         and changing `seed` reshuffles the whole run at once.
+                         The three apartment doorways are ALWAYS folded
+                         gateBar .012 / gateBarThick .004   a flat bar, on edge
+                         gateStack .32   the folded stack's width
+                         gateCells 7   diamonds across the extended span; the
+                         ROW count derives from it so the straps land near 60
+                         degrees and the lattice closes on both rails
+                         gateColor #35373a / gateRust .4   the steel, drawn by
+                         the window grille's own iron recipe
+                         gateTrackDepth .05   how far the gate, its top channel
+                         and its floor rail stand off the wall face. Clears the
+                         .045 frame by 5 mm and sits well inside the collider's
+                         .25 m player radius, so the gates need no collider
+                         change at all
+                         gatePark "seed"   which side the stack parks —
+                         "hinge" (the +z jamb) | "far" | "seed". Whichever is
+                         asked for, a stack that would hit a neighbouring
+                         frame parks the other way instead
+                         gateHeight is NOT a tunable: doorHeight − .05
+             furniture   furniture true   the four props (seat row + table on
+                         the right, bike + bag on the left). Their POSITIONS
+                         are derived from the doors — see furnitureLayout in
+                         js/zone-a-corridor.js — so there are no coordinates
+                         here to tune, only nudges
+                         furnitureCollide true   cut each prop's footprint out
+                         of the corridor's walkable rectangle so you cannot
+                         walk through it. Off leaves them as scenery
+                         furnitureUnlit false   build them MeshBasic with
+                         shading baked into vertex colours instead of
+                         MeshLambert. They are the only lit things in the
+                         corridor, so this is the switch if they ever read
+                         brighter than the walls, or if the environment preset
+                         changes the light rig under them
+                         furnitureOffsets {}   by-eye nudges, keyed seats /
+                         table / bike / bag, each { z, x, yaw } in metres and
+                         DEGREES, applied after the derivation. Any key or any
+                         prop may be left out, e.g.
+                         furnitureOffsets: {"bike": {"z": 0.4}, "table":
+                         {"yaw": -8}}
+                         The props' own sizes live in PropKit's defaults and in
+                         the option sets furnitureLayout passes it — the
+                         corridor asks for a 0.38 m wheel rather than PropKit's
+                         0.3, which is a 16-inch child's bike rather than a
+                         toddler's
+             apartments  roomWidth 3.2 / roomDepth 4   the DEFAULT size, w
+                         ALONG the corridor and d away from it
+                         roomSizes [{},{},{}]   per-apartment { w, d }
+                         overrides indexed like roomImages, either key
+                         optional. Set on the tag: apartment 1 (left, nearest)
+                         4.8 x 6.0, apartment 2 (left, far) the default
+                         3.2 x 4.0, apartment 3 (right) 6.4 wide x 4.0 deep
+                         roomOffsets [0,0,0]   a by-eye z nudge each, applied
+                         after the packing
+                         roomSpacing 0 (auto)   the left pair packs tight
+                         around ONE party wall; above 0 it overrides that
+                         pair's half step
+
+                         HOW THEY ARE PACKED: apartment 2 sits at the far end
+                         with its outer wall against the corridor's end wall;
+                         apartment 1 sits directly in front of it, the two
+                         sharing one party wall; apartment 3 is centred on the
+                         midpoint of that pair's whole span, so its doorway
+                         looks across at the party wall rather than into
+                         either of their doors. The closed doors fill whatever
+                         corridor is left in front of the stretch.
+             stencils    wallStencils .6   the density of the painted phone
+                         numbers BAKED INTO the wall texture — background hum,
+                         one per bay of the right variant, masked into the
+                         paint stack itself and therefore never aimed at
+                         anything (the canvas tiles every 3.6 m)
+                         wallStencilDecals true   and the PLACED ones, on the
+                         two long blank runs of wall: the right wall between
+                         its 1st and 2nd door, the left between its 2nd and
+                         3rd. Derived from the openings like everything else,
+                         and skipped rather than squeezed if a stretch is too
+                         short. These are the ones you walk up to
+                         wallStencilDecalWidth 1.7 / wallStencilDecalY 1.45
+                         wallStencilTilt 6 / wallStencilInk 1   apply to both
+             fabric      wallThickness 0.15 / textureSize 1024 / seed 1
+                         endWallShade .92    how much darker the dead-end wall
+                                             is than the sides, as a LINEAR
+                                             multiplier — 1 is identical. Not a
+                                             colour: a hex here would be
+                                             converted sRGB → linear and come
+                                             out at about a fifth of what you
+                                             asked for, which is exactly the
+                                             bug this replaced
+             the walls   wallNoiseRes 2      noise resolution divisor
+                         wallFlake 1         how weathered the wall is — how
+                                             much of each coat is GONE, and
+                                             with it the blooms and rust runs
+                                             (0 repaints the corridor)
+                         roomWallFlake .051  an APARTMENT's share of that. The
+                                             corridor is common ground nobody
+                                             has painted in decades; a room
+                                             someone lives in gets repainted.
+                                             .09 leaves a 97% top coat — see
+                                             the schema for the arithmetic if
+                                             you want to aim at another figure
+                         wallGrain 1         vertical brush streaking
+                         wallStripe true     allow the ochre band variant
+                         wallStencils 0.6    painted-ad density (0 = none)
+                         wallStencilTilt 6   degrees off level they are
+                                             painted at (numbers only — there
+                                             is no lettering anywhere)
+                         wallStencilInk 1    how much pigment went on: how
+                                             strongly a mark reads before the
+                                             wall starts taking it away
+                         wallPalette "chungcu"   or "green"
+                         wallPaletteOverride null   patches the named palette
+                         roomWallPalettes ["yellow","red","green"]
+                                             per-apartment scheme, in
+                                             roomImages order — apartment 1
+                                             (left, nearest) colonial yellow,
+                                             2 (left, far) oxide red, 3 (right)
+                                             faded jade. A name indexes
+                                             WALL_PALETTES; an object patches
+                                             the corridor's palette instead.
+                                             A room uses ONE variant, so each
+                                             scheme costs one extra canvas
+             the window  window true         false restores a solid dead end
+                                             and takes the grille, the view and
+                                             the daylight with it
+                         windowWidth 2.8 / windowHeight 1.5 / windowSill 1
+                         windowX 0           along the wall, 0 = centreline.
+                                             The opening is clamped to leave
+                                             0.3 m of wall each side and 0.25 m
+                                             above, with a console warning if
+                                             it had to be
+                         windowRevealColor ""    "" leaves the reveals in the
+                                             wall's own paint, which is what a
+                                             hole knocked through one looks
+                                             like; a colour paints them
+                         windowSillColor #b9b3a6
+             the grille  grilleBar .014      square bar, the lattice
+                         grilleSpacingX .14 / grilleSpacingY .16
+                         grilleFrame .04     the four edge bars, thicker
+                         grilleColor #2a2b2e / grilleRust .35
+                         grilleInset .03     how far behind the wall face it
+                                             sits, inside the reveal — and far
+                                             enough back that the camera's near
+                                             plane cannot reach it
+                         grilleTile .5       metres of bar per texture repeat
+             the view    viewSkyTop #c9d4dc / viewSkyHorizon #efe9dc
+                         viewSkyDistance 40
+                         viewSkyWidth 0 / viewSkyHeight 0    0 = AUTO, and they
+                                             should stay 0: the size is derived
+                                             from the aperture and viewClearance
+                         viewClearance .25   closest an eye can get to the wall
+                         viewEyeY 1.6
+                         viewLayers 2        2 depth bands, 1 drops the far one,
+                                             0 drops the city and leaves sky
+                         viewSilhouetteSrc  assets/saigon2.png   band centre
+                         viewSilhouetteSrcL assets/saigon1.png   the sides,
+                         viewSilhouetteSrcR assets/saigon3.png   alternating
+                                             outward so neighbours never match
+                         viewSilhouetteSrc2 assets/saigon4.png   far band centre
+                         viewPanelsMax 4     panels each side of centre. Each
+                                             band takes as many as the cone of
+                                             sight needs and no more — 9 and 9
+                                             here, covering 432 m and 630 m
+                                             against the 401 m and 617 m asked
+                                             for. Lower it to save draw calls;
+                                             the town then ends at the extreme
+                                             angles
+                         viewDistance 22 / viewWidth 48 / viewHaze #3d4a55 /
+                         viewHazeOpacity .92                     the near band
+                         viewDistance2 34 / viewWidth2 70 / viewHaze2 #7d8a94 /
+                         viewHazeOpacity2 .75                    the far band
+                         viewBottom -4       where the city's base sits. This is
+                                             the storey you are on
+                         viewCrop .06        trims the PNGs' bottom band
+             the sun     daylight true
+                         daylightDepth 2.6   how far the patch reaches out
+                         daylightOpacity .28
+                         daylightColor #fff6dc
+                         daylightSkew .25    how far it LEANS sideways per metre
+                                             of depth — where the sun is, about
+                                             14 degrees off square. A lean, not
+                                             a widening: widen it and the bar
+                                             shadows fan out from a point and
+                                             the light reads as a lamp standing
+                                             in the window
+                         daylightSoftness .6   0 = hard shadows, 1 = wide
+                                             penumbra. The penumbra is scaled to
+                                             the bar PITCH, so a closer lattice
+                                             does not go solid dark
+             lighting    tubeSpacing 4 (snapped) / tubeColor #f4f1e2
+             joinery     frameWidth .07 / frameDepth .045 / frameColor #8d7f62 /
+                         leafThickness .045 / doorOpenAngle 100 / floorTile .2 /
+                         roomTile .2 / tubeWidth .11 / tubeLength 0 (auto) /
+                         tubeDrop .06 / imageProud .02
+             VR focus    focusDistance 1.3 / focusDimRadius 2.5
+           ============================================================ -->
+      <!-- ============================================================
+           THE CORRIDOR'S SOUND — three field recordings made in Ho Chi Minh
+           City in 2026, played where they were recorded from. See
+           js/corridor-audio.js.
+
+           WHAT PLAYS WHERE:
+             THE FLAT     Cư Xá Thanh Đa at six in the evening — a television
+                          running a Vietnamese film, music somewhere, a child a
+                          long way off. It LOOPS, and its emitter hangs on the
+                          BICYCLE, so the sound has a source in the corridor
+                          rather than being a wash: it is loudest at somebody's
+                          front door and it carries into the apartments the way
+                          a neighbour's television does. Starts on arrival,
+                          stops on the way home.
+             THE STREET   Đồng Khởi at 8pm and the Nguyễn Tri Phương six-way at
+                          7pm, ALTERNATING — one, then the other, then the
+                          first — from a point two metres beyond the window in
+                          the end wall. They take turns twice over: at the end
+                          of each file, AND at the door, so a second visit
+                          opens on the other recording. A track runs a minute
+                          and a half to two minutes, and without that second
+                          rule a visitor who does not stand at the window for
+                          that long would only ever hear Đồng Khởi.
+
+           THE HARD EDGE. The street is on a LINEAR distance model, which is
+           the only one that reaches exactly zero at a distance you can name:
+           inverse and exponential are asymptotic, they get quiet but never
+           stop. refDistance 1, rolloffFactor 1, maxDistance = streetRange, so
+           the city is FULL near the glass and NOTHING past the range. The flat
+           is on `inverse` instead, because that is the model that behaves like
+           a room.
+
+           streetRange is a radius from the SOURCE, and the source sits
+           streetOffset from the window — two metres beyond the end wall and
+           1.75 m above eye height — so the sphere always reaches rather less
+           down the corridor than the number reads. At 16 it gets about 13.9 m
+           back, which leaves the LANDING silent (19.1 m out) and covers
+           everything else.
+
+           THE TWO LAYERS OVERLAP DOWN THE MIDDLE, which is what these numbers
+           are for. Measured on the centreline at eye height, and at the centre
+           of each apartment:
+
+                                   street   flat
+             at the glass           0.73     0.43
+             4 m back               0.55     0.58
+             mid corridor           0.33     0.92
+             at the bicycle         0.06     0.95
+             the landing            0.00     0.95
+             apartment 1            0.36     0.66
+             apartment 2            0.57     0.47
+             apartment 3            0.47     0.50
+
+           So the flat carries the whole run, the traffic is in all three
+           rooms, and they cross in the middle — while the walk toward the
+           window still brings the city up out of nothing, because the landing
+           is past the street's range.
+
+           STREAMED, NOT DECODED — the one real engineering choice here. Every
+           source is an HTMLAudioElement handed to
+           THREE.PositionalAudio.setMediaElementSource, never an AudioBuffer
+           from THREE.AudioLoader. The three files are 5.4 MB of mp3; DECODED
+           into AudioBuffers they are float32 stereo at 44.1 kHz — 46 MB each
+           for the two long ones, ~124 MB for the set, resident, on a Quest,
+           for ambience. As media elements they stay compressed and decode as
+           they play. Nothing is even fetched until the first teleport in.
+
+           THE LISTENER IS SHARED, not a second one: AudioKit (js/audio.js)
+           owns the page's one THREE.AudioListener on #camera, and Zone C's
+           cinema — which used to build its own — now asks for the same object.
+           Two listeners means two AudioContexts and two sets of ears in one
+           head. Its resume() rides the teleport click, because an AudioContext
+           made outside a user gesture starts suspended on Quest and stays
+           silent however much you play into it.
+
+           CREDITS — the recordings' own filenames, which name the building,
+           the block, the floor, the hour and what you can hear:
+             Cư Xá Thanh Đa_Lô A-Lầu 3-6h Chiều-Tiếng Tivi Mở Phim Việt Nam-
+             Tiếng Nhạc-Tiếng Em Bé Vọng Từ Xa_TP.HCM 2026            (2:11)
+             Đường Đồng Khởi Q1 (đối diện Vincom), 8pm_Tp.Hcm 2026    (1:29)
+             Đường phố_Ngã sáu Nguyễn Tri Phương, 7pm_Tp.Hcm 2026     (2:11)
+           They are in audio/ under ASCII names a URL can carry; the originals
+           are kept verbatim in the manifest (CorridorAudio.TRACKS) as `title`
+           and `originalFile`, and in the git history.
+
+           WHAT TO TUNE BY EAR, in this order:
+             corridorRefDistance 5 / corridorRolloff .8   TOGETHER these decide
+                          how much of the neighbour's television reaches inside
+                          an apartment. refDistance is a PLATEAU — full volume
+                          everywhere within it — and at 5 that covers the
+                          landing, 4.6 m from the bicycle, so you arrive INTO
+                          the television rather than walking up to it. Drop it
+                          to ~3.5 to make the arrival quieter; raise rolloff to
+                          keep it out of the rooms
+             streetRange 16           how far the city carries. Under about 8
+                          it stops before the middle of the run and the two
+                          layers never meet; over about 20 it reaches the
+                          landing and the window stops being a reveal
+             corridorVolume .95 / streetVolume .85   the balance between them
+             crossfade 1.5            the overlap between the two street tracks
+             duckWhileMemory .3       how far both drop under a spoken memory
+             enabled                  false silences the layer without removing
+                          it from this tag
+           ============================================================ -->
+      <a-entity
+        id="zone-a-corridor"
+        corridor-root='offset: 0 0 400; shown: false; width: 4.4;
+                       roomSizes: [{"w": 4.8, "d": 6.0}, {}, {"w": 6.4}];
+                       roomWallPalettes: ["yellow", "red", "green"]'
+        corridor-audio='enabled: true;
+                        corridorVolume: 0.95; corridorRefDistance: 5;
+                        corridorRolloff: 0.8; corridorMaxDistance: 30;
+                        corridorAnchor: bike; anchorOffset: 0 1.4 0;
+                        streetVolume: 0.85; streetRange: 16;
+                        streetOffset: 0 1.6 -2;
+                        fadeIn: 1.5; fadeOut: 1.0; crossfade: 1.5;
+                        duckWhileMemory: 0.3'
+      >
+        <!-- RETURN BOOTH — the way home, standing on the landing against its
+             back wall with its screen facing back down the corridor, so you
+             read it the moment you turn around on arrival and again as you
+             walk back up the run. A CHILD of the corridor root, so it hides
+             and relocates with it (exactly like the floor map's return
+             terminals under #zone-b-map); the manager derives its spot from
+             the corridor's own landingDepth.
+
+             It borrows the map terminals’ amber accent and their EXIT
+             grammar deliberately: one “way home” language across the whole
+             exhibition. No beacon — that exists to be findable across a 25 m
+             floor map, and this is a 2.2 m-wide corridor. Its cue is forced to
+             glow, like Zone C’s, because the corridor floor is dark cement and
+             the void preset’s shadow pool would be invisible on it. -->
+        <a-entity
+          id="terminal-a2-return"
+          teleport-terminal="label: EXHIBITION; accent: #ffc400"
+          spot-contact-cue="forceGlow: true"
+        ></a-entity>
+      </a-entity>
+
+      <!-- ============================================================
+           ZONE B — the wall of 100 images (5 rows × 20), standing on the PARK
+           SQUARE (#zone-b-park above), 10 m past its centre, to the RIGHT of
+           spawn. zone-b-root offsets the WHOLE assembly as a unit (same
+           pattern/intent as zone-a-root) — wall, cues, info terminal B and the
+           triptych group all ride it. Tune via the zone-b-root `offset`
+           property — not the grid math.
+
+           offset 40.2 3 0 is the square's centre plus 10 m east, at the
+           defaults: the centre is x = the hallway's open end 10.2 + half of
+           squareSize 40 = 30.2, z = the hallway's centre 0
+           (ParkConfig.center() in the console gives the live figure), and the
+           wall stands 10 m beyond it so the approach from the hallway mouth is
+           30 m long, with Terminal A (which stays on the centre's -10 m
+           mark) 20 m in front of it. The wall's back slab then ends 9.7 m
+           short of the east kerb. y 3 raises the wall's centre; everything on
+           the floor below it counters that with a local y of -3. Change
+           squareSize or move the hallway and this has to follow by hand, the
+           same way Zone C's offset was worked out from its room.
 
            The inner container's `0 -90 0` rotation turns the wall (built FLAT
-           by image-wall, facing +z) to face -x, back toward spawn. So facing
-           -z you see Zone A; turn right 90° (face +x) and the wall is dead
-           ahead, its width spanning the view. All wall tunables (width / gap /
-           rows / cols / aspect) live on the image-wall component.
+           by image-wall, facing +z) to face -x, back toward the hallway mouth,
+           so you walk out of the passage with the wall dead ahead across the
+           square, its width spanning the view. All wall tunables (width / gap
+           / rows / cols / aspect) live on the image-wall component.
+
+           THE WALL HAS A BACK now. It stands free in the open, so it is seen
+           from behind — and a-image is double-sided, so from there the 100
+           pictures showed MIRRORED. image-wall builds a plain pale slab 2 cm
+           behind the tiles (behind their hover frames), from the floor to a
+           quarter metre above the top row and past each end: a mat between
+           the pictures from the front, a wall from behind. Unlit like the
+           tiles, a baked tone per face so its edges read. Tunables on
+           image-wall: backDepth .3 (0 removes it) / backColor #e6e2da /
+           backMargin .25. The park cuts the slab's whole footprint out of the
+           walkable square, so you walk round it, not through it. The
+           triptych stands on the same kind of slab — see its note below.
+
+           Compass, for the notes below: -z is NORTH (A-Frame's forward, the
+           way Zone A lies from the foyer). The wall runs north-south, so its
+           LEFT end as you face it is the north end.
            ============================================================ -->
-      <a-entity id="zone-b" zone-b-root="offset: 25 3 -1.2">
+      <a-entity id="zone-b" zone-b-root="offset: 40.2 3 0">
         <!-- `shuffle: true` randomizes the wall's image order per load (seed the
              optional shuffleSeed>0 for a reproducible order). Off by default =
              today's manifest order; the floor map is unaffected (it picks by
@@ -334,50 +1213,70 @@
           wall-focus
         ></a-entity>
 
-        <!-- Per-tile floor contact cue under the wall's BOTTOM ROW. Lives under
-             #zone-b so it PERSISTS across environment switches (env teardown
-             only touches #environment); it reuses Zone A's cue machinery via the
-             shared ContactCue kit and retunes to each preset's ground profile.
-             Count + positions derive from the wall's live grid (#zone-b-wall).
-             Tunables: radius / opacity / softness / yoffset. -->
-        <a-entity wall-contact-cue="wall: #zone-b-wall"></a-entity>
+        <!-- ONE soft contact shadow along the foot of the wall's back slab —
+             was a row of twenty little round per-tile pools (wall-contact-cue),
+             which made sense when the pictures hung in the air and read as
+             twenty separate shadows once the wall stood on a slab. Sized from
+             the slab's own footprint (image-wall.footprint(): width + backMargin,
+             backDepth) plus `pad` all round, with rounded ends that fade over
+             the same distance as the sides — see slab-contact-cue in
+             js/zone-b.js. One mesh, one draw call (the old row was forty).
+             Lives under #zone-b so it PERSISTS across environment switches and
+             retunes to each preset's ground profile like every other cue.
+             Tunables: pad .4 / intensity 1.8 / softness .25 / opacity /
+             yoffset. -->
+        <a-entity slab-contact-cue="target: #zone-b-wall"></a-entity>
 
-        <!-- Zone B info terminal: at the wall's LEFT edge (the teleport
-             terminal holds the right edge), angled 45° from the wall's -x
-             facing toward the spawn point (which sits almost exactly on
-             that diagonal from this corner). Local to #zone-b: y -3
-             counteracts the root's raised y (floor). NUDGE BY EYE via
-             position/rotation. -->
+        <!-- Zone B info terminal: at the wall's SOUTH end (its right end as
+             you face it; the triptych holds the north end), 1.2 m out in
+             front of the wall line and just past the back slab's end, angled
+             45° off the wall's -x facing toward the approach from the hallway
+             mouth — yaw -135 turns the screen to face west-north-west, back
+             along the diagonal a visitor walks in on. Its hit box clears the
+             slab's end by ~0.17 m. Local to #zone-b: y -3 counteracts the
+             root's raised y (floor). NUDGE BY EYE via position/rotation. -->
         <a-entity
           id="info-terminal-b"
           info-terminal="key: b"
-          position="-1.2 -3 -12.23"
-          rotation="0 -45 0"
+          position="-1.2 -3 12.23"
+          rotation="0 -135 0"
           spot-contact-cue
         ></a-entity>
 
         <!-- TRIPTYCH SUB-ZONE — three stacked Ticket 485496 images just past
-             the wall's LEFT end (opposite Terminal A's side, beyond
-             info-terminal-b), turned 90° to the wall: at yaw 0 the stack
-             faces +z, back along the wall's axis, so it reads face-on as
-             you walk the wall toward its left end (it is edge-on from
-             spawn — by design). Local to #zone-b: y -3 counteracts the
-             root's raised y (floor); x -1.2 lines up with the terminals'
-             wall clearance; z -13.9 clears info-terminal-b's hit box by
-             ~1 m. PLACEHOLDER — NUDGE BY EYE via this position/rotation
-             (the whole sub-zone moves as a unit). Stack tunables
-             (imageScale / bottomHeight / stackGap) live on zone-b-triptych. -->
+             the wall's NORTH end (its left end as you face it; info-terminal-b
+             holds the south end), turned 90° to the wall: at yaw 0 the stack
+             faces +z, back along the wall's axis, so it reads face-on as you
+             walk the wall toward its north end (it is edge-on from the hallway
+             mouth — by design, the same as it was in the room). Local to
+             #zone-b: y -3 counteracts the root's raised y (floor); x -1.2
+             lines up with info-terminal-b's wall clearance; z -13.9 stands
+             the group 2.4 m clear of the back slab's end, and the whole group
+             sits 4.7 m inside the square's north kerb, clear of the benches.
+             Like the image wall, the stack is a FIXED WALL now: the same pale
+             slab (wallBackMesh in js/zone-b.js) stands behind the three images,
+             floor to a quarter metre above the top one and past each side, so
+             from behind it is a wall rather than three mirrored pictures, and
+             the park cuts it out of the walkable square. Tunables on
+             zone-b-triptych: backDepth .3 (0 removes it) / backColor #e6e2da /
+             backMargin .25.
+             NUDGE BY EYE via this position/rotation (the whole sub-zone moves
+             as a unit). Stack tunables (imageScale / bottomHeight / stackGap)
+             live on zone-b-triptych. -->
         <a-entity id="zone-b-triptych" position="-1.2 -3 -13.9" rotation="0 0 0">
           <!-- wall-focus is the wall's own capture-and-restore lightbox,
                reused UNFORKED: it delegates clicks from its child tiles, so
                a second instance on the stack gives the triptych the exact
                same focus grammar (VR fly-out + web blurred overlay, one at
                a time — each instance's `focused` guard keeps them apart). -->
-          <!-- One elliptical floor cue under the stack footprint: the shared
-               spot-contact-cue (same kit + env-switch retune as every other
-               cue; it persists across environment switches because it lives
-               under #zone-b, not #environment). Width spans the stack's
-               ~1.62 m of images with margin; size/opacity BY EYE.
+          <!-- The floor cue under the stack's back slab: slab-contact-cue on
+               the stack itself (no target = this entity), the same stadium
+               shadow as the image wall's, sized from the triptych's own
+               footprint (the images' width + backMargin, backDepth) plus `pad`
+               — it replaced a 2.1 × 0.9 m oval that faded out before the
+               slab's ends. Same kit + env-switch retune as every other cue;
+               it persists across environment switches because it lives under
+               #zone-b, not #environment. Tunables: pad / intensity / softness.
                The stack sits LEFT of the info terminal as a visitor faces
                the sub-zone (group-local -x): x -3.0 keeps ~0.2 m between
                the images' edge and the terminal's hit box. -->
@@ -386,20 +1285,21 @@
             position="-3.0 0 0"
             zone-b-triptych="wall: #zone-b-wall; imageScale: 1.5"
             wall-focus
-            spot-contact-cue="width: 2.1; depth: 0.9; opacity: 0.3"
+            slab-contact-cue
           ></a-entity>
 
           <!-- Triptych info terminal: to the stack's RIGHT as a visitor
                faces the sub-zone (the stack sits at group-local x -3.0,
-               this terminal at -1.4), screen facing the same way as the
-               images. Its hit box (~0.57 m half-width) clears the stack's
-               images by ~0.2 m and stays ~1 m from info-terminal-b's.
+               this terminal at -1.2), screen facing the same way as the
+               images. Its hit box (~0.57 m half-width) clears the end of the
+               stack's back slab by ~0.17 m (it stood at -1.4, 0.2 m closer,
+               before the stack had a slab to clear).
                NUDGE BY EYE via position/rotation (the placement-offset
                tunable for this terminal). -->
           <a-entity
             id="info-terminal-d"
             info-terminal="key: d"
-            position="-1.4 0 0"
+            position="-1.2 0 0"
             rotation="0 0 0"
             spot-contact-cue
           ></a-entity>
@@ -490,13 +1390,21 @@
            transition-glitch (rig moves at peak obscuration; see
            js/zone-b-teleport.js and js/transition.js).
 
-           Terminal A is a freestanding sign in the MIDDLE of the Zone B room
-           (its centre read live from the floorplan — no copied numbers); its
-           screen shows a central-Saigon detail cropped from the baked map JPEG
+           Terminal A stands on the park's square 10 m WEST of the square's
+           centre — 20 m in front of the image wall, which stands 10 m past
+           that centre — on the approach axis from the hallway mouth, screen
+           toward you: the first thing you meet walking out onto the square.
+           Its spot is read live from the square's centre (ParkConfig,
+           js/zone-b-park.js — no copied numbers), NOT from the wall, so moving
+           #zone-b's offset leaves it where it is. terminalAOffset defaults to
+           -10 0 0. Its screen
+           shows a central-Saigon detail cropped from the baked map JPEG
            (reusing the existing asset) as a preview of the destination.
-           Teleporting back lands you at this same spot.
+           Teleporting back lands you 1.6 m in front of it, facing the wall,
+           with the collider back on and the square's walls restored.
 
-           Tunables on zone-b-teleport: terminalAOffset (from the room centre) /
+           Tunables on zone-b-teleport: terminalAOffset (from the square's
+           centre, -10 0 0) /
            mapSpawnOffset / returnSpawnOffset / returnInset (each return terminal's
            inset inside its map edge) / returnY. Terminal geometry + hit sizes,
            and the return terminals' accent / beacon / beaconHeight / beaconWidth /
@@ -536,15 +1444,15 @@
            ============================================================ -->
       <a-entity
         id="zone-c"
-số đề        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
+        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHeightAboveFloor: 0.8; controlsScale: 0.7"
       >
         <!-- Floor contact cue under the screen: one wide elliptical pool
              (cueWidth AUTO-tracks 1.2 × screenWidth; the control strip gets
              none). Lives under #zone-c so it PERSISTS across environment
              switches (env teardown only touches #environment); it reuses the
              shared ContactCue kit and retunes its material to each preset's
-             ground profile, exactly like Zone A's ring cues and Zone B's
-             wall cues — with an `intensity` boost on the profile opacity so
+             ground profile, exactly like Zone B's wall cues and every spot
+             cue — with an `intensity` boost on the profile opacity so
              this one big pool doesn't read faint. Tunables: cueWidth /
              cueDepth / intensity / opacity / softness / yoffset.
              forceGlow: the Zone C floor is dark, so the void preset's shadow
@@ -606,7 +1514,16 @@ số đề        zone-c-root="offset: -21.9 3 -0.5; screenHeight: 8.8; screenHe
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
-           while the headset head-tracks the camera within it. -->
+           while the headset head-tracks the camera within it.
+
+           rig-collision clamps locomotion to the walkable floor. Its region is
+           built from the FLOORPLAN's own live config (so the walls you see and
+           the walls you cannot cross come from one set of numbers), PLUS any
+           sub-space that registers itself through the RigRegions registry in
+           js/rig-collision.js — which is how the Zone A corridor, 400 m out and
+           not part of the floorplan at all, gets the same walls the gallery
+           has. Tunables on this entity: playerRadius / doorOverlap /
+           teleportThreshold / enabled / debug. -->
       <a-entity id="rig" position="0 0 0" rig-collision>
         <!-- Camera at standing eye height; desktop controls unchanged.
              near:0.1 (up from the 0.005 default) tightens the depth range so

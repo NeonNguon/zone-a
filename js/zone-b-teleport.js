@@ -1,9 +1,10 @@
 // ================================================================
 // Zone B — teleport terminals: the floor map (relocated ~400 m out, hidden
 // while you're in the main exhibition) is reached through a freestanding sign
-// in the MIDDLE of the Zone B room; a bright return terminal on EACH of the
-// map's four edges brings you back to that same spot (findable from anywhere
-// on the map, each topped by a tall beacon over the sphere field).
+// on the Zone B park's square, west of the image wall on the approach from the
+// hallway mouth; a bright return terminal on EACH of the map's four edges
+// brings you back to that same spot (findable from anywhere on the map, each
+// topped by a tall beacon over the sphere field).
 // Each jump runs the reusable transition-glitch (js/transition.js) and
 // executes the actual rig relocation + map visibility flip at the glitch's
 // PEAK, so the cut is never visible.
@@ -31,7 +32,9 @@
 // TUNABLES: screenWidth/screenHeight/screenHeightAboveFloor/tilt (geometry),
 //   hitScale (hit box = screen size × this, floor to above the screen),
 //   screenSrc + cropMin/cropMax (image detail, fractions of the image with
-//   y measured from the TOP), label (generated text screen when no src).
+//   y measured from the TOP), label (generated text screen when no src —
+//   word-wrapped + shrink-to-fit, so a long label like a work's title stays
+//   legible; a short one draws exactly where the single-line version drew).
 //
 // WAYFINDING (return terminals only): `accent` (a bright colour) turns the dark
 //   label screen into a high-contrast, self-lit-looking "way home" screen and,
@@ -42,6 +45,70 @@
 //   screen (like a post behind a sign) so it never occludes the label. All
 //   flat/unlit — Quest-cheap.
 // ----------------------------------------------------------------
+// The screen canvases' type stack — the same system Helvetica stack the info
+// terminals draw with, so all the screens in the exhibition share one face.
+const SCREEN_FONT = "Helvetica, Arial, sans-serif";
+
+// ----------------------------------------------------------------
+// drawWrappedLabel — a centred, word-wrapped screen label.
+//
+// A label screen was originally ONE line drawn at the canvas centre, which is
+// all the map's return terminals ("EXIT") ever needed. Zone A V2's booth
+// carries a work's TITLE instead ("All the Places I Have Lived", read live from
+// ZoneTexts), which overflows the 512 px canvas on one line — so the drawing
+// wraps now.
+//
+// Written so that a label which ALREADY fits on one line is drawn exactly where
+// it was drawn before: a single line lands on the canvas centre at the caller's
+// unshrunk font size, and the function returns that same y for the caller's
+// underline rule. Every existing terminal is therefore pixel-identical.
+//
+// Wrapping is greedy on spaces and capped at `maxLines`; if the text still does
+// not fit (a long word, or more lines than the cap) the font shrinks in 2 px
+// steps until it does, down to `minSize`. Returns the y of the LAST line.
+// ----------------------------------------------------------------
+function drawWrappedLabel(ctx, canvas, text, opts) {
+  const maxWidth = canvas.width - opts.padding * 2;
+  const words = String(text).split(/\s+/).filter(Boolean);
+  let size = opts.fontSize;
+  let lines = [];
+
+  // Lay the text out, shrinking until it satisfies BOTH the width and the line
+  // cap (or bottoms out at minSize — better a slightly tight screen than none).
+  for (;;) {
+    ctx.font = opts.weight + " " + size + "px " + opts.family;
+    lines = [];
+    let line = "";
+    words.forEach(function (w) {
+      const next = line ? line + " " + w : w;
+      if (line && ctx.measureText(next).width > maxWidth) {
+        lines.push(line);
+        line = w;
+      } else {
+        line = next;
+      }
+    });
+    if (line) lines.push(line);
+    const widest = lines.reduce(function (m, l) {
+      return Math.max(m, ctx.measureText(l).width);
+    }, 0);
+    const fits = lines.length <= opts.maxLines && widest <= maxWidth;
+    if (fits || size <= opts.minSize) break;
+    size -= 2;
+  }
+
+  // Centre the BLOCK on the canvas centre: with one line that IS the canvas
+  // centre, which is where the single-line version drew.
+  const lineH = size * opts.lineHeight;
+  const top = canvas.height / 2 - ((lines.length - 1) * lineH) / 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  lines.forEach(function (l, i) {
+    ctx.fillText(l, canvas.width / 2, top + i * lineH);
+  });
+  return top + (lines.length - 1) * lineH;
+}
+
 AFRAME.registerComponent("teleport-terminal", {
   schema: {
     label: { type: "string", default: "" }, // text screen (no src)
@@ -69,8 +136,18 @@ AFRAME.registerComponent("teleport-terminal", {
     // comes from the shared TerminalKit (js/terminal-kit.js) — extracted
     // verbatim from this component, so the look and behaviour are unchanged.
     // This component owns only the screen canvas CONTENT and the teleport.
+    //
+    // The screen canvas is created ONCE and owned by this component; every
+    // draw (init, a later label change, the async image crop) paints into that
+    // same canvas so the CanvasTexture TerminalKit wrapped around it stays the
+    // texture on the screen mesh.
+    this.canvas = document.createElement("canvas");
+    this.canvas.width = 512;
+    this.canvas.height = 360;
+    this.drawScreen();
+
     this.rig = TerminalKit.build(this.el, {
-      canvas: this.makeScreenCanvas(),
+      canvas: this.canvas,
       screenWidth: d.screenWidth,
       screenHeight: d.screenHeight,
       screenHeightAboveFloor: d.screenHeightAboveFloor,
@@ -87,14 +164,31 @@ AFRAME.registerComponent("teleport-terminal", {
     if (d.screenSrc) this.loadScreenImage();
   },
 
-  // The screen's canvas. Three looks: a bright self-lit `accent` "way home"
-  // screen (bold white label on the accent colour — reads as glowing on the
-  // unlit screen mesh); else a dark generated label (Helvetica, thin accent
-  // rule — the data aesthetic); or, once loaded, the image crop.
-  makeScreenCanvas: function () {
-    const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 360;
+  // Redraw the screen when the label (or accent) is set after init. Zone A V2's
+  // booth takes its label from ZoneTexts, which only a manager can read, so the
+  // manager sets it once the terminal already exists — this is what makes that
+  // land on the screen. No live terminal ever changes its label otherwise, so
+  // every existing terminal is untouched by this.
+  update: function (oldData) {
+    if (!this.rig || Object.keys(oldData).length === 0) return; // init drew it
+    if (
+      oldData.label === this.data.label &&
+      oldData.accent === this.data.accent
+    ) {
+      return;
+    }
+    this.drawScreen();
+    if (this.data.screenSrc) this.loadScreenImage(); // repaints over it, async
+    this.screenTex.needsUpdate = true;
+  },
+
+  // Draw the screen's content into this.canvas. Three looks: a bright self-lit
+  // `accent` "way home" screen (bold white label on the accent colour — reads
+  // as glowing on the unlit screen mesh); else a dark generated label
+  // (Helvetica, thin accent rule — the data aesthetic); or, once loaded, the
+  // image crop (drawn over either by loadScreenImage).
+  drawScreen: function () {
+    const canvas = this.canvas;
     const ctx = canvas.getContext("2d");
     if (this.data.accent) {
       // Bright wayfinding screen: saturated accent fill + bold white label,
@@ -106,13 +200,19 @@ AFRAME.registerComponent("teleport-terminal", {
       ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
       if (this.data.label) {
         ctx.fillStyle = "#ffffff";
-        ctx.font = "700 76px Helvetica, Arial, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(this.data.label, canvas.width / 2, canvas.height / 2);
+        // One short word ("EXIT", "EXHIBITION") stays one centred line at 76px,
+        // exactly as before; anything longer wraps rather than running off.
+        drawWrappedLabel(ctx, canvas, this.data.label, {
+          weight: "700",
+          fontSize: 76,
+          minSize: 34,
+          family: SCREEN_FONT,
+          padding: 46, // clears the 8px white frame at 12px inset
+          maxLines: 3,
+          lineHeight: 1.15,
+        });
       }
-      this.canvas = canvas;
-      return canvas;
+      return;
     }
     ctx.fillStyle = "#0b0b10";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -120,15 +220,21 @@ AFRAME.registerComponent("teleport-terminal", {
     ctx.strokeRect(10.5, 10.5, canvas.width - 21, canvas.height - 21);
     if (this.data.label) {
       ctx.fillStyle = "#e8eef8";
-      ctx.font = "600 44px Helvetica, Arial, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(this.data.label, canvas.width / 2, canvas.height / 2);
+      // Wraps to 2-3 lines for a long label (Zone A V2's booth shows the work's
+      // title); a one-line label lands on the canvas centre as it always did,
+      // and the accent rule follows the LAST line, so both cases read right.
+      const lastY = drawWrappedLabel(ctx, canvas, this.data.label, {
+        weight: "600",
+        fontSize: 44,
+        minSize: 22,
+        family: SCREEN_FONT,
+        padding: 40, // clears the thin frame at 10.5px inset
+        maxLines: 3,
+        lineHeight: 1.2,
+      });
       ctx.fillStyle = "#bfe6ff";
-      ctx.fillRect(canvas.width / 2 - 60, canvas.height / 2 + 42, 120, 3);
+      ctx.fillRect(canvas.width / 2 - 60, lastY + 42, 120, 3);
     }
-    this.canvas = canvas;
-    return canvas;
   },
 
   // A tall, bright, UNLIT wayfinding beacon rising above the sphere field: a
@@ -228,9 +334,13 @@ AFRAME.registerComponent("teleport-terminal", {
 // retuning the map offset later can't break arrival points.
 //
 // Placements (all world-space, derived):
-//   Terminal A — a freestanding sign at the CENTRE of the Zone B room (read
-//     live from the floorplan), terminalAOffset from that centre, screen
-//     facing -x (the entrance / the return-spawn side).
+//   Terminal A — a freestanding sign on the Zone B park's square,
+//     terminalAOffset from the square's CENTRE (ParkConfig.center(), derived
+//     live from the floorplan's hallway) — deliberately not from the wall, so
+//     the wall can be moved without taking the sign with it. The default
+//     offset puts the sign 10 m WEST of the centre, on the approach axis from
+//     the hallway mouth (the wall stands 10 m EAST of it): you meet it walking
+//     in. Screen facing -x, toward you as you come.
 //   Return terminals — ONE per map edge (near/far/left/right), each `returnInset`
 //     inside its edge midpoint (derived live from the board's width/depth + gap),
 //     children of the map root so they move/hide with the map; every screen faces
@@ -238,7 +348,7 @@ AFRAME.registerComponent("teleport-terminal", {
 //   Map spawn — mapSpawnOffset from the near-edge centre, facing +x (across
 //     the map, the full sphere field ahead).
 //   Return spawn — returnSpawnOffset from Terminal A, facing +x (toward the
-//     sign in the middle of the room, NOT the exhibition's original spawn).
+//     sign and the wall beyond it, NOT the exhibition's original spawn).
 //
 // Sequence per jump: glitch trigger -> AT PEAK move rig (visitor-compensated,
 // see TeleportRig) + flip map `shown` -> glitch resolves. `busy` +
@@ -246,7 +356,10 @@ AFRAME.registerComponent("teleport-terminal", {
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-b-teleport", {
   schema: {
-    terminalAOffset: { type: "vec3", default: { x: 0, y: 0, z: 0 } }, // from room centre
+    // From the park square's centre, not from the wall: -10 puts the sign
+    // halfway between the hallway mouth and the centre, on the approach axis,
+    // 20 m in front of the wall.
+    terminalAOffset: { type: "vec3", default: { x: -10, y: 0, z: 0 } },
     mapSpawnOffset: { type: "vec3", default: { x: -0.6, y: 0, z: 0 } },
     returnSpawnOffset: { type: "vec3", default: { x: -1.6, y: 0, z: 0 } },
     // Each return terminal sits this far INSIDE its map edge (m), lifted returnY
@@ -287,13 +400,18 @@ AFRAME.registerComponent("zone-b-teleport", {
       t.addEventListener("click", this.onReturn)
     );
 
-    // Re-derive whenever the map root moves or the board (re)builds.
+    // Re-derive whenever the map root moves, the board (re)builds, or the park
+    // (and with it the square Terminal A stands on) rebuilds.
     this.onMapChange = () => this.layout();
     if (this.mapRootEl) {
       this.mapRootEl.addEventListener("zonebmaprootchanged", this.onMapChange);
     }
     if (this.boardEl) {
       this.boardEl.addEventListener("zonebmapbuilt", this.onMapChange);
+    }
+    this.parkEl = document.getElementById("zone-b-park");
+    if (this.parkEl) {
+      this.parkEl.addEventListener("zonebparkchanged", this.onMapChange);
     }
 
     this.layout();
@@ -304,16 +422,14 @@ AFRAME.registerComponent("zone-b-teleport", {
     this.layout();
   },
 
-  // Zone B's room centre in WORLD coords, read live from the floorplan (the room
-  // the freestanding teleport sign stands in). #floorplan parses before this
-  // component, so its config is readable here; falls back to the wall root's
-  // offset if not.
+  // The centre of the Zone B park's square in WORLD coords — ParkConfig
+  // (js/zone-b-park.js), itself derived live from the floorplan's hallway, so
+  // no number is copied here. (It used to be the zoneB ROOM's centre; the room
+  // is gone.) Falls back to the wall root's offset if the park is not loaded.
   zoneBCenter: function () {
-    const fp = document.getElementById("floorplan");
-    const attr = fp && fp.getAttribute("floorplan");
-    const r = attr && attr.rooms && attr.rooms.zoneB;
-    if (r) return { x: r.cx, z: r.cz };
-    console.warn("zone-b-teleport: no floorplan zoneB; FALLBACK to wall root");
+    const c = window.ParkConfig && window.ParkConfig.center();
+    if (c) return c;
+    console.warn("zone-b-teleport: no ParkConfig; FALLBACK to wall root");
     const wallRoot = document.getElementById("zone-b");
     const rootAttr = wallRoot && wallRoot.getAttribute("zone-b-root");
     const base = (rootAttr && rootAttr.offset) || { x: 19.2, y: 3, z: -3 };
@@ -323,9 +439,9 @@ AFRAME.registerComponent("zone-b-teleport", {
   layout: function () {
     const d = this.data;
 
-    // --- Terminal A: a freestanding sign at the CENTRE of the Zone B room
-    // (read live from the floorplan — no copied numbers), at FLOOR level and
-    // offset by the tunable; screen faces -x (the entrance / return-spawn side).
+    // --- Terminal A: a freestanding sign on the park's square, offset from its
+    // centre (read live from ParkConfig — no copied numbers), at FLOOR level;
+    // screen faces -x (the hallway mouth / return-spawn side).
     const c = this.zoneBCenter();
     const ax = c.x + d.terminalAOffset.x;
     const ay = 0 + d.terminalAOffset.y;
@@ -446,6 +562,9 @@ AFRAME.registerComponent("zone-b-teleport", {
     }
     if (this.boardEl) {
       this.boardEl.removeEventListener("zonebmapbuilt", this.onMapChange);
+    }
+    if (this.parkEl) {
+      this.parkEl.removeEventListener("zonebparkchanged", this.onMapChange);
     }
   },
 });

@@ -6,3 +6,9 @@ tools/package-lock.json
 
 # Nested git repo, managed independently — not a submodule.
 100locations/
+
+# Visual reference material only (the ChungCu corridor photographs the Zone A V2
+# textures were painted from). Never loaded by the scene, never in <a-assets> —
+# the corridor's surfaces are runtime canvases (js/zone-a-corridor.js). Kept out
+# of the repo because they are third-party photographs, not project assets.
+reference/

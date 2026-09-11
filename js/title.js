@@ -84,7 +84,7 @@ AFRAME.registerComponent("exhibition-title", {
 
     // Backing card: near-black like the DOM splash, just behind the text —
     // the separation that keeps white text legible on light presets (void's
-    // #eeeeee background) and against the ring images behind it.
+    // #eeeeee background) and against the Zone A room behind it.
     this.backing = document.createElement("a-plane");
     this.backing.setAttribute("width", 4.0);
     this.backing.setAttribute("height", 1.5);
@@ -96,9 +96,9 @@ AFRAME.registerComponent("exhibition-title", {
     );
     this.el.appendChild(this.backing);
     // Explicit layering: the card and the text are transparent objects almost
-    // coplanar with each other and near the (transparent-tagged) ring images
+    // coplanar with each other and near other transparent-tagged scene objects
     // behind them — distance sorting alone draws them in the wrong order
-    // (ring over card, text hollow). renderOrder pins it: ring (default 0)
+    // (scene over card, text hollow). renderOrder pins it: scene (default 0)
     // -> card (1) -> text (2).
     this.backing.addEventListener(
       "loaded",

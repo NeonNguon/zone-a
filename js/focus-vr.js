@@ -23,9 +23,50 @@
 (function () {
   const VR_DISTANCE = 2.2; // metres in front of the camera at click time
   const VR_EYE_Y = 1.6; // fixed eye height for the panel centre
-  const VR_IMG = 1.6; // focus image size (square) — bigger than ring images
-  const DIM_RADIUS = 4; // dark sphere radius; ring (~3.7m) falls just inside,
-  //                       so we lean on the backing panel for separation too
+  const VR_IMG = 1.6; // focus image size (square) — bigger than a hung image
+  const DIM_RADIUS = 4; // dark sphere radius; in the open gallery the walls and
+  //                       the far zones fall outside it and darken
+
+  // ---- per-space override hook -----------------------------------------
+  // The two constants above are sized for the OPEN gallery. A sub-space can be
+  // much tighter — the chung cư apartments are 3.2 × 4 m — and there a panel
+  // 2.2 m out lands inside (or through) a wall. So a space may set
+  //
+  //   window.ZoneA.focusVR = { distance: <m>, dimRadius: <m> };
+  //
+  // and this view adopts it AT OPEN TIME; clearing it (or setting either to 0)
+  // restores the gallery defaults. The corridor teleport sets it on arrival and
+  // clears it on the way home (js/zone-a-corridor.js). Nothing else changes:
+  // the desktop overlay never reads this.
+  //
+  // The dim sphere must stay OUTSIDE the panel it is isolating. It is a
+  // transparent black shell at `dimRadius`, so anything FARTHER than that is
+  // tinted — including any part of the focus panel itself, which would put a
+  // visible circular edge across the picture. panelRadius() is the distance
+  // from the eye to the farthest corner of the panel, and a dimRadius smaller
+  // than that is warned about rather than silently drawn wrong.
+  function panelRadius(distance) {
+    const halfW = (VR_IMG + 0.5) / 2; // backing panel half-width
+    const lowest = 0.35 + (VR_IMG + 1.1) / 2; // its bottom, below eye height
+    return Math.sqrt(distance * distance + halfW * halfW + lowest * lowest);
+  }
+
+  function focusCfg() {
+    const o = (window.ZoneA && window.ZoneA.focusVR) || {};
+    const cfg = {
+      distance: o.distance > 0 ? o.distance : VR_DISTANCE,
+      dimRadius: o.dimRadius > 0 ? o.dimRadius : DIM_RADIUS,
+    };
+    const need = panelRadius(cfg.distance);
+    if (cfg.dimRadius < need) {
+      console.warn(
+        "focus-vr: dimRadius " + cfg.dimRadius.toFixed(2) + " m is inside the " +
+          "panel (which reaches " + need.toFixed(2) + " m) — its corners will " +
+          "be dimmed. Raise ZoneA.focusVR.dimRadius."
+      );
+    }
+    return cfg;
+  }
 
   let focusEl = null; // world-anchored container (image + text + reveal)
   let dimEl = null; // head-centred dark sphere
@@ -89,13 +130,17 @@
     const title = currentEntry ? currentEntry.title : stem;
     const year = currentEntry ? currentEntry.year : "";
 
+    // The distance + dim radius for the space we are standing in (see
+    // focusCfg): the gallery defaults, unless a sub-space has overridden them.
+    const cfg = focusCfg();
+
     // --- Dim sphere: child of the camera so it stays centred on the head.
     // A sphere is rotationally symmetric, so head rotation doesn't matter;
     // it just darkens everything farther than DIM_RADIUS. side: back renders
     // the inner faces (we're inside it). It's clickable -> empty-space close.
     const cam = document.getElementById("camera");
     dimEl = document.createElement("a-sphere");
-    dimEl.setAttribute("radius", DIM_RADIUS);
+    dimEl.setAttribute("radius", cfg.dimRadius);
     dimEl.setAttribute("material", panelMat("#000000", 0.6) + "; side: back");
     dimEl.setAttribute("class", "clickable");
     cam.appendChild(dimEl);
@@ -111,7 +156,7 @@
     fwd.y = 0;
     fwd.normalize();
 
-    const focusPos = camPos.clone().addScaledVector(fwd, VR_DISTANCE);
+    const focusPos = camPos.clone().addScaledVector(fwd, cfg.distance);
     focusPos.y = VR_EYE_Y; // fixed comfortable eye height
     // Yaw so the panel's +Z faces back toward the camera (Y axis only).
     const yawDeg = THREE.MathUtils.radToDeg(

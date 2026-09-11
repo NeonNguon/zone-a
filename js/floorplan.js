@@ -6,10 +6,15 @@
 // approach as the contact cues. It builds no floor — the environment preset's
 // ground plane is the floor, so the rooms sit on whatever preset is active.
 //
+// THREE rooms now: the foyer and Zones A and C. Zone B has no room any more —
+// it is an open park outside the building (js/zone-b-park.js), and its hallway
+// is a passage OUT, with one opening in the foyer and an open far end where the
+// square begins. See the note on open ends above buildCorridor().
+//
 // HEIGHTS are per-room, and the hallways are deliberately LOWER than the rooms
 // they join, so you duck through a passage and the space opens up on arrival:
 //   foyer (central) 5 m, ceiling       zoneA  5 m, ceiling
-//   zoneB          10 m, ceiling       zoneC 10 m, ceiling
+//   zoneC          10 m, ceiling
 //   hallways        3 m, roofed
 // Two things fall out of that and are easy to miss:
 //  - Openings are NOT full-height. A 3 m hallway into a 5 m room leaves 2 m of
@@ -53,7 +58,7 @@
 // `src` is the wallpaper hook — a URL or an <a-assets> selector — and `repeat`
 // tiles it ('4 2' = 4 across, 2 up). So, for example:
 //   zoneC: { ..., style: { color: '#e8e3d9' } }
-//   zoneB: { ..., style: { src: '#wallpaper', repeat: '6 2' },
+//   zoneA: { ..., style: { src: '#wallpaper', repeat: '6 2' },
 //                 ceilingStyle: { color: '#ffffff' } }
 // Live, without a reload (the whole plan rebuilds):
 //   const fp = document.getElementById('floorplan');
@@ -81,7 +86,7 @@ const DEFAULT_ROOMS = {
   // tinted to the room it leads to, so the doorway previews the zone beyond it
   // and the tint reads continuously through the passage into the room:
   //   -x wall (to Zone C, the cinema)  -> charcoal
-  //   +x wall (to Zone B, the lottery) -> soft coral
+  //   +x wall (out to Zone B, the park) -> soft coral
   // Per-SIDE overrides — the foyer's other two walls (-z to Zone A, +z solid)
   // and its ceiling stay white.
   central: {
@@ -91,19 +96,13 @@ const DEFAULT_ROOMS = {
       "+x": { color: "#f5b4b0" },
     },
   },
-  // The ring, forward (-z). Its images top out ~2.3 m, so 5 m is ample.
+  // Zone A, forward (-z). Since Zone A V2 the room is EMPTY but for the
+  // teleport booth and the info terminal (the nine images moved out to the
+  // chung cu corridor), so nothing in it comes near this 5 m height.
   zoneA: { cx: 0, cz: -11.85, w: 11.2, d: 11.1, height: 5, ceiling: true },
-  // Image wall + triptych, right (+x). The wall tops out ~4.9 m.
-  //
-  // A SOFT-CORAL room (the lottery): walls + a fractionally deeper ceiling, with
-  // a matching soft-coral terrazzo floor (see tinted-floor in index.html). shader
-  // stays standard so the walls still shade under the light rig — lighting is
-  // unchanged here (no fixtureScale, unlike Zone C). Tune the two colours by eye.
-  zoneB: {
-    cx: 19.2, cz: -3, w: 18, d: 28.8, height: 10, ceiling: true,
-    style: { color: "#f5b4b0" },
-    ceilingStyle: { color: "#e9a6a2" },
-  },
+  // (Zone B had a coral room here, right (+x) of the foyer. It is gone: the
+  // lottery now stands outdoors on a concrete square at the far end of the
+  // central-zoneB hallway — see js/zone-b-park.js.)
   // Cinema, left (-x). The screen tops out ~7.1 m — the tallest thing in the
   // exhibition, and why these two rooms are 10 m rather than 5.
   //
@@ -126,8 +125,10 @@ const DEFAULT_ROOMS = {
 // ---------- hallway config ----------
 // Each hallway cuts ONE opening into each of the two facing walls it names,
 // spans the gap between them with two corridor side-walls, and roofs itself.
-//   openings — the two [room, side] walls to cut. Both get the same opening, so
-//              they line up by construction.
+//   openings — the [room, side] walls to cut. Both get the same opening, so
+//              they line up by construction. Naming only ONE wall is legal: the
+//              hallway is then a passage out of the building, OPEN at the end
+//              of `corridor` that no room wall stands on (see corridorOpenEnds).
 //   center   — opening centre along the wall's RUN axis: z for a ±x wall,
 //              x for a ±z wall.
 //   width    — clear width of the opening (metres).
@@ -140,17 +141,17 @@ const DEFAULT_ROOMS = {
 const DEFAULT_HALLWAYS = [
   {
     id: "central-zoneB",
-    openings: [
-      { room: "central", side: "+x" },
-      { room: "zoneB", side: "-x" },
-    ],
+    // ONE opening: the passage out to the Zone B park. Its far end, x 10.2, is
+    // open — no room wall stands there, and the concrete square begins exactly
+    // there (zone-b-park reads this span to find where to lay it).
+    openings: [{ room: "central", side: "+x" }],
     center: 0,
     width: 2.4,
     corridor: { from: 5, to: 10.2 },
-    // Soft-coral passage into the lottery room: coral side-walls + a fractionally
-    // deeper roof, matching Zone B AND the foyer's coral +x wall at both ends, so
-    // the coral is seamless from the foyer doorway through to Zone B (the corridor
-    // is coplanar with the doorway reveals at each end).
+    // Soft-coral passage out to the lottery: coral side-walls + a fractionally
+    // deeper roof, matching the foyer's coral +x wall, so the coral is seamless
+    // from the foyer doorway to the mouth (the corridor is coplanar with the
+    // doorway reveal at the foyer end).
     style: { color: "#f5b4b0" },
     ceilingStyle: { color: "#e9a6a2" },
   },
@@ -214,6 +215,33 @@ function sideGeometry(room, side) {
 // The through axis a side faces along — the direction you walk to cross it.
 function throughAxis(side) {
   return side.charAt(1); // '-x'/'+x' -> 'x'; '-z'/'+z' -> 'z'
+}
+
+// Which ends of a hallway's corridor are OPEN: { lo, hi } for the min and max
+// of its from/to span, true where no room wall stands.
+//
+// A hallway naming two walls has none — both ends are buried in rooms, and this
+// returns { lo: false, hi: false } without looking further, so every such
+// hallway builds exactly as it always did. A hallway naming ONE wall is a
+// passage out of the building: the end nearer that wall's plane is walled, the
+// other is open. Naming none leaves a free-standing tube, open at both ends.
+//
+// Global (like sideGeometry) because more than the walls need the answer:
+// tinted-floor has to stop its strip where the passage stops, not half a wall
+// thickness beyond it.
+function corridorOpenEnds(h, rooms) {
+  const valid = ((h && h.openings) || []).filter((o) => rooms && rooms[o.room]);
+  if (valid.length >= 2 || !h.corridor) return { lo: false, hi: false };
+  const lo = Math.min(h.corridor.from, h.corridor.to);
+  const hi = Math.max(h.corridor.from, h.corridor.to);
+  const open = { lo: true, hi: true };
+  valid.forEach((o) => {
+    const g = sideGeometry(rooms[o.room], o.side);
+    if (!g) return;
+    if (Math.abs(g.fixed - lo) <= Math.abs(g.fixed - hi)) open.lo = false;
+    else open.hi = false;
+  });
+  return open;
 }
 
 AFRAME.registerComponent("floorplan", {
@@ -466,6 +494,12 @@ AFRAME.registerComponent("floorplan", {
   // seamless tube from room face to room face, with no edge where they join.
   // They run the corridor's whole span PLUS half a wall thickness at each end,
   // so they reach the rooms' inner faces and tuck inside both room walls.
+  //
+  // AN OPEN END is the exception (see corridorOpenEnds): there is no room wall
+  // there to tuck into, so the side-walls stop exactly at the span's end rather
+  // than sticking out half a thickness, and the roof runs all the way to it
+  // rather than stopping short for a wall body that is not there. The mouth is
+  // then one clean frame: wall ends, roof edge and floor strip in one plane.
   buildCorridor: function (h) {
     const side = h.openings && h.openings[0] && h.openings[0].side;
     if (!side || !h.corridor) {
@@ -478,11 +512,12 @@ AFRAME.registerComponent("floorplan", {
     const runAxis = throughAxis(side);
     const offset = h.width / 2 + d.thickness / 2;
     const half = d.thickness / 2;
+    const open = corridorOpenEnds(h, d.rooms);
     // Reach the rooms' inner faces, so the passage's floor and ceiling lines run
     // its full length instead of stopping half a wall short of each doorway.
-    // The overhang is buried inside the room walls.
-    const lo = Math.min(h.corridor.from, h.corridor.to) - half;
-    const hi = Math.max(h.corridor.from, h.corridor.to) + half;
+    // The overhang is buried inside the room walls — at a walled end only.
+    const lo = Math.min(h.corridor.from, h.corridor.to) - (open.lo ? 0 : half);
+    const hi = Math.max(h.corridor.from, h.corridor.to) + (open.hi ? 0 : half);
     let built = 0;
     const style = this.styleFor(h, "wall");
     [-1, 1].forEach((s) => {
@@ -500,8 +535,9 @@ AFRAME.registerComponent("floorplan", {
     // bodies (whose centres are the corridor's end planes, so each straddles it
     // by half a thickness) and the opening's clear width — meeting the lintels
     // and the side-walls edge-to-edge, overlapping neither, so nothing z-fights.
-    const c0 = Math.min(h.corridor.from, h.corridor.to) + half;
-    const c1 = Math.max(h.corridor.from, h.corridor.to) - half;
+    // At an open end there is no wall body to meet, so the roof runs to the end.
+    const c0 = Math.min(h.corridor.from, h.corridor.to) + (open.lo ? 0 : half);
+    const c1 = Math.max(h.corridor.from, h.corridor.to) - (open.hi ? 0 : half);
     if (c1 - c0 > MIN_SEGMENT) {
       const mid = (c0 + c1) / 2;
       const span = c1 - c0;

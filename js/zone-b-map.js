@@ -345,7 +345,7 @@ AFRAME.registerComponent("map-board", {
 
 // ----------------------------------------------------------------
 // map-contact-cue — one small contact cue ON THE MAP PLANE under each sphere,
-// grounding it (same intent as Zone A's ring cues / Zone B's wall cues).
+// grounding it (same intent as Zone B's wall cues / the spot cues).
 // REUSES the shared ContactCue kit (js/components.js): the SAME radial
 // gradient texture, the SAME shadow/glow material, and the SAME
 // per-environment retuning — on an environment switch only the shared
