@@ -75,6 +75,11 @@
          registers its walkable ground there), BEFORE zone-b-teleport.js, whose
          Terminal A reads the square's centre from ParkConfig. -->
     <script src="js/zone-b-park.js"></script>
+    <!-- The park's two field recordings. AFTER zone-b-park.js (it reads the
+         square and the lawn from ParkConfig) and after js/audio.js, whose
+         AudioKit owns the page's one AudioListener — this does not make a
+         second. See the header of js/zone-b-audio.js. -->
+    <script src="js/zone-b-audio.js"></script>
     <!-- Zone B teleport terminals (square <-> floor map). Moved down here from
          beside zone-b-map.js so it loads after the park; it still comes after
          zone-b-map.js and transition.js (it reads their live config and
@@ -568,7 +573,30 @@
                         walls "#zone-b-wall, #zone-b-triptych-stack"   the
                         free-standing walls to cut around, as a selector list
            ============================================================ -->
-      <a-entity id="zone-b-park" park-root></a-entity>
+      <!-- The park, and the two recordings made in it. zone-b-audio sits on
+           the same entity so it can read the square straight off ParkConfig.
+           Tunables (all with defaults — see js/zone-b-audio.js):
+             birdsVolume / birdsRefDistance / birdsRolloff / birdsHeight
+                       the birdsong standing at the centre of the square. The
+                       refDistance is the plateau: full over the middle, about
+                       0.4 at the kerb.
+             riverVolume / riverRange / riverWaterOffset / riverHeight
+                       the boat, whose emitter is moved each frame to the
+                       nearest point of the shore. riverRange is a hard edge —
+                       silent beyond it — so it sets how far into the square
+                       the river reaches.
+             gateMargin  how far outside the square the park is audible at all.
+                       It has to stay under ~5.1 m or the birds get into the
+                       foyer, whose east wall is that far from the hallway.
+             fadeIn / fadeOut -->
+      <a-entity id="zone-b-park" park-root
+        zone-b-audio='enabled: true;
+                      birdsVolume: 0.8; birdsRefDistance: 8; birdsRolloff: 1;
+                      birdsMaxDistance: 80; birdsHeight: 4;
+                      riverVolume: 0.85; riverRange: 50; riverWaterOffset: 5;
+                      riverHeight: 1.5;
+                      gateMargin: 5; fadeIn: 2.0; fadeOut: 1.2'
+      ></a-entity>
 
       <!-- ============================================================
            EXHIBITION TITLE — the in-scene counterpart of the loading splash:

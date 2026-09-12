@@ -71,6 +71,139 @@ const SAIGON_SRCS = [
 ];
 const SKYLINE_ASPECT = 1456 / 816; // source image width/height, preserved on planes
 
+// --- the converted silhouettes (assets/skyline/) ------------------------
+// A second, much larger set of the same kind of file, produced offline by
+// tools/silhouette-alpha.js from plain RGB pictures: same 1456×816, same LA
+// (grey + alpha) black-on-transparent, and — the part that matters — the same
+// layout, with the subject's ground line on the row SKYLINE_CROP cuts at and a
+// solid band below it. So they drop into skylinePanel() exactly as saigon1-4 do.
+//
+// SAIGON_SRCS ABOVE IS DELIBERATELY UNTOUCHED. The `skyline` and `cityroom`
+// presets and the Zone A corridor window all read it (the corridor through its
+// own schema defaults, which name the four files directly), and Zone A has to
+// render exactly as it did. These are PARALLEL lists: the Zone B park picks
+// from them, nothing else does yet. CorridorTextures.silhouette caches per
+// SOURCE PATH, so the four originals stay one shared canvas between the corridor
+// and the park however many of these are added alongside.
+//
+// `cities` are the plain skylines. The park's two bands draw from these PLUS
+// SAIGON_SRCS — the originals are not retired, they join the pool — so a band
+// shuffles nine pictures instead of alternating four.
+const SKYLINE_CITY_SRCS = [
+  "assets/skyline/city-01.png", "assets/skyline/city-02.png",
+  "assets/skyline/city-03.png", "assets/skyline/city-04.png",
+  "assets/skyline/city-05.png",
+];
+
+// `bridges` are placed by hand, not shuffled: one each, in the near band, on a
+// bearing over the water. They were re-cut by the converter (maxSpire) to sit at
+// the same apparent scale as the cities — see the note in that file.
+const SKYLINE_BRIDGE_SRCS = [
+  "assets/skyline/bridge-01.png", "assets/skyline/bridge-02.png",
+];
+
+// `boats` is the pool for the park's boat band: the 14 solo-* pictures, one
+// hull each on open water, and NOT the boat-NN harbour scenes even though those
+// are pictures of boats too. Two reasons, and the second is the one that
+// decided it:
+//
+//   boat-02 and boat-03 still contain a city. The converter reported them MIXED
+//   — one connected component spanning the full frame, the far bank welding the
+//   skyline to the hulls — so there is no boats-only crop of them to use, and a
+//   skyline on a 6 m panel 100 m away reads as a toy city floating on the water.
+//
+//   The rest are the wrong SHAPE for this band. It sizes each picture by how
+//   tall its subject is (see buildBoats), which is right for one hull and wrong
+//   for a harbour: a group scene's subject is wide, not tall, so scaling it by
+//   its tallest mast squeezes four boats into the width of one.
+//   boat-04-boats measured 4.3 m wide that way, with three boats in it.
+//
+// The harbour scenes stay in assets/skyline/ and in the manifest. They belong
+// on a band that sizes by width — which is what the skyline bands do, and what
+// they would need to join.
+const SKYLINE_BOAT_SRCS = [
+  "assets/skyline/solo-01.png", "assets/skyline/solo-02.png",
+  "assets/skyline/solo-03.png", "assets/skyline/solo-04.png",
+  "assets/skyline/solo-05.png", "assets/skyline/solo-06.png",
+  "assets/skyline/solo-07.png", "assets/skyline/solo-08.png",
+  "assets/skyline/solo-09.png", "assets/skyline/solo-10.png",
+  "assets/skyline/solo-11.png", "assets/skyline/solo-12.png",
+  "assets/skyline/solo-13.png", "assets/skyline/solo-14.png",
+];
+
+// Bow direction per boat: +1 points to the right of the picture, -1 to the left.
+// Ten of the fourteen face left. See SkylineKit.bow for what uses it and why.
+const SKYLINE_BOAT_BOW = {
+  "assets/skyline/solo-01.png": -1, "assets/skyline/solo-02.png": -1,
+  "assets/skyline/solo-03.png": 1, "assets/skyline/solo-04.png": 1,
+  "assets/skyline/solo-05.png": -1, "assets/skyline/solo-06.png": -1,
+  "assets/skyline/solo-07.png": -1, "assets/skyline/solo-08.png": 1,
+  "assets/skyline/solo-09.png": 1, "assets/skyline/solo-10.png": -1,
+  "assets/skyline/solo-11.png": -1, "assets/skyline/solo-12.png": -1,
+  "assets/skyline/solo-13.png": -1, "assets/skyline/solo-14.png": -1,
+};
+
+// HOW TALL THE SUBJECT IS IN EACH PICTURE, as a fraction of the CROPPED height
+// (what is left after SKYLINE_CROP takes the bottom band off) — `spire` is the
+// very top of it, `roof` the height at which a fifth of the columns are still
+// subject. Measured by tools/silhouette-alpha.js, which prints this block ready
+// to paste; assets/skyline/manifest.json carries the same numbers.
+//
+// WHY THE SCENE NEEDS THEM. A band trims `topTrim` off the top of the window
+// and so keeps (1 - topTrim) of the cropped height: anything whose `spire` is
+// ABOVE that has its top cut off. The four originals run 0.436-0.503, which is
+// exactly why skylineTopTrim could be 0.45 (keeping 0.55) and drop only sky.
+// The new pictures do not all sit in that range — city-04 is 0.719, solo-14 is
+// 0.971, and the two bridges are framed so tight they reach the top of the
+// frame — so a band that kept 0.45 for all of them would quietly behead half of
+// them. The park fits each band's trim to the tallest picture it actually uses
+// and says so in its build log; these are the numbers it fits against.
+const SKYLINE_METRICS = {
+  "assets/saigon1.png": { spire: 0.503, roof: 0.252 },
+  "assets/saigon2.png": { spire: 0.443, roof: 0.181 },
+  "assets/saigon3.png": { spire: 0.436, roof: 0.158 },
+  "assets/saigon4.png": { spire: 0.469, roof: 0.260 },
+  "assets/skyline/city-01.png": { spire: 0.533, roof: 0.199 },
+  "assets/skyline/city-02.png": { spire: 0.549, roof: 0.221 },
+  "assets/skyline/city-03.png": { spire: 0.575, roof: 0.232 },
+  "assets/skyline/city-04.png": { spire: 0.719, roof: 0.422 },
+  "assets/skyline/city-05.png": { spire: 0.676, roof: 0.407 },
+  "assets/skyline/bridge-01.png": { spire: 0.621, roof: 0.199 },
+  "assets/skyline/bridge-02.png": { spire: 0.626, roof: 0.167 },
+  "assets/skyline/boat-01.png": { spire: 0.307, roof: 0.134 },
+  "assets/skyline/boat-01-boats.png": { spire: 0.263, roof: 0.134 },
+  "assets/skyline/boat-02.png": { spire: 0.477, roof: 0.206 },
+  "assets/skyline/boat-03.png": { spire: 0.557, roof: 0.317 },
+  "assets/skyline/boat-04.png": { spire: 0.315, roof: 0.144 },
+  "assets/skyline/boat-04-boats.png": { spire: 0.283, roof: 0.142 },
+  "assets/skyline/boat-05.png": { spire: 0.596, roof: 0.214 },
+  "assets/skyline/boat-05-boats.png": { spire: 0.596, roof: 0.214 },
+  "assets/skyline/boat-06.png": { spire: 0.386, roof: 0.163 },
+  "assets/skyline/boat-06-boats.png": { spire: 0.386, roof: 0.162 },
+  "assets/skyline/boat-07.png": { spire: 0.471, roof: 0.217 },
+  "assets/skyline/boat-07-boats.png": { spire: 0.431, roof: 0.217 },
+  "assets/skyline/solo-01.png": { spire: 0.94, roof: 0.214 },
+  "assets/skyline/solo-02.png": { spire: 0.229, roof: 0.181 },
+  "assets/skyline/solo-03.png": { spire: 0.338, roof: 0.31 },
+  "assets/skyline/solo-04.png": { spire: 0.25, roof: 0.109 },
+  "assets/skyline/solo-05.png": { spire: 0.444, roof: 0.397 },
+  "assets/skyline/solo-06.png": { spire: 0.252, roof: 0.15 },
+  "assets/skyline/solo-07.png": { spire: 0.538, roof: 0.162 },
+  "assets/skyline/solo-08.png": { spire: 0.364, roof: 0.342 },
+  "assets/skyline/solo-09.png": { spire: 0.333, roof: 0.142 },
+  "assets/skyline/solo-10.png": { spire: 0.521, roof: 0.203 },
+  "assets/skyline/solo-11.png": { spire: 0.528, roof: 0.258 },
+  "assets/skyline/solo-12.png": { spire: 0.709, roof: 0.325 },
+  "assets/skyline/solo-13.png": { spire: 0.575, roof: 0.283 },
+  "assets/skyline/solo-14.png": { spire: 0.971, roof: 0.299 },
+};
+
+// The range the four originals occupy, and so the range skylineTopTrim was
+// chosen for. A picture far outside it is not wrong, but it is framed
+// differently enough that it will not sit at the same apparent scale as the
+// rest — which the park reports rather than leaving to be noticed in a headset.
+const SKYLINE_REFERENCE_SPIRE = { min: 0.436, max: 0.503 };
+
 // `skyline` preset (distant horizon ring) -------------------------------
 const SKYLINE_RADIUS = 18; // metres centre -> skyline ring (tune horizon distance)
 const SKYLINE_HEIGHT = 9; // metres, full plane height; buildings fill the lower
@@ -601,6 +734,48 @@ window.SkylineKit = {
   srcs: SAIGON_SRCS,
   aspect: SKYLINE_ASPECT,
   crop: SKYLINE_CROP,
+  // The parallel pools and their measurements (see the notes by SAIGON_SRCS).
+  // `srcs` above keeps its old meaning and its old four files so every existing
+  // reader — both presets here, and the Zone A corridor — is unaffected.
+  cities: SKYLINE_CITY_SRCS,
+  bridges: SKYLINE_BRIDGE_SRCS,
+  boats: SKYLINE_BOAT_SRCS,
+  metrics: SKYLINE_METRICS,
+  referenceSpire: SKYLINE_REFERENCE_SPIRE,
+  // WHICH WAY EACH BOAT IS POINTING: +1 bow to the right of the picture, -1 to
+  // the left. Read off the fourteen by eye and then checked by mirroring every
+  // -1 and confirming all fourteen ended up pointing the same way.
+  //
+  // The park needs it because a boat panel is a fixed picture and the band now
+  // has traffic going both ways round the river. A hull whose bow points left
+  // while it travels right is sailing stern-first, which is exactly what it
+  // looked like. The panel's local +X is the direction of increasing bearing
+  // (its rotation is -bearing, so local +X maps to the velocity), so a boat
+  // moving forward must have its bow to the right — and the ones that do not
+  // get mirrored on that axis. See buildBoats.
+  bow: function (src) {
+    return SKYLINE_BOAT_BOW[src] || 1;
+  },
+
+  // WHAT ONE PICTURE COSTS IN TEXTURE, in MB of canvas. Not a constant any
+  // more: the boat pictures are written by the converter at a quarter of the
+  // others' size (364x204 against 1456x816), because a boat panel is 8 degrees
+  // wide seen from the square where a city panel is 67, so full resolution was
+  // nine times more than a boat could ever put on screen. 0.28 MB each instead
+  // of 4.53, which is what makes a dozen boats affordable.
+  canvasMB: function (src) {
+    return SKYLINE_BOAT_SRCS.indexOf(src) >= 0
+      ? (364 * 204 * 4) / 1048576
+      : (1456 * 816 * 4) / 1048576;
+  },
+
+  // How tall the subject of `src` is, as a fraction of the cropped height.
+  // Unmeasured pictures fall back to the reference maximum, which is the
+  // assumption that keeps a band from clipping something it cannot size.
+  spire: function (src) {
+    const m = SKYLINE_METRICS[src];
+    return m ? m.spire : SKYLINE_REFERENCE_SPIRE.max;
+  },
 };
 
 // A floating red label so a STUB look is obviously a stub in-headset.
