@@ -69,6 +69,11 @@ const PARK_SUBSPACE_CLEARANCE = 100;
 // that it is never visible as water over the lawn.
 const RIVER_OVERLAP = 0.05;
 
+// How much boats differ from boatSpeed, either way. Enough that they separate
+// and re-group over a few minutes instead of holding formation for ever, which
+// is what gives a river its untidiness.
+const BOAT_SPEED_VARY = 0.35;
+
 // "#rgb" / "#rrggbb" -> [r, g, b] sRGB bytes, for drawing straight into a
 // canvas (a THREE.Color would hand back linear values).
 function parkRGB(hex) {
@@ -860,6 +865,18 @@ AFRAME.registerComponent("park-root", {
     // How much of its own slot a boat may wander, 0 = dead even, 1 = anywhere
     // in the slot. Bounded by the slot so the boats keep their order and spacing.
     boatJitter: { type: "number", default: 0.7 },
+    // Metres per second along the water. 0 stops them dead.
+    //
+    // 0.6, halved from 1.2 after watching it: at boatRadius that is about 0.34
+    // degrees a second, so a boat takes some seventeen minutes to go round. The
+    // speed that matters is not the speed over the ground but the ANGULAR one,
+    // because these are 100 m away — 1.2 m/s is a believable working speed for
+    // a river boat and still read as hurried from the square, which is the
+    // distance doing it rather than the number.
+    boatSpeed: { type: "number", default: 0.6 },
+    // Metres of spread in boatRadius, so boats going opposite ways pass in
+    // different lanes instead of through each other.
+    boatLaneSpread: { type: "number", default: 12 },
     // trees — on the lawn only, seeded; see treeLayout
     trees: { type: "boolean", default: true },
     treeCount: { type: "int", default: 16 },
@@ -919,6 +936,7 @@ AFRAME.registerComponent("park-root", {
     this.boatEl = null; // the boat band's container entity
     this.boatInfo = null; // the boat band's build facts, or null when it is off
     this.picsUsed = {}; // source path -> true, the pictures this build lifted
+    this.boatMotion = []; // one entry per boat: its panel, bearing, lane and rate
     this.skylineCrops = {}; // src -> the cropped clone every panel of it shares
     this.benchEl = null; // the benches' container entity
     this.instanced = []; // InstancedMeshes, which own buffers of their own
@@ -1758,6 +1776,12 @@ AFRAME.registerComponent("park-root", {
         `${(o.cz - o.R * Math.cos(t)).toFixed(3)}`
     );
     el.setAttribute("rotation", `0 ${(-o.deg).toFixed(3)} 0`);
+    // A horizontal mirror, for a boat sailing the other way. Scale rather than
+    // texture: the cropped texture is SHARED by every panel showing that
+    // picture, so flipping its uv would turn every copy round at once. The
+    // material is unlit and double-sided, so a negative scale costs nothing and
+    // changes nothing but which way the hull points.
+    if (o.flipX) el.setAttribute("scale", "-1 1 1");
     if (o.lifter) el.setAttribute("visible", false);
     o.root.appendChild(el);
     const onLoaded = () => {
@@ -2114,6 +2138,10 @@ AFRAME.registerComponent("park-root", {
   buildBoats: function (s) {
     const d = this.data;
     this.boatInfo = null;
+    // Before any early return: these hold element references, and a rebuild
+    // that turns the boats off would otherwise leave tick driving panels that
+    // are no longer in the scene.
+    this.boatMotion = [];
     if (this.boatEl && this.boatEl.parentNode) {
       this.boatEl.parentNode.removeChild(this.boatEl);
     }
@@ -2143,14 +2171,25 @@ AFRAME.registerComponent("park-root", {
     const w = (h / keep) * kit.aspect;
 
     const R = d.boatRadius;
-    // The FOCUS arc, not the whole river. The water now runs all the way round
-    // the park, but scattering boats round the back of the gallery would pay
-    // for panels and a lifted picture each to float where nothing can see them.
-    const arc = Math.max(0, Math.min(360, d.riverFocusArcDeg));
+    // THE WHOLE RING, now that they move.
+    //
+    // They used to be confined to the focus arc, because a static boat behind
+    // the gallery is a panel and a lifted picture paying for something nobody
+    // can see. A moving one is different: it has to come from somewhere and go
+    // somewhere, and a boat that wrapped round at the end of an arc would pop
+    // out of existence at one edge of the water and back in at the other.
+    //
+    // Spread over the full circle instead, they simply circulate — and the
+    // GALLERY does the work an alpha fade would otherwise have to: boats pass
+    // behind it and come out the other side, so they enter and leave the view
+    // by going behind a building, which is how it happens on a real river.
+    const arc = d.boatSpeed ? 360 : Math.max(0, Math.min(360, d.riverFocusArcDeg));
+    const ring = arc >= 359.999;
     // Half a panel's angular width, so a boat at either end still floats.
     const halfPanelDeg = THREE.MathUtils.radToDeg(Math.atan(w / (2 * R)));
-    const from = d.riverBearingDeg - arc / 2 + halfPanelDeg;
-    const to = d.riverBearingDeg + arc / 2 - halfPanelDeg;
+    // A closed ring has no ends to keep clear of, so it is not inset.
+    const from = ring ? d.riverBearingDeg - 180 : d.riverBearingDeg - arc / 2 + halfPanelDeg;
+    const to = ring ? d.riverBearingDeg + 180 : d.riverBearingDeg + arc / 2 - halfPanelDeg;
     const span = to - from;
     if (span <= 0) {
       console.warn(
@@ -2172,6 +2211,8 @@ AFRAME.registerComponent("park-root", {
     // ever asks for more boats than there are pictures.
     let deck = parkShuffle(pool, rand);
     const placed = [];
+    let rMin = Infinity;
+    let rMax = 0;
     for (let i = 0; i < n; i++) {
       const centre = from + slot * (i + 0.5);
       const deg = centre + (rand() - 0.5) * slot * jitter;
@@ -2181,14 +2222,37 @@ AFRAME.registerComponent("park-root", {
       // This picture's own height, as its share of the tallest one's.
       const ph = h * (spire / maxSpire);
       const pw = (ph / keep) * kit.aspect;
-      this.farPanel({
+      // Its own lane and its own way up the river. Two boats meeting head-on at
+      // one radius would slide through each other; a few metres apart they pass.
+      const lane = R + (rand() - 0.5) * d.boatLaneSpread;
+      const dir = rand() < 0.5 ? -1 : 1;
+      // Increasing bearing carries a panel toward its own local +X, which is
+      // the right of its picture. So a boat sailing that way needs its bow on
+      // the right; the ten of fourteen drawn facing left are mirrored when they
+      // travel that way, and the four facing right are mirrored when they do
+      // not. Without this half the fleet sails stern-first.
+      const flipX = kit.bow(src) !== dir;
+      const speed = d.boatSpeed * (1 + (rand() - 0.5) * 2 * BOAT_SPEED_VARY);
+      rMin = Math.min(rMin, lane);
+      rMax = Math.max(rMax, lane);
+      const el = this.farPanel({
         root: root, src: src, w: pw, h: ph, keep: keep,
-        deg: deg, cx: s.cx, cz: s.cz, R: R,
+        deg: deg, cx: s.cx, cz: s.cz, R: lane, flipX: flipX,
         haze: d.boatHaze, opacity: d.boatHazeOpacity,
         order: -1, token: token, lifter: lifter,
       });
+      // Degrees per second: v / r radians, as degrees. A boat further out has
+      // to cover more arc for the same speed over the ground, so this is not
+      // one shared rate.
+      this.boatMotion.push({
+        el: el, deg: deg, R: lane, y: ph / 2 + d.skylineLift,
+        rate: (dir * speed * 180) / (Math.PI * lane),
+      });
       this.picsUsed[src] = true;
-      placed.push({ deg: +deg.toFixed(1), src: src.split("/").pop(), h: +ph.toFixed(1) });
+      placed.push({
+        deg: +deg.toFixed(1), src: src.split("/").pop(), h: +ph.toFixed(1),
+        dir: dir, flipped: flipX,
+      });
     }
 
     // A boat has to be ON the water. buildRiver ran first, so its measured
@@ -2202,19 +2266,23 @@ AFRAME.registerComponent("park-root", {
           "will be standing on the sky sphere's ground band"
       );
     } else {
-      if (R >= riv.outer) {
-        console.warn(`[park] boatRadius ${R} m is past the river's far edge ` +
-          `(${riv.outer} m) — the boats are aground`);
+      // Against the LANES, not the nominal radius: boatLaneSpread puts boats
+      // either side of it, and it is the outermost and innermost that ground.
+      if (rMax >= riv.outer) {
+        console.warn(`[park] the outer boat lane (${rMax.toFixed(0)} m) is past the ` +
+          `river's far edge (${riv.outer} m) — those boats are aground`);
       }
-      if (R <= riv.innerMax) {
-        console.warn(`[park] boatRadius ${R} m is inside the lawn's outer edge ` +
-          `(up to ${riv.innerMax} m at the corners) — the boats are on the grass`);
+      if (rMin <= riv.innerMax) {
+        console.warn(`[park] the inner boat lane (${rMin.toFixed(0)} m) is inside the ` +
+          `lawn's outer edge (up to ${riv.innerMax} m at the corners) — those boats ` +
+          "are on the grass");
       }
     }
 
-    const reach = Math.sqrt(R * R + (w / 2) * (w / 2) + (h + d.skylineLift) * (h + d.skylineLift));
+    const reach = Math.sqrt(rMax * rMax + (w / 2) * (w / 2) + (h + d.skylineLift) * (h + d.skylineLift));
     this.boatInfo = {
-      radius: R, count: n, arcFrom: +from.toFixed(1), arcTo: +to.toFixed(1),
+      radius: R, laneMin: +rMin.toFixed(0), laneMax: +rMax.toFixed(0),
+      speed: d.boatSpeed, count: n, arcFrom: +from.toFixed(1), arcTo: +to.toFixed(1),
       trim: +trim.toFixed(3), maxSpire: +maxSpire.toFixed(3),
       tallest: +h.toFixed(1), shortest: +Math.min.apply(null, placed.map((p) => p.h)).toFixed(1),
       widest: +w.toFixed(1), reach: +reach.toFixed(1), placed: placed,
@@ -2313,10 +2381,14 @@ AFRAME.registerComponent("park-root", {
     console.log(
       "[park] boats " +
         (bo
-          ? `${bo.count} on the river at ${bo.radius} m, bearings ` +
-            `${bo.arcFrom}-${bo.arcTo}°, ${bo.shortest}-${bo.tallest} m tall ` +
+          ? `${bo.count} on the river in lanes ${bo.laneMin}-${bo.laneMax} m, ` +
+            (bo.speed ? `drifting at ${bo.speed} m/s both ways` : "static") +
+            `, ${bo.shortest}-${bo.tallest} m tall ` +
             `(trim ${bo.trim} fitted to the tallest picture, spire ${bo.maxSpire}), ` +
-            `at ${bo.placed.map((x) => `${x.deg}° ${x.src}`).join(", ")}`
+            `starting at ${bo.placed.map((x) => `${x.deg}°`).join(", ")}` +
+            `; ${bo.placed.filter((x) => x.dir > 0).length} going one way, ` +
+            `${bo.placed.filter((x) => x.dir < 0).length} the other, ` +
+            `${bo.placed.filter((x) => x.flipped).length} mirrored so the bow leads`
           : "off")
     );
 
@@ -2388,7 +2460,7 @@ AFRAME.registerComponent("park-root", {
 
   // The sky, the skyline and anything else far off, only while the camera is
   // inside the sky sphere.
-  tick: function () {
+  tick: function (time, dt) {
     if (!this.built) return;
     const cam = this.el.sceneEl.camera;
     if (!cam) return;
@@ -2399,6 +2471,36 @@ AFRAME.registerComponent("park-root", {
       this.far.visible = inside;
       if (this.skylineEl) this.skylineEl.object3D.visible = inside;
       if (this.boatEl) this.boatEl.object3D.visible = inside;
+    }
+
+    // THE BOATS MOVE, and they are the only thing in the park that does. The
+    // concrete, the lawn, the water and the city are all static by design — the
+    // river's own note says why it is not animated — but a river with nothing
+    // moving on it reads as a photograph of a river.
+    //
+    // Written straight to object3D rather than through setAttribute. This runs
+    // every frame, and setAttribute goes through A-Frame's component update
+    // path: string parsing, a diff and an event per call. That is the standard
+    // way to turn a dozen cheap transforms into a frame-rate problem.
+    //
+    // Skipped entirely while the camera is outside the sky sphere, because the
+    // whole band is hidden then anyway — the teleport sub-spaces are 400 m out.
+    if (!inside || !this.data.boatSpeed || !this.boatMotion.length) return;
+    const step = (dt || 0) / 1000;
+    // A backgrounded tab hands back one enormous delta on return; teleporting
+    // the boats a few hundred metres is worse than dropping the frame.
+    if (step <= 0 || step > 0.5) return;
+    const cx = this.skyCenter.x;
+    const cz = this.skyCenter.z;
+    for (let i = 0; i < this.boatMotion.length; i++) {
+      const b = this.boatMotion[i];
+      b.deg += b.rate * step;
+      if (b.deg >= 360) b.deg -= 360;
+      else if (b.deg < 0) b.deg += 360;
+      const t = THREE.MathUtils.degToRad(b.deg);
+      const o = b.el.object3D;
+      o.position.set(cx + b.R * Math.sin(t), b.y, cz - b.R * Math.cos(t));
+      o.rotation.y = -t; // still facing the square's centre as it goes round
     }
   },
 
@@ -2416,6 +2518,7 @@ AFRAME.registerComponent("park-root", {
     if (this.boatEl && this.boatEl.parentNode) {
       this.boatEl.parentNode.removeChild(this.boatEl);
     }
+    this.boatMotion = [];
     // The clones only: their canvases belong to CorridorTextures' cache.
     Object.keys(this.skylineCrops).forEach((k) => this.skylineCrops[k].dispose());
     this.skylineCrops = {};

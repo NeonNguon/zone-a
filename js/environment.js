@@ -131,6 +131,18 @@ const SKYLINE_BOAT_SRCS = [
   "assets/skyline/solo-13.png", "assets/skyline/solo-14.png",
 ];
 
+// Bow direction per boat: +1 points to the right of the picture, -1 to the left.
+// Ten of the fourteen face left. See SkylineKit.bow for what uses it and why.
+const SKYLINE_BOAT_BOW = {
+  "assets/skyline/solo-01.png": -1, "assets/skyline/solo-02.png": -1,
+  "assets/skyline/solo-03.png": 1, "assets/skyline/solo-04.png": 1,
+  "assets/skyline/solo-05.png": -1, "assets/skyline/solo-06.png": -1,
+  "assets/skyline/solo-07.png": -1, "assets/skyline/solo-08.png": 1,
+  "assets/skyline/solo-09.png": 1, "assets/skyline/solo-10.png": -1,
+  "assets/skyline/solo-11.png": -1, "assets/skyline/solo-12.png": -1,
+  "assets/skyline/solo-13.png": -1, "assets/skyline/solo-14.png": -1,
+};
+
 // HOW TALL THE SUBJECT IS IN EACH PICTURE, as a fraction of the CROPPED height
 // (what is left after SKYLINE_CROP takes the bottom band off) — `spire` is the
 // very top of it, `roof` the height at which a fifth of the columns are still
@@ -730,6 +742,21 @@ window.SkylineKit = {
   boats: SKYLINE_BOAT_SRCS,
   metrics: SKYLINE_METRICS,
   referenceSpire: SKYLINE_REFERENCE_SPIRE,
+  // WHICH WAY EACH BOAT IS POINTING: +1 bow to the right of the picture, -1 to
+  // the left. Read off the fourteen by eye and then checked by mirroring every
+  // -1 and confirming all fourteen ended up pointing the same way.
+  //
+  // The park needs it because a boat panel is a fixed picture and the band now
+  // has traffic going both ways round the river. A hull whose bow points left
+  // while it travels right is sailing stern-first, which is exactly what it
+  // looked like. The panel's local +X is the direction of increasing bearing
+  // (its rotation is -bearing, so local +X maps to the velocity), so a boat
+  // moving forward must have its bow to the right — and the ones that do not
+  // get mirrored on that axis. See buildBoats.
+  bow: function (src) {
+    return SKYLINE_BOAT_BOW[src] || 1;
+  },
+
   // WHAT ONE PICTURE COSTS IN TEXTURE, in MB of canvas. Not a constant any
   // more: the boat pictures are written by the converter at a quarter of the
   // others' size (364x204 against 1456x816), because a boat panel is 8 degrees
