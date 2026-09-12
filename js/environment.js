@@ -152,10 +152,10 @@ const SKYLINE_METRICS = {
   "assets/saigon3.png": { spire: 0.436, roof: 0.158 },
   "assets/saigon4.png": { spire: 0.469, roof: 0.260 },
   "assets/skyline/city-01.png": { spire: 0.533, roof: 0.199 },
-  "assets/skyline/city-02.png": { spire: 0.549, roof: 0.219 },
+  "assets/skyline/city-02.png": { spire: 0.549, roof: 0.221 },
   "assets/skyline/city-03.png": { spire: 0.575, roof: 0.245 },
   "assets/skyline/city-04.png": { spire: 0.719, roof: 0.422 },
-  "assets/skyline/city-05.png": { spire: 0.676, roof: 0.405 },
+  "assets/skyline/city-05.png": { spire: 0.676, roof: 0.407 },
   "assets/skyline/bridge-01.png": { spire: 0.621, roof: 0.199 },
   "assets/skyline/bridge-02.png": { spire: 0.626, roof: 0.167 },
   "assets/skyline/boat-01.png": { spire: 0.307, roof: 0.134 },
@@ -730,6 +730,18 @@ window.SkylineKit = {
   boats: SKYLINE_BOAT_SRCS,
   metrics: SKYLINE_METRICS,
   referenceSpire: SKYLINE_REFERENCE_SPIRE,
+  // WHAT ONE PICTURE COSTS IN TEXTURE, in MB of canvas. Not a constant any
+  // more: the boat pictures are written by the converter at a quarter of the
+  // others' size (364x204 against 1456x816), because a boat panel is 8 degrees
+  // wide seen from the square where a city panel is 67, so full resolution was
+  // nine times more than a boat could ever put on screen. 0.28 MB each instead
+  // of 4.53, which is what makes a dozen boats affordable.
+  canvasMB: function (src) {
+    return SKYLINE_BOAT_SRCS.indexOf(src) >= 0
+      ? (364 * 204 * 4) / 1048576
+      : (1456 * 816 * 4) / 1048576;
+  },
+
   // How tall the subject of `src` is, as a fraction of the cropped height.
   // Unmeasured pictures fall back to the reference maximum, which is the
   // assumption that keeps a band from clipping something it cannot size.

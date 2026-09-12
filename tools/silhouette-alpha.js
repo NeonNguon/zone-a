@@ -132,6 +132,29 @@ const MIN_BLOB = 220; // px; smaller components are speckle, dropped
 const MIXED_SPAN = 0.85; // a component wider than this fraction of the frame has
 //                          fused the background city into the boats -> MIXED
 
+// HOW MUCH SMALLER THE SOLO BOATS ARE WRITTEN, as a divisor of 1456x816.
+//
+// Every picture is lifted into a canvas at its OWN pixel size at runtime, so
+// the resolution written here is the texture bill: 4.5 MB each at full size,
+// and the boat band wants a dozen of them.
+//
+// A city panel earns that size — the near band is 173 m wide seen from 130 m,
+// about 67 degrees, which is roughly 1350 px across a Quest 3's view, so 1456
+// is matched to it almost exactly. A BOAT panel is 14.7 m at 100 m for the
+// tallest in the pool and 3.5 m for the smallest: 8.4 and 2.0 degrees, or about
+// 168 and 40 px. Full size is nine times more texture than the picture can ever
+// put on screen.
+//
+// 4 keeps a comfortable margin — 364x204, still twice the widest a boat renders
+// at, and more than the ~280 px it reaches if you stand at the lawn's edge — and
+// takes fourteen boats from 63.5 MB of canvas down to 4.0 MB. It also divides
+// 816 exactly, so the ground line stays on a whole row (204 x 0.75 = 153) and
+// the aspect is unchanged, which is what the panel geometry depends on.
+//
+// The boat-NN harbour scenes are NOT shrunk: they are framed for a wide panel,
+// and if they are ever used they would be used at skyline width.
+const SOLO_DIV = 4;
+
 const ROOT = path.join(__dirname, "..");
 const SRC_DIR = path.join(ROOT, "assets");
 const OUT_DIR = path.join(ROOT, "assets", "skyline");
@@ -148,23 +171,23 @@ const JOBS = [
   // --- plain skylines ---------------------------------------------------
   // Cleanest of the lot: coverage is a flat 1.00 down to 533 and 0.00 at 535,
   // no reflection at all, so the band simply stops. 534 is the last solid row.
-  { src: "saigon (5).png", category: "city", cutRow: 534 },
+  { src: "saigon (5).png", category: "city", cutRow: 534, fillHoles: true },
   // The reflection is welded straight onto the city, and both are solid black,
   // so coverage alone cannot see the join — it reads 1.00 from 576 to the frame
   // edge. Row MEAN LUMA can: it sits at ~10 through the city bases, lifts to
   // 95 at 564-566 (the bright water seam) and drops back to ~3 below, which is
   // the reflection. 563 is the last row above that seam.
-  { src: "saigon (4).png", category: "city", cutRow: 563 },
+  { src: "saigon (4).png", category: "city", cutRow: 563, fillHoles: true },
   // Gradient sky, long mirror reflection over water; the bridge at the left
   // edge is part of the skyline here, not the subject. Coverage holds ~0.9
   // through 602 and only then breaks up into ripples.
-  { src: "saigon (6).png", category: "city", cutRow: 600 },
+  { src: "saigon (6).png", category: "city", cutRow: 600, fillHoles: true },
   // Dark blue-grey city over a solid foreground band, white below it: 1.00
   // through 657, 0.00 at 659.
-  { src: "saigon (7).png", category: "city", cutRow: 658 },
+  { src: "saigon (7).png", category: "city", cutRow: 658, fillHoles: true },
   // Textbook mirror reflection — the inverted city hangs below a ragged join,
   // so coverage tails off gradually rather than stepping.
-  { src: "0_1.png", category: "city", cutRow: 558 },
+  { src: "0_1.png", category: "city", cutRow: 558, fillHoles: true },
 
   // --- cable-stayed bridges ---------------------------------------------
   // Flat dark river below the land strip: coverage RISES into the water and
@@ -179,10 +202,10 @@ const JOBS = [
   // are three times their height. bridge-02 was also losing the tips of its
   // topmost cables off the top of the frame. 0.62 puts them in the middle of
   // the city pool's range, which is where a bridge belongs against a skyline.
-  { src: "saigon (8).png", category: "bridge", cutRow: 719, maxSpire: 0.62 },
+  { src: "saigon (8).png", category: "bridge", cutRow: 719, maxSpire: 0.62, extendSides: 150 },
   // Same shape, softer join: luma bottoms out at ~47 through 746 and lifts from
   // 748 as the water catches the light. Piers enter the water right there.
-  { src: "0_1 (2).png", category: "bridge", cutRow: 747, maxSpire: 0.62 },
+  { src: "0_1 (2).png", category: "bridge", cutRow: 747, maxSpire: 0.62, extendSides: 150 },
 
   // --- river boats ------------------------------------------------------
   // Hazy: the distant city at the right is far lighter than the boats, so the
@@ -232,22 +255,22 @@ const JOBS = [
   // — there is no city in the frame to take out, and what little far shore
   // there is (a tree line on "boat (11)", a horizon on "0_3") sits in haze well
   // above the threshold and drops on its own.
-  { src: "boat (2).png", category: "solo", cutRow: 578 },
-  { src: "boat (3).png", category: "solo", cutRow: 526 },
-  { src: "boat (4).png", category: "solo", cutRow: 524 },
-  { src: "boat (5).png", category: "solo", cutRow: 598 },
-  { src: "boat (6).png", category: "solo", cutRow: 592 },
-  { src: "boat (7).png", category: "solo", cutRow: 522 },
-  { src: "boat (8).png", category: "solo", cutRow: 520 },
-  { src: "boat (9).png", category: "solo", cutRow: 592 },
+  { src: "boat (2).png", category: "solo", outDiv: SOLO_DIV, cutRow: 578 },
+  { src: "boat (3).png", category: "solo", outDiv: SOLO_DIV, cutRow: 526 },
+  { src: "boat (4).png", category: "solo", outDiv: SOLO_DIV, cutRow: 524 },
+  { src: "boat (5).png", category: "solo", outDiv: SOLO_DIV, cutRow: 598 },
+  { src: "boat (6).png", category: "solo", outDiv: SOLO_DIV, cutRow: 592 },
+  { src: "boat (7).png", category: "solo", outDiv: SOLO_DIV, cutRow: 522 },
+  { src: "boat (8).png", category: "solo", outDiv: SOLO_DIV, cutRow: 520 },
+  { src: "boat (9).png", category: "solo", outDiv: SOLO_DIV, cutRow: 592 },
   // Dark river: coverage JUMPS 0.45 -> 0.82 at 594 as the water starts, the
   // one place in this batch where the boundary is unmistakable in the numbers.
-  { src: "boat (10).png", category: "solo", cutRow: 593 },
-  { src: "boat (11).png", category: "solo", cutRow: 658 },
-  { src: "boat (12).png", category: "solo", cutRow: 600 },
-  { src: "0_2.png", category: "solo", cutRow: 594 },
-  { src: "0_3.png", category: "solo", cutRow: 646 },
-  { src: "0_3 (1).png", category: "solo", cutRow: 594 },
+  { src: "boat (10).png", category: "solo", outDiv: SOLO_DIV, cutRow: 593 },
+  { src: "boat (11).png", category: "solo", outDiv: SOLO_DIV, cutRow: 658 },
+  { src: "boat (12).png", category: "solo", outDiv: SOLO_DIV, cutRow: 600 },
+  { src: "0_2.png", category: "solo", outDiv: SOLO_DIV, cutRow: 594 },
+  { src: "0_3.png", category: "solo", outDiv: SOLO_DIV, cutRow: 646 },
+  { src: "0_3 (1).png", category: "solo", outDiv: SOLO_DIV, cutRow: 594 },
 ];
 
 // `0_1 (3).png` is byte-identical to `0_1.png` (md5 8f36437f...), so it is
@@ -453,6 +476,125 @@ function compose(mask, w, h, cutRow, subjectTop, forceScale) {
 }
 
 // ======================================================================
+// CLOSE THE HOLES INSIDE THE SILHOUETTE.
+//
+// These pictures are drawings, not photographs, and several draw a building's
+// windows, floor slabs and scaffolding as WHITE LINES inside its outline. As a
+// picture that is fine. As a silhouette it is not: the panel is a hole-punched
+// mask, so every one of those lines lets the sky through, and on a hazy skyline
+// 130 m away they read as bright flecks scattered over the towers — pale where
+// the city should be solid. city-02 is 14% holes by area, which is what that
+// looks like.
+//
+// A PER-COLUMN FILL WOULD BE WRONG, and is the obvious thing to reach for:
+// filling each column from its topmost ink down to the ground line also fills
+// the real sky between two towers of different heights, which is most of what
+// gives a skyline its shape. The distinction that matters is whether a gap
+// reaches the SKY. So this floods inward from the top and side edges through
+// everything transparent, and fills only what it cannot reach — the enclosed
+// pockets, which are exactly the drawn detail. Sky between buildings connects
+// to the top of the frame and is left alone.
+//
+// Not for the bridges (82% of a cable-stayed bridge's bounding area is the air
+// under its deck and between its cables, all of it enclosed by the deck and the
+// towers) and not for the boats (the gap under a canopy is real). Cities only.
+// ======================================================================
+function fillHoles(alpha) {
+  const seen = new Uint8Array(OUT_W * GROUND_ROW);
+  const stack = new Int32Array(OUT_W * GROUND_ROW);
+  let sp = 0;
+  const push = (x, y) => {
+    const i = y * OUT_W + x;
+    if (!seen[i] && alpha[i] < 128) {
+      seen[i] = 1;
+      stack[sp++] = i;
+    }
+  };
+  for (let x = 0; x < OUT_W; x++) push(x, 0); // the sky
+  for (let y = 0; y < GROUND_ROW; y++) {
+    push(0, y); // and the two edges, where a panel meets its neighbour
+    push(OUT_W - 1, y);
+  }
+  while (sp > 0) {
+    const q = stack[--sp];
+    const x = q % OUT_W;
+    const y = (q / OUT_W) | 0;
+    if (x > 0) push(x - 1, y);
+    if (x < OUT_W - 1) push(x + 1, y);
+    if (y > 0) push(x, y - 1);
+    if (y < GROUND_ROW - 1) push(x, y + 1);
+  }
+  let filled = 0;
+  for (let i = 0; i < OUT_W * GROUND_ROW; i++) {
+    if (alpha[i] < 128 && !seen[i]) {
+      alpha[i] = 255;
+      filled++;
+    }
+  }
+  return filled;
+}
+
+// ======================================================================
+// EXTEND THE VIADUCT OUT TO BOTH EDGES.
+//
+// For the bridges, and because of what maxSpire does to them. That shrink is
+// UNIFORM — it has to be, or the towers distort — so bringing a bridge down to
+// the cities' apparent height also makes it narrower: at scale 0.67 the picture
+// fills the middle two thirds of the frame and leaves a transparent margin of
+// some 240 px at each side. On a panel that margin is a hole, and since the two
+// bridges stand on ADJACENT panels what you see is a bridge in segments with
+// the river showing through between them.
+//
+// Fading those edges out was worse, not better: a bridge deck is one continuous
+// horizontal line and the eye reads a break in it as a break, however soft. So
+// the deck is CARRIED OUT to the edge instead.
+//
+// HOW: take a strip of the picture just inside where its content ends — for
+// these two that is the approach viaduct, a deck on regular piers — and repeat
+// it outward, MIRRORED. Mirroring rather than tiling is what makes it seamless:
+// a plain repeat jumps back to the start of the strip every `strip` pixels and
+// leaves a visible vertical seam each time, while a reflected repeat always
+// continues the column it just drew. The result is an approach that runs off
+// the frame the way a real one does, and two neighbouring panels whose decks
+// meet instead of stopping.
+//
+// Rows below the ground line are left alone: they are already solid.
+// ======================================================================
+function extendSides(alpha, strip) {
+  if (!strip) return alpha;
+  // Where the picture's content actually starts and ends, above the ground line.
+  let x0 = OUT_W;
+  let x1 = -1;
+  for (let y = 0; y < GROUND_ROW; y++) {
+    const base = y * OUT_W;
+    for (let x = 0; x < OUT_W; x++) {
+      if (alpha[base + x] > 0) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+      }
+    }
+  }
+  if (x1 < 0) return alpha; // nothing above the ground line
+  const S = Math.max(2, Math.min(strip, x1 - x0 + 1));
+  // Reflected index: 0..S-1 then back down, so every join continues the last
+  // column drawn rather than snapping back to the strip's start.
+  const mirror = (d) => {
+    const m = d % (2 * S);
+    return m < S ? m : 2 * S - 1 - m;
+  };
+  for (let y = 0; y < GROUND_ROW; y++) {
+    const base = y * OUT_W;
+    for (let x = 0; x < x0; x++) {
+      alpha[base + x] = alpha[base + x0 + mirror(x0 - x - 1)];
+    }
+    for (let x = x1 + 1; x < OUT_W; x++) {
+      alpha[base + x] = alpha[base + x1 - mirror(x - x1 - 1)];
+    }
+  }
+  return alpha;
+}
+
+// ======================================================================
 // BOATS-ONLY
 //
 // Label 4-connected components of the mask and keep the ones that read as
@@ -550,11 +692,44 @@ function boatsOnlyMask(fullMask, w, h, cutRow) {
 // Built as RGBA and collapsed with toColourspace("b-w") because sharp's raw
 // input does not take a 2-channel grey+alpha buffer directly; the result is a
 // real LA PNG (colour type 4), matching assets/saigon1-4.png.
-async function writeLA(alpha, file) {
-  const rgba = Buffer.alloc(OUT_W * OUT_H * 4);
-  for (let p = 0; p < alpha.length; p++) rgba[p * 4 + 3] = alpha[p]; // RGB stay 0
+async function writeLA(alpha, file, div) {
+  const d = div && div > 1 ? div : 1;
+  const w = OUT_W / d;
+  const h = OUT_H / d;
+  let a = alpha;
+  if (d > 1) {
+    // Resize the ALPHA ALONE, as a one-channel image, and rebuild the RGBA
+    // afterwards. Handing sharp the RGBA would make it premultiply for the
+    // resample and unpremultiply after, which divides by an alpha that is zero
+    // across most of this picture — the shape survives that, but there is no
+    // reason to round-trip through it when the colour channels are all zero
+    // anyway and the alpha is the entire content.
+    a = await sharp(Buffer.from(alpha.buffer, alpha.byteOffset, alpha.length), {
+      raw: { width: OUT_W, height: OUT_H, channels: 1 },
+    })
+      .resize(w, h, { kernel: "lanczos3" })
+      // Back to ONE channel explicitly: sharp promotes a raw single-channel
+      // input to 3-channel sRGB inside the pipeline, and without this the raw
+      // buffer comes back interleaved RGB — which is read as a third of the
+      // picture, and writes an empty file.
+      .toColourspace("b-w")
+      .raw()
+      .toBuffer();
+  }
+  // RE-ASSERT THE BAND. A lanczos kernel has negative lobes, and the ground
+  // line is the hardest edge in the picture — fully transparent one row, fully
+  // opaque the next — so the resample rings across it and leaves the first rows
+  // of the foreground band at about 216 instead of 255. Measured, before this.
+  // The band is solid BY DEFINITION (it is what the panel's skirt repeats, and
+  // a skirt at 85% alpha shows sky through the bottom of the city), so it is
+  // written back rather than trusted to survive a filter.
+  const ground = Math.round(h * (1 - SKYLINE_CROP));
+  for (let p = ground * w; p < w * h; p++) a[p] = 255;
+
+  const rgba = Buffer.alloc(w * h * 4);
+  for (let p = 0; p < w * h; p++) rgba[p * 4 + 3] = a[p]; // RGB stay 0
   await toFileRetrying(
-    sharp(rgba, { raw: { width: OUT_W, height: OUT_H, channels: 4 } })
+    sharp(rgba, { raw: { width: w, height: h, channels: 4 } })
       .toColourspace("b-w")
       .png({ compressionLevel: 9 }),
     file
@@ -727,10 +902,20 @@ function esc(s) {
       log(`      fitted: spire ${before} -> ${metrics.spire} (cap ${job.maxSpire}), scale ${scale.toFixed(3)}`);
     }
 
+    if (job.fillHoles) {
+      const n = fillHoles(alpha);
+      if (n) log(`      filled ${n} px of enclosed holes (drawn window detail)`);
+      metrics = measureSubject(alpha);
+    }
+    if (job.extendSides) {
+      alpha = extendSides(alpha, job.extendSides);
+      metrics = measureSubject(alpha);
+    }
+
     const n = (counters[job.category] = (counters[job.category] || 0) + 1);
     const name = `${job.category}-${String(n).padStart(2, "0")}.png`;
     const outPath = path.join(OUT_DIR, name);
-    await writeLA(alpha, outPath);
+    await writeLA(alpha, outPath, job.outDiv);
 
     const entry = {
       name,
@@ -739,6 +924,8 @@ function esc(s) {
       category: job.category,
       threshold,
       ramp,
+      extendSides: job.extendSides || 0,
+      fillHoles: !!job.fillHoles,
       cutRow,
       cutRowSource,
       cutRowAuto: guess.row,
@@ -747,8 +934,8 @@ function esc(s) {
       shift: GROUND_ROW - cutRow,
       groundRow: GROUND_ROW,
       fitScale: Number(scale.toFixed(4)),
-      width: OUT_W,
-      height: OUT_H,
+      width: OUT_W / (job.outDiv || 1),
+      height: OUT_H / (job.outDiv || 1),
       format: "LA (grey + alpha), black on transparent",
       // Subject height as a fraction of the CROPPED height — what the scene
       // checks its top-trim against. See measureSubject.
@@ -779,7 +966,7 @@ function esc(s) {
         const c2 = compose(res.mask, w, h, cutRow, subjectTop);
         const bName = name.replace(/\.png$/, "-boats.png");
         const bPath = path.join(OUT_DIR, bName);
-        await writeLA(c2.alpha, bPath);
+        await writeLA(c2.alpha, bPath, job.outDiv);
         entry.boatsOnly = {
           emitted: true,
           name: bName,
