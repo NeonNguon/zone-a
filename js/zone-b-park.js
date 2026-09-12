@@ -879,13 +879,18 @@ AFRAME.registerComponent("park-root", {
     boatLaneSpread: { type: "number", default: 12 },
     // trees — on the lawn only, seeded; see treeLayout
     trees: { type: "boolean", default: true },
-    treeCount: { type: "int", default: 21 },
-    // Share of them that are palms, 0..1. They are built from the SAME two
-    // instanced meshes as the broadleaf trees — a taller, thinner scaling of
-    // the trunk prism, and the canopy sphere squashed flat and stretched long
-    // to make a frond — so a mixed park costs exactly the same two draw calls
-    // as a park with none.
-    palmFraction: { type: "number", default: 0.3 },
+    treeCount: { type: "int", default: 26 }, // total, palms included
+    // How many of them are palms — a COUNT, not a share. It was a probability
+    // rolled per tree, which meant asking for five more palms was not something
+    // you could actually type: 0.3 of 21 came out as nine one load and could as
+    // easily have been six. Now 26 trees carry 14 palms and 12 broadleaf, every
+    // time, and adding five more is adding five here.
+    //
+    // Palms are built from the SAME two instanced meshes as the broadleaf trees
+    // — a taller, thinner scaling of the trunk prism, and the canopy sphere
+    // squashed flat and stretched long to make a frond — so a mixed park costs
+    // exactly the same two draw calls as a park with none.
+    palmCount: { type: "int", default: 14 },
     palmScale: { type: "number", default: 1 },
     treeSeed: { type: "number", default: 11 },
     treeKerbClearance: { type: "number", default: 3 }, // trunk to the kerb's outer face
@@ -1121,45 +1126,78 @@ AFRAME.registerComponent("park-root", {
       const tooClose = out.some((t) => (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) <
         d.treeSpacing * d.treeSpacing);
       if (tooClose) continue;
-      const palm = rand() < d.palmFraction;
+      // The accepted positions arrive in random order across the lawn (this is
+      // rejection sampling), so taking the first palmCount of them as palms
+      // scatters the palms exactly as a per-tree coin flip did — but an exact
+      // number of them.
+      const palm = out.length < d.palmCount;
       const tint = 1 + (rand() * 2 - 1) * d.treeTone;
       // Palms read a shade lighter and yellower than the broadleaf canopies.
       const warm = (rand() - 0.5) * 0.08 + (palm ? 0.035 : 0);
 
       if (palm) {
-        // A PALM: a tall bare trunk with a crown of fronds at the very top.
-        // Each frond is the canopy sphere flattened almost to a sheet and
-        // stretched along its length, then swung out and down from the crown —
-        // so the same instanced geometry that makes a round canopy makes these
-        // too, and the park still draws in two calls.
+        // A PALM: a tall bare trunk carrying a crown of arching fronds.
+        //
+        // THE FROND IS TWO PIECES, not one. A single stretched blob can only
+        // point one way, so a crown made of them is a spiky star — every frond
+        // leaving the trunk already angled down at its final angle. A real one
+        // goes OUT first, nearly level, and only bends down over its outer
+        // half. So each frond is an inner segment leaving the crown almost
+        // horizontal and an outer segment picking up from its tip and arching
+        // away, which is what makes the crown read as a canopy spreading
+        // outwards rather than a starburst.
+        //
+        // And there are a lot of them, kept wide: what gives a palm its mass is
+        // a dozen or more overlapping blades, not the length of any one.
         const ps = sc * d.palmScale;
-        const trunkH = (4.5 + rand() * 3) * ps;
-        const trunkR = (0.10 + rand() * 0.05) * ps;
-        const len = (2.0 + rand() * 1.0) * ps;
-        const n = 6 + Math.floor(rand() * 4);
+        const trunkH = (5.0 + rand() * 3) * ps;
+        const trunkR = (0.11 + rand() * 0.05) * ps;
+        // How far a frond reaches from the trunk — the crown's radius, set off
+        // the trunk's height so tall palms carry proportionally big crowns.
+        const reach = trunkH * (0.48 + rand() * 0.18);
+        const n = 11 + Math.floor(rand() * 5);
         const a0 = rand() * Math.PI * 2;
         const blobs = [];
         for (let b = 0; b < n; b++) {
-          // Evenly round the crown, jittered so it is not a wheel, and each
-          // frond drooping by its own amount.
-          const az = a0 + (b / n) * Math.PI * 2 + (rand() - 0.5) * (Math.PI / n);
-          const droop = 0.30 + rand() * 0.35;
-          const l = len * (0.75 + rand() * 0.5);
-          const ch = Math.cos(droop);
-          const sh = Math.sin(droop);
+          // Evenly round the crown, jittered so it is not a wheel.
+          const az = a0 + (b / n) * Math.PI * 2 + (rand() - 0.5) * (Math.PI / n) * 0.9;
+          const r = reach * (0.8 + rand() * 0.4);
+          const wide = (0.30 + rand() * 0.12) * ps;
+          const thick = 0.06 * ps;
+
+          // INNER: out of the crown, barely dipping.
+          const d1 = 0.05 + rand() * 0.16;
+          const l1 = r * 0.58;
+          const c1 = Math.cos(d1);
+          const s1 = Math.sin(d1);
           blobs.push({
-            // Centred half its own length out along the way it points.
-            dx: Math.cos(az) * ch * (l / 2),
-            dz: Math.sin(az) * ch * (l / 2),
-            y: trunkH - sh * (l / 2),
-            sx: l / 2, sy: 0.085 * ps, sz: 0.36 * ps,
-            az: az, droop: droop,
+            dx: Math.cos(az) * c1 * (l1 / 2),
+            dz: Math.sin(az) * c1 * (l1 / 2),
+            y: trunkH - s1 * (l1 / 2),
+            sx: l1 / 2, sy: thick, sz: wide,
+            az: az, droop: d1,
+          });
+
+          // OUTER: continues from where the inner one ends, arching down.
+          const d2 = d1 + 0.40 + rand() * 0.35;
+          const l2 = r * 0.55;
+          const c2 = Math.cos(d2);
+          const s2 = Math.sin(d2);
+          const tipX = Math.cos(az) * c1 * l1;
+          const tipZ = Math.sin(az) * c1 * l1;
+          const tipY = trunkH - s1 * l1;
+          blobs.push({
+            dx: tipX + Math.cos(az) * c2 * (l2 / 2),
+            dz: tipZ + Math.sin(az) * c2 * (l2 / 2),
+            y: tipY - s2 * (l2 / 2),
+            sx: l2 / 2, sy: thick, sz: wide * 0.8,
+            az: az, droop: d2,
           });
         }
         out.push({
           x: x, z: z, kind: "palm", trunkR: trunkR,
           trunkY: trunkH + 0.15 * ps, // a little into the crown, so no gap shows
-          canopyR: len * 0.8, // what the contact cue is sized from
+          canopyR: reach * 0.9, // what the contact cue is sized from
           tint: tint, warm: warm, blobs: blobs,
         });
       } else {
