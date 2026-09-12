@@ -879,7 +879,14 @@ AFRAME.registerComponent("park-root", {
     boatLaneSpread: { type: "number", default: 12 },
     // trees — on the lawn only, seeded; see treeLayout
     trees: { type: "boolean", default: true },
-    treeCount: { type: "int", default: 16 },
+    treeCount: { type: "int", default: 21 },
+    // Share of them that are palms, 0..1. They are built from the SAME two
+    // instanced meshes as the broadleaf trees — a taller, thinner scaling of
+    // the trunk prism, and the canopy sphere squashed flat and stretched long
+    // to make a frond — so a mixed park costs exactly the same two draw calls
+    // as a park with none.
+    palmFraction: { type: "number", default: 0.3 },
+    palmScale: { type: "number", default: 1 },
     treeSeed: { type: "number", default: 11 },
     treeKerbClearance: { type: "number", default: 3 }, // trunk to the kerb's outer face
     treeBuildingClearance: { type: "number", default: 4 }, // trunk to lawnWest
@@ -1114,24 +1121,72 @@ AFRAME.registerComponent("park-root", {
       const tooClose = out.some((t) => (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) <
         d.treeSpacing * d.treeSpacing);
       if (tooClose) continue;
-      const trunkH = (2.3 + rand() * 1.1) * sc;
-      const trunkR = (0.15 + rand() * 0.08) * sc;
-      const canopyR = (1.9 + rand() * 0.9) * sc;
+      const palm = rand() < d.palmFraction;
       const tint = 1 + (rand() * 2 - 1) * d.treeTone;
-      const warm = (rand() - 0.5) * 0.08; // a little toward yellow or blue-green
-      const blobs = [{ dx: 0, dz: 0, y: trunkH + canopyR * 0.35, r: canopyR }];
-      const extra = rand() < 0.55 ? 2 : 1;
-      for (let b = 0; b < extra; b++) {
-        const a = rand() * Math.PI * 2;
-        const dist = canopyR * (0.55 + rand() * 0.35);
-        blobs.push({
-          dx: Math.cos(a) * dist, dz: Math.sin(a) * dist,
-          y: trunkH + canopyR * (0.1 + rand() * 0.3),
-          r: canopyR * (0.6 + rand() * 0.2),
+      // Palms read a shade lighter and yellower than the broadleaf canopies.
+      const warm = (rand() - 0.5) * 0.08 + (palm ? 0.035 : 0);
+
+      if (palm) {
+        // A PALM: a tall bare trunk with a crown of fronds at the very top.
+        // Each frond is the canopy sphere flattened almost to a sheet and
+        // stretched along its length, then swung out and down from the crown —
+        // so the same instanced geometry that makes a round canopy makes these
+        // too, and the park still draws in two calls.
+        const ps = sc * d.palmScale;
+        const trunkH = (4.5 + rand() * 3) * ps;
+        const trunkR = (0.10 + rand() * 0.05) * ps;
+        const len = (2.0 + rand() * 1.0) * ps;
+        const n = 6 + Math.floor(rand() * 4);
+        const a0 = rand() * Math.PI * 2;
+        const blobs = [];
+        for (let b = 0; b < n; b++) {
+          // Evenly round the crown, jittered so it is not a wheel, and each
+          // frond drooping by its own amount.
+          const az = a0 + (b / n) * Math.PI * 2 + (rand() - 0.5) * (Math.PI / n);
+          const droop = 0.30 + rand() * 0.35;
+          const l = len * (0.75 + rand() * 0.5);
+          const ch = Math.cos(droop);
+          const sh = Math.sin(droop);
+          blobs.push({
+            // Centred half its own length out along the way it points.
+            dx: Math.cos(az) * ch * (l / 2),
+            dz: Math.sin(az) * ch * (l / 2),
+            y: trunkH - sh * (l / 2),
+            sx: l / 2, sy: 0.085 * ps, sz: 0.36 * ps,
+            az: az, droop: droop,
+          });
+        }
+        out.push({
+          x: x, z: z, kind: "palm", trunkR: trunkR,
+          trunkY: trunkH + 0.15 * ps, // a little into the crown, so no gap shows
+          canopyR: len * 0.8, // what the contact cue is sized from
+          tint: tint, warm: warm, blobs: blobs,
+        });
+      } else {
+        const trunkH = (2.3 + rand() * 1.1) * sc;
+        const trunkR = (0.15 + rand() * 0.08) * sc;
+        const canopyR = (1.9 + rand() * 0.9) * sc;
+        const blobs = [{
+          dx: 0, dz: 0, y: trunkH + canopyR * 0.35,
+          sx: canopyR, sy: canopyR * 0.62, sz: canopyR,
+        }];
+        const extra = rand() < 0.55 ? 2 : 1;
+        for (let b = 0; b < extra; b++) {
+          const a = rand() * Math.PI * 2;
+          const dist = canopyR * (0.55 + rand() * 0.35);
+          const r = canopyR * (0.6 + rand() * 0.2);
+          blobs.push({
+            dx: Math.cos(a) * dist, dz: Math.sin(a) * dist,
+            y: trunkH + canopyR * (0.1 + rand() * 0.3),
+            sx: r, sy: r * 0.62, sz: r,
+          });
+        }
+        out.push({
+          x: x, z: z, kind: "broadleaf", trunkR: trunkR,
+          trunkY: trunkH + 0.4 * canopyR,
+          canopyR: canopyR, tint: tint, warm: warm, blobs: blobs,
         });
       }
-      out.push({ x: x, z: z, trunkH: trunkH, trunkR: trunkR, canopyR: canopyR,
-        tint: tint, warm: warm, blobs: blobs });
     }
     return out;
   },
@@ -1189,6 +1244,11 @@ AFRAME.registerComponent("park-root", {
     qGeo.rotateX(-Math.PI / 2);
 
     const blobCount = trees.reduce((n, t) => n + t.blobs.length, 0);
+    const palms = trees.reduce((n, t) => n + (t.kind === "palm" ? 1 : 0), 0);
+    console.log(
+      `[park] trees ${trees.length} of ${d.treeCount} planted — ${trees.length - palms} ` +
+        `broadleaf, ${palms} palm, ${blobCount} canopy pieces in one instanced mesh`
+    );
     const trunks = new THREE.InstancedMesh(tGeo, tMat, trees.length);
     const canopy = new THREE.InstancedMesh(cGeo, cMat, blobCount);
     const cues = new THREE.InstancedMesh(qGeo, qMat, trees.length);
@@ -1198,12 +1258,24 @@ AFRAME.registerComponent("park-root", {
     const scl = new THREE.Vector3();
     const col = new THREE.Color();
     let bi = 0;
+    const axis = new THREE.Vector3(1, 0, 0); // a blob's local length axis
+    const dir = new THREE.Vector3();
+    const bq = new THREE.Quaternion();
     trees.forEach((t, i) => {
-      m.compose(pos.set(t.x, 0, t.z), q, scl.set(t.trunkR, t.trunkH + 0.4 * t.canopyR, t.trunkR));
+      m.compose(pos.set(t.x, 0, t.z), q, scl.set(t.trunkR, t.trunkY, t.trunkR));
       trunks.setMatrixAt(i, m);
       col.setRGB(t.tint + t.warm, t.tint, t.tint - t.warm);
       t.blobs.forEach((b) => {
-        m.compose(pos.set(t.x + b.dx, b.y, t.z + b.dz), q, scl.set(b.r, b.r * 0.62, b.r));
+        // A frond carries the way it points; a round canopy blob does not, and
+        // takes the identity, which is what it always had.
+        let rot = q;
+        if (b.az != null) {
+          const ch = Math.cos(b.droop);
+          dir.set(Math.cos(b.az) * ch, -Math.sin(b.droop), Math.sin(b.az) * ch);
+          bq.setFromUnitVectors(axis, dir);
+          rot = bq;
+        }
+        m.compose(pos.set(t.x + b.dx, b.y, t.z + b.dz), rot, scl.set(b.sx, b.sy, b.sz));
         canopy.setMatrixAt(bi, m);
         canopy.setColorAt(bi, col);
         bi++;
