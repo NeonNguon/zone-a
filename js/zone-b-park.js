@@ -58,6 +58,17 @@
 // ================================================================
 
 // ---------------------------------------------------------------- helpers
+// How close any part of the park may come to a teleport sub-space before the
+// build log complains. The sub-spaces sit ~400 m out and the park now reaches
+// outward (the river to skylineRadius, the skyline bands past it), so this is
+// the margin that keeps the two from ever being in frame together.
+const PARK_SUBSPACE_CLEARANCE = 100;
+
+// How far the river is pulled UNDER the lawn's edge, in metres. Enough that no
+// triangle's rounding can open a hairline between water and grass, small enough
+// that it is never visible as water over the lawn.
+const RIVER_OVERLAP = 0.05;
+
 // "#rgb" / "#rrggbb" -> [r, g, b] sRGB bytes, for drawing straight into a
 // canvas (a THREE.Color would hand back linear values).
 function parkRGB(hex) {
@@ -107,6 +118,43 @@ function parkAuto() {
       return String(v);
     },
   };
+}
+
+// BEARINGS, the skyline panels' convention, used by everything that stands in a
+// ring around the square: 0 = -z, 90 = +x (east), 180 = +z, 270 = -x. So the
+// unit direction for a bearing is (sin, -cos), which is what parkPanelPos and
+// the bands below both build their positions from.
+function parkDir(deg) {
+  const t = THREE.MathUtils.degToRad(deg);
+  return { x: Math.sin(t), z: -Math.cos(t) };
+}
+
+// How far it is from a point INSIDE an axis-aligned rectangle to the rectangle's
+// edge along a bearing — a ray/box exit, the slab test with the near side
+// dropped because the origin is known to be inside. The river uses it to follow
+// the lawn's outline rather than guessing a radius for it.
+function parkRectExit(cx, cz, deg, r) {
+  const d = parkDir(deg);
+  let m = Infinity;
+  if (d.x > 1e-9) m = Math.min(m, (r.x1 - cx) / d.x);
+  else if (d.x < -1e-9) m = Math.min(m, (r.x0 - cx) / d.x);
+  if (d.z > 1e-9) m = Math.min(m, (r.z1 - cz) / d.z);
+  else if (d.z < -1e-9) m = Math.min(m, (r.z0 - cz) / d.z);
+  return isFinite(m) ? Math.max(0, m) : 0;
+}
+
+// The bearing of a point as seen from the square's centre, in 0..360.
+function parkBearing(cx, cz, x, z) {
+  const deg = THREE.MathUtils.radToDeg(Math.atan2(x - cx, -(z - cz)));
+  return ((deg % 360) + 360) % 360;
+}
+
+// Signed shortest angle from a to b, in -180..180 — "how far apart are these two
+// bearings", which is the only way to compare them without the 0/360 wrap
+// biting (the near band asks it of every far panel behind it).
+function parkAngleDelta(a, b) {
+  let d = ((b - a) % 360 + 540) % 360 - 180;
+  return d;
 }
 
 // Push one axis-aligned box into flat position/colour arrays as non-indexed
@@ -294,6 +342,51 @@ const ParkTextures = {
         px[p] = Math.min(255, px[p] * k);
         px[p + 1] = Math.min(255, px[p + 1] * k);
         px[p + 2] = Math.min(255, px[p + 2] * k);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+  },
+
+  // THE RIVER: the same idea as the lawn and deliberately far weaker. Two
+  // octaves only — broad swells and a fine ripple — at a few per cent either
+  // side of the base tone, with no speckle and no "blades".
+  //
+  // WHY SO FAINT. This surface is seen almost edge-on and it is BIG: it runs
+  // from the lawn's edge out to the foot of the skyline, so a single pixel of
+  // it near the far edge covers many metres. Any texture with real contrast
+  // turns into moire out there, and a strong low-frequency octave repeating
+  // every riverTile metres reads as a quilt — exactly the trap the lawn's patch
+  // octave is kept low-contrast for, and worse here because the viewing angle is
+  // flatter. What the noise is actually for is to stop a hundred-metre field of
+  // ONE value from banding on the Quest's 8-bit output, and that takes very
+  // little. No animation: the whole park is static, and a moving surface at this
+  // size would be the only thing in the scene asking for a per-frame upload.
+  river: function (o) {
+    const S = o.size;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = S;
+    const ctx = canvas.getContext("2d");
+    const img = ctx.createImageData(S, S);
+    const px = img.data;
+    const rand = mulberry32(o.seed * 40503 + 17);
+    const base = parkRGB(o.color);
+    const n1 = parkNoise(4, rand); // swells
+    const n2 = parkNoise(17, rand); // ripple
+    const amp = o.noise;
+    for (let y = 0; y < S; y++) {
+      const v = y / S;
+      for (let x = 0; x < S; x++) {
+        const u = x / S;
+        // ±3% swell, ±2% ripple, both scaled by riverNoise.
+        const k =
+          1 + (n1(u * 4, v * 4) - 0.5) * 0.06 * amp +
+          (n2(u * 17, v * 17) - 0.5) * 0.04 * amp;
+        const p = (y * S + x) * 4;
+        px[p] = Math.max(0, Math.min(255, base[0] * k));
+        px[p + 1] = Math.max(0, Math.min(255, base[1] * k));
+        px[p + 2] = Math.max(0, Math.min(255, base[2] * k));
+        px[p + 3] = 255;
       }
     }
     ctx.putImageData(img, 0, 0);
@@ -522,6 +615,21 @@ AFRAME.registerComponent("park-root", {
     skyTop: { type: "color", default: "#9fb1be" },
     skyHorizon: { type: "color", default: "#dde2e3" },
     skyGround: { type: "color", default: "#9ba399" }, // below the horizon
+    // river — a flat ring segment filling the gap between the lawn's outer edge
+    // and the foot of the near skyline band, on ONE bearing only. See buildRiver.
+    river: { type: "boolean", default: true },
+    riverBearingDeg: { type: "number", default: 90 }, // 90 = east, panel bearings
+    riverArcDeg: { type: "number", default: 120 },
+    riverOuter: parkAuto(), // auto = skylineRadius, so it follows the near band
+    // A touch darker and COOLER than skyGround (#9ba399, a warm grey-green):
+    // the water has to separate from the land the sky's lower band stands in
+    // for, and at this distance tone and temperature are the only cues left.
+    riverColor: { type: "color", default: "#7c888e" },
+    riverLift: { type: "number", default: 0.002 }, // UNDER lawnLift; see buildRiver
+    riverNoise: { type: "number", default: 1 },
+    riverTile: { type: "number", default: 24 }, // metres a texture repeat
+    riverSeed: { type: "number", default: 7 },
+    riverTextureSize: { type: "int", default: 256 },
     // skyline — two rings of silhouette panels around the square's centre.
     // Heights are the VISIBLE (cropped) height; width follows from the picture.
     skyline: { type: "boolean", default: true },
@@ -595,6 +703,8 @@ AFRAME.registerComponent("park-root", {
     this.built = false;
     this.skylineEl = null; // the ring's container entity (panels are a-planes)
     this.skylineToken = 0; // invalidates a previous build's pending attaches
+    this.skylineInfo = []; // per-band build facts, for logFarScenery
+    this.riverInfo = null; // the river's build facts, or null when it is off
     this.skylineCrops = {}; // src -> the cropped clone every panel of it shares
     this.benchEl = null; // the benches' container entity
     this.instanced = []; // InstancedMeshes, which own buffers of their own
@@ -1121,8 +1231,12 @@ AFRAME.registerComponent("park-root", {
     sky.renderOrder = 1;
     this.skyCenter = new THREE.Vector3(s.cx, 0, s.cz);
 
+    // --- THE RIVER (before the skyline: it is the ground the boats stand on)
+    this.buildRiver(P);
+
     // --- THE SKYLINE
     this.buildSkyline(s);
+    this.logFarScenery(s);
 
     // --- THE TREES and THE BENCHES
     this.buildTrees(P);
@@ -1135,6 +1249,201 @@ AFRAME.registerComponent("park-root", {
         ` z ${L.z0}..${L.z1}, kerb mouth ${P.mouth ? P.mouth.z0.toFixed(3) + ".." + P.mouth.z1.toFixed(3) : "none"}`
     );
     this.el.emit("zonebparkchanged");
+  },
+
+  // ---------------------------------------------------------------
+  // THE TELEPORT SUB-SPACES, read from the DOM rather than typed here. The floor
+  // map and the chung cư corridor are each parked ~400 m out on z by their
+  // root's `offset` attribute, and that attribute is the only place the number
+  // lives — copying it into this file would be a second copy to forget. The
+  // skyline's note has always claimed "nothing comes within 200 m of the 400 m
+  // sub-spaces"; now that the park is growing outward (the river reaches
+  // skylineRadius, the boats stand at boatRadius) the claim is checked instead.
+  //
+  // Anything this returns is a point, and the check is against a piece of park
+  // geometry expressed as a centre plus a reach — the same "farthest point"
+  // number the skyline bands already report.
+  // ---------------------------------------------------------------
+  // The roots' `offset` attribute is NOT the answer: for zone-b-map-root it is
+  // documented as a DELTA from a spot derived off the Zone B wall, so reading it
+  // would give a few metres rather than the 400 it resolves to. Both components
+  // end up writing the entity's own position, so that is what is read — the
+  // resolved truth, whatever it was derived from.
+  //
+  // A root still sitting at the origin has not placed itself yet (this can run
+  // before those components' first update). That is reported rather than
+  // silently skipped, so an absent check never looks like a passing one.
+  subspaces: function () {
+    const out = [];
+    const pending = [];
+    document.querySelectorAll("[zone-b-map-root], [corridor-root]").forEach((el) => {
+      const id = el.id || el.tagName.toLowerCase();
+      const p = el.object3D && el.object3D.position;
+      if (!p || (!p.x && !p.y && !p.z)) {
+        pending.push(id);
+        return;
+      }
+      out.push({ id: id, x: p.x, y: p.y, z: p.z });
+    });
+    this.subspacesPending = pending;
+    return out;
+  },
+
+  // Warn if `reach` metres around `centre` comes within PARK_SUBSPACE_CLEARANCE
+  // of any sub-space. Returns the tightest clearance in metres, or null when
+  // there are no sub-spaces to clear (the park alone in a test page).
+  checkSubspaces: function (label, cx, cz, reach) {
+    const subs = this.subspaces();
+    if (!subs.length) return null;
+    let tightest = Infinity;
+    subs.forEach((sub) => {
+      const dx = sub.x - cx;
+      const dz = sub.z - cz;
+      const gap = Math.sqrt(dx * dx + dz * dz) - reach;
+      if (gap < tightest) tightest = gap;
+      if (gap < PARK_SUBSPACE_CLEARANCE) {
+        console.warn(
+          `[park] the ${label} reaches within ${gap.toFixed(1)} m of the ` +
+            `${sub.id} sub-space at z ${sub.z} — it must stay ` +
+            `${PARK_SUBSPACE_CLEARANCE} m clear or the two will be visible from each other`
+        );
+      }
+    });
+    return tightest;
+  },
+
+  // ---------------------------------------------------------------
+  // THE RIVER — the Saigon, on the east side of the square.
+  //
+  // WHAT GAP IT FILLS. The lawn stops at lawnEast / ±lawnHalfDepth and the near
+  // skyline band stands at skylineRadius, and between the two there is a ring of
+  // nothing. What shows there is the sky sphere's lower band — the `skyGround`
+  // tone, which exists precisely to read as land in the haze (see the
+  // ParkTextures.sky note on why that band had to stop being pale). On the east
+  // that strip is the river, so this lays a surface over it. One side only:
+  // riverBearingDeg / riverArcDeg, in the panels' bearing convention, so "90"
+  // means the same direction here as it does on the skyline.
+  //
+  // IT IS A RING SEGMENT WHOSE INNER EDGE IS THE LAWN'S OUTLINE, not a circle.
+  // The lawn is a rectangle and the skyline is a circle, so the gap between them
+  // is neither, and an inner circle would either leave a crescent of sky-ground
+  // showing at the lawn's corners or run up over the grass in the middle.
+  // parkRectExit samples the lawn along each bearing instead. Between two
+  // samples taken on the SAME edge of the rectangle the chord lies exactly on
+  // that edge, so the inner boundary is exact everywhere except where it crosses
+  // a corner — and the corners inside the arc are inserted as samples of their
+  // own, so it is exact there too.
+  //
+  // THE SEAM IS AN OVERLAP, NOT A BUTT JOINT. The water is pulled RIVER_OVERLAP
+  // under the grass and sits at riverLift (0.002), BELOW lawnLift (0.003), so
+  // the lawn wins the overlap and no hairline of sky-ground can show between
+  // them however the triangles round off. The two never fight for the same
+  // pixel: 1 mm apart, and both are within ~45 m of anywhere you can stand,
+  // where the depth buffer resolves about a millimetre and the separation along
+  // a grazing ray is larger than the vertical step (the ground-stack note).
+  // Nothing else is down there to fight — the global terrazzo plane is only
+  // GROUND_SIZE (64 m) across, centred on the world origin, and stops at x 32
+  // while the river starts beyond the lawn at x 70.
+  //
+  // OPAQUE, AND DRAWN FIRST. Flat and unlit like every other surface in the
+  // park. Being opaque already puts it ahead of the skyline — three draws the
+  // whole opaque pass before any transparent one, and the panels are
+  // transparent — so renderOrder is set only to say so out loud, and to keep it
+  // ahead of the sky sphere (renderOrder 1) which it occludes.
+  // ---------------------------------------------------------------
+  buildRiver: function (P) {
+    const d = this.data;
+    this.riverInfo = null;
+    if (!d.river) return;
+    const s = P.square;
+    const L = P.lawn;
+    const outer = d.riverOuter === "auto" ? d.skylineRadius : d.riverOuter;
+    const arc = Math.max(0, Math.min(360, d.riverArcDeg));
+    if (arc <= 0 || outer <= 0) return;
+
+    const from = d.riverBearingDeg - arc / 2;
+    const to = d.riverBearingDeg + arc / 2;
+
+    // Sample bearings: a regular step fine enough that the OUTER edge reads as a
+    // curve, plus the lawn's corners so the INNER edge is exact across them.
+    // At 2° the outer chord's sagitta is outer·(1−cos 1°) ≈ 2 cm at 130 m.
+    const step = 2;
+    const bearings = [];
+    for (let a = from; a < to; a += step) bearings.push(a);
+    bearings.push(to);
+    [[L.x0, L.z0], [L.x1, L.z0], [L.x1, L.z1], [L.x0, L.z1]].forEach((c) => {
+      const b = parkBearing(s.cx, s.cz, c[0], c[1]);
+      // The corner may sit in the arc under any 360 offset of its bearing.
+      [b - 360, b, b + 360].forEach((cand) => {
+        if (cand > from && cand < to) bearings.push(cand);
+      });
+    });
+    bearings.sort((a, b) => a - b);
+
+    const pos = [];
+    const uv = [];
+    const y = d.riverLift;
+    let innerMin = Infinity;
+    let innerMax = 0;
+    const at = (deg, r) => {
+      const dir = parkDir(deg);
+      return [s.cx + dir.x * r, s.cz + dir.z * r];
+    };
+    const push = (p) => {
+      pos.push(p[0], y, p[1]);
+      uv.push(p[0] / d.riverTile, -p[1] / d.riverTile);
+    };
+    for (let i = 0; i < bearings.length - 1; i++) {
+      const a = bearings[i];
+      const b = bearings[i + 1];
+      if (b - a < 1e-6) continue;
+      const ra = Math.max(0, parkRectExit(s.cx, s.cz, a, L) - RIVER_OVERLAP);
+      const rb = Math.max(0, parkRectExit(s.cx, s.cz, b, L) - RIVER_OVERLAP);
+      innerMin = Math.min(innerMin, ra, rb);
+      innerMax = Math.max(innerMax, ra, rb);
+      if (ra >= outer || rb >= outer) continue; // lawn already past the band
+      const ia = at(a, ra);
+      const ib = at(b, rb);
+      const oa = at(a, outer);
+      const ob = at(b, outer);
+      // Wound so both triangles face +y, like the lawn's strips.
+      push(ia); push(ob); push(oa);
+      push(ia); push(ib); push(ob);
+    }
+    if (!pos.length) {
+      console.warn("[park] the river arc is entirely behind the lawn's edge; no water built");
+      return;
+    }
+
+    const tex = this.canvasTexture(
+      "river",
+      [d.riverTextureSize, d.riverColor, d.riverNoise, d.riverSeed].join("|"),
+      () => ParkTextures.river({
+        size: d.riverTextureSize, color: d.riverColor,
+        noise: d.riverNoise, seed: d.riverSeed,
+      }),
+      true
+    );
+    tex.anisotropy = this.anisotropy();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.computeBoundingSphere();
+    // In `far`, not `ground`: it is scenery at the skyline's distance, so it
+    // hides with the sky whenever the camera leaves the sphere (see tick).
+    const mesh = this.addMesh(this.far, geo, new THREE.MeshBasicMaterial({ map: tex }));
+    mesh.renderOrder = -3;
+
+    const clear = this.checkSubspaces("river", s.cx, s.cz, outer);
+    this.riverInfo = {
+      bearing: d.riverBearingDeg, arc: arc, outer: outer,
+      innerMin: +innerMin.toFixed(1), innerMax: +innerMax.toFixed(1),
+      tris: pos.length / 9, subspaceClearM: clear == null ? null : +clear.toFixed(0),
+    };
+    if (outer >= d.skyRadius) {
+      console.warn(`[park] the river reaches ${outer} m, through the ${d.skyRadius} m sky ` +
+        "— lower riverOuter");
+    }
   },
 
   // ---------------------------------------------------------------
@@ -1298,18 +1607,86 @@ AFRAME.registerComponent("park-root", {
       d.skylineHazeOpacity2, d.skylinePanelsMax2, 0.5, 2, -2);
     band("near", d.skylineRadius, d.skylineHeight, d.skylineHaze,
       d.skylineHazeOpacity, d.skylinePanelsMax, 0, 0, -1);
+  },
+
+  // ---------------------------------------------------------------
+  // THE BUILD LOG for everything far off — the skyline bands, the river, and
+  // (from the next stage) the boats. One place, called from build() after all
+  // of them, rather than each printing its own: they share a frame and the
+  // interesting question is always how they sit relative to each other and to
+  // the two limits that bound them all — the sky sphere they must stay inside,
+  // and the teleport sub-spaces they must stay clear of.
+  //
+  // Called unconditionally, so `skyline: false` or `river: false` still says so
+  // rather than leaving a silent gap in the log.
+  // ---------------------------------------------------------------
+  logFarScenery: function (s) {
+    const d = this.data;
+    const bands = this.skylineInfo || [];
     console.log(
-      "[park] skyline " + this.skylineInfo.map((b) =>
-        `${b.band} ${b.panels} × ${b.panelWidth} m at ${b.radius} m, reaching ${b.reach} m` +
-          (b.gapM > 0 ? ` (GAPS of ${b.gapM} m — raise skylinePanelsMax)` : "")
-      ).join(", ")
+      "[park] skyline " +
+        (bands.length
+          ? bands.map((b) =>
+              `${b.band} ${b.panels} × ${b.panelWidth} m at ${b.radius} m, reaching ${b.reach} m` +
+                (b.gapM > 0 ? ` (GAPS of ${b.gapM} m — raise skylinePanelsMax)` : "")
+            ).join(", ")
+          : "off")
     );
-    this.skylineInfo.forEach((b) => {
-      if (b.reach >= d.skyRadius) {
-        console.warn(`[park] the ${b.band} skyline band reaches ${b.reach} m, ` +
-          `through the ${d.skyRadius} m sky — lower its height or radius`);
+    const r = this.riverInfo;
+    console.log(
+      "[park] river " +
+        (r
+          ? `${r.arc}° at bearing ${r.bearing}, from the lawn's edge ` +
+            `(${r.innerMin}-${r.innerMax} m out) to ${r.outer} m, ${r.tris} triangles` +
+            (r.subspaceClearM == null ? "" : `, ${r.subspaceClearM} m clear of the sub-spaces`)
+          : "off")
+    );
+
+    // Everything far off reduced to a centre and a farthest point — the shape
+    // both of the two limits are measured against.
+    this.farCenter = { x: s.cx, z: s.cz };
+    this.farReach = bands.map((b) => ({ label: b.band + " band", reach: b.reach }));
+    if (r) this.farReach.push({ label: "river", reach: r.outer });
+    this.farReach.forEach((f) => {
+      if (f.reach >= d.skyRadius) {
+        console.warn(`[park] the ${f.label} reaches ${f.reach} m, through the ` +
+          `${d.skyRadius} m sky — lower its height or radius`);
       }
     });
+    this.checkAllSubspaces();
+  },
+
+  // ---------------------------------------------------------------
+  // THE CLEARANCE CHECK, WHICH USUALLY HAS TO WAIT. The park builds on
+  // `floorplanbuilt`, and the two sub-space roots write their own positions from
+  // their own components' update — which on a cold load has not run yet, so at
+  // build time both are still sitting at the origin and there is nothing to
+  // measure against. Reporting "clear" from that would be a pass the check never
+  // made, so instead it says what it could not check and runs again, once, on
+  // the scene's `loaded` event, by which time they have placed themselves.
+  // ---------------------------------------------------------------
+  checkAllSubspaces: function () {
+    const subs = this.subspaces();
+    const pending = this.subspacesPending || [];
+    let worst = Infinity;
+    (this.farReach || []).forEach((f) => {
+      const gap = this.checkSubspaces(f.label, this.farCenter.x, this.farCenter.z, f.reach);
+      if (gap != null && gap < worst) worst = gap;
+    });
+    console.log(
+      `[park] sub-space clearance (${PARK_SUBSPACE_CLEARANCE} m minimum): ` +
+        (subs.length
+          ? subs.map((x) => `${x.id} at z ${x.z.toFixed(0)}`).join(", ") +
+            (isFinite(worst) ? `, tightest ${worst.toFixed(0)} m` : "")
+          : "none found") +
+        (pending.length ? `; not placed yet, unchecked: ${pending.join(", ")}` : "")
+    );
+    if (pending.length && !this.subspaceRechecked) {
+      this.subspaceRechecked = true; // once only, however many roots are late
+      const again = () => this.checkAllSubspaces();
+      if (this.el.sceneEl.hasLoaded) setTimeout(again, 0);
+      else this.el.sceneEl.addEventListener("loaded", again, { once: true });
+    }
   },
 
   // The sky, the skyline and anything else far off, only while the camera is
