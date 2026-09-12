@@ -157,6 +157,21 @@ function parkAngleDelta(a, b) {
   return d;
 }
 
+// A seeded Fisher-Yates, returning a NEW array — the same seed always deals the
+// same order, which is what makes a shuffled skyline reproducible enough to tune
+// by eye. Dealing without replacement is the point: a ring of six panels drawn
+// independently would show the same picture twice as often as not.
+function parkShuffle(arr, rand) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const t = a[i];
+    a[i] = a[j];
+    a[j] = t;
+  }
+  return a;
+}
+
 // Push one axis-aligned box into flat position/colour arrays as non-indexed
 // triangles, each face in its own tone — the unlit way to make an edge read.
 // `tones` = { top, x, z, bottom } multipliers on `color` (a THREE.Color);
@@ -649,6 +664,22 @@ AFRAME.registerComponent("park-root", {
     skylineHaze2: { type: "color", default: "#a7b1b8" },
     skylineHazeOpacity2: { type: "number", default: 0.7 },
     skylinePanelsMax2: { type: "int", default: 16 },
+    // boats — a third band, on the water only. See buildBoats.
+    boats: { type: "boolean", default: true },
+    boatRadius: { type: "number", default: 100 }, // between the lawn and the near band
+    // The height of the TALLEST boat in the pool; every other picture shows at
+    // its own share of it. Not a panel height — see buildBoats on why this band
+    // sizes itself from the pictures rather than the other way round.
+    boatHeight: { type: "number", default: 6 },
+    // Nearer than the near band, so less haze: darker and more opaque than
+    // skylineHaze/#7f8b94 at 0.85, still short of an untinted black silhouette.
+    boatHaze: { type: "color", default: "#5a646c" },
+    boatHazeOpacity: { type: "number", default: 0.93 },
+    boatCount: { type: "int", default: 5 },
+    boatSeed: { type: "number", default: 13 },
+    // How much of its own slot a boat may wander, 0 = dead even, 1 = anywhere
+    // in the slot. Bounded by the slot so the boats keep their order and spacing.
+    boatJitter: { type: "number", default: 0.7 },
     // trees — on the lawn only, seeded; see treeLayout
     trees: { type: "boolean", default: true },
     treeCount: { type: "int", default: 16 },
@@ -705,6 +736,8 @@ AFRAME.registerComponent("park-root", {
     this.skylineToken = 0; // invalidates a previous build's pending attaches
     this.skylineInfo = []; // per-band build facts, for logFarScenery
     this.riverInfo = null; // the river's build facts, or null when it is off
+    this.boatEl = null; // the boat band's container entity
+    this.boatInfo = null; // the boat band's build facts, or null when it is off
     this.skylineCrops = {}; // src -> the cropped clone every panel of it shares
     this.benchEl = null; // the benches' container entity
     this.instanced = []; // InstancedMeshes, which own buffers of their own
@@ -1234,8 +1267,9 @@ AFRAME.registerComponent("park-root", {
     // --- THE RIVER (before the skyline: it is the ground the boats stand on)
     this.buildRiver(P);
 
-    // --- THE SKYLINE
+    // --- THE SKYLINE and THE BOATS (boats after: they share its token)
     this.buildSkyline(s);
+    this.buildBoats(s);
     this.logFarScenery(s);
 
     // --- THE TREES and THE BENCHES
@@ -1447,6 +1481,82 @@ AFRAME.registerComponent("park-root", {
   },
 
   // ---------------------------------------------------------------
+  // ONE CROPPED TEXTURE per (picture, window), shared by every panel that shows
+  // it. The canvas underneath belongs to CorridorTextures' cache and is keyed by
+  // SOURCE PATH, so the four originals are one canvas between the corridor and
+  // this ring however many bands use them; what is cloned here is only the uv
+  // transform, which is per-band because each band crops a different amount off
+  // the top.
+  //
+  // THE KEY HAS TO INCLUDE THE WINDOW, not just the source. The skyline bands
+  // and the boat band trim different amounts, so a cache keyed on the path alone
+  // would hand the second band the first band's crop and silently show it the
+  // wrong slice of its own picture. (Today no picture is in both pools, so this
+  // would not have bitten yet — which is exactly the kind of bug that waits.)
+  //
+  // Resolves to null if the build has been superseded while the image was
+  // loading; see the READY note on CorridorTextures.silhouette for why a clone
+  // must not exist before the real picture has arrived.
+  // ---------------------------------------------------------------
+  croppedTexture: function (lifter, kit, src, keep, token) {
+    const key = src + "|" + keep.toFixed(4);
+    const base = lifter.silhouette(src);
+    return base.userData.ready.then(() => {
+      if (token !== this.skylineToken) return null;
+      if (!this.skylineCrops[key]) {
+        const t = base.clone();
+        t.repeat.set(1, keep);
+        t.offset.set(0, kit.crop);
+        this.skylineCrops[key] = t;
+      }
+      return this.skylineCrops[key];
+    });
+  },
+
+  // ONE PANEL standing on the ground line at a bearing, facing the square's
+  // centre — the mechanics every band shares: the environment layer's plane, the
+  // same crop window, smooth alpha, no depth write, and the white-lifted canvas
+  // attached once it has loaded (until then the panel stays hidden, because a
+  // mapless haze-coloured plane is a solid grey rectangle).
+  farPanel: function (o) {
+    const d = this.data;
+    const t = THREE.MathUtils.degToRad(o.deg);
+    const panel = o.kitPanel || window.SkylineKit.panel;
+    const kit = window.SkylineKit;
+    const el = panel(o.lifter ? "" : o.src, o.w, o.h, {
+      repeat: "1 " + o.keep,
+      offset: "0 " + kit.crop,
+      alphaTest: 0,
+      depthWrite: false,
+      color: o.lifter ? o.haze : null,
+      opacity: o.lifter ? o.opacity : null,
+    });
+    el.setAttribute(
+      "position",
+      `${(o.cx + o.R * Math.sin(t)).toFixed(3)} ${(o.h / 2 + d.skylineLift).toFixed(3)} ` +
+        `${(o.cz - o.R * Math.cos(t)).toFixed(3)}`
+    );
+    el.setAttribute("rotation", `0 ${(-o.deg).toFixed(3)} 0`);
+    if (o.lifter) el.setAttribute("visible", false);
+    o.root.appendChild(el);
+    const onLoaded = () => {
+      const mesh = el.getObject3D("mesh");
+      if (!mesh) return;
+      mesh.renderOrder = o.order;
+      if (!o.lifter) return;
+      this.croppedTexture(o.lifter, kit, o.src, o.keep, o.token).then((tex) => {
+        if (!tex || o.token !== this.skylineToken) return;
+        mesh.material.map = tex;
+        mesh.material.needsUpdate = true;
+        el.setAttribute("visible", true);
+      });
+    };
+    if (el.hasLoaded) onLoaded();
+    else el.addEventListener("loaded", onLoaded, { once: true });
+    return el;
+  },
+
+  // ---------------------------------------------------------------
   // THE SKYLINE — Saigon in haze all the way round the square: a full ring of
   // silhouette panels in two depth bands, the corridor window's near/far idea
   // turned through 360 degrees.
@@ -1524,20 +1634,6 @@ AFRAME.registerComponent("park-root", {
 
     // The texture window: from SKYLINE_CROP up, minus the top trim.
     const keep = (1 - kit.crop) * (1 - d.skylineTopTrim);
-    // One cropped clone per picture, shared by every panel showing it.
-    const cropped = (src) => {
-      const base = lifter.silhouette(src);
-      return base.userData.ready.then(() => {
-        if (token !== this.skylineToken) return null;
-        if (!this.skylineCrops[src]) {
-          const t = base.clone();
-          t.repeat.set(1, keep);
-          t.offset.set(0, kit.crop);
-          this.skylineCrops[src] = t;
-        }
-        return this.skylineCrops[src];
-      });
-    };
 
     const band = (label, R, h, haze, opacity, max, phase, first, order) => {
       const w = (h / keep) * kit.aspect;
@@ -1556,42 +1652,11 @@ AFRAME.registerComponent("park-root", {
         }
       }
       for (let i = 0; i < n; i++) {
-        const deg = (360 / n) * (i + phase);
-        const t = THREE.MathUtils.degToRad(deg);
-        const src = kit.srcs[pics[i]];
-        const panel = kit.panel(lifter ? "" : src, w, h, {
-          repeat: "1 " + keep,
-          offset: "0 " + kit.crop,
-          alphaTest: 0,
-          depthWrite: false,
-          color: lifter ? haze : null,
-          opacity: lifter ? opacity : null,
+        this.farPanel({
+          root: root, src: kit.srcs[pics[i]], w: w, h: h, keep: keep,
+          deg: (360 / n) * (i + phase), cx: s.cx, cz: s.cz, R: R,
+          haze: haze, opacity: opacity, order: order, token: token, lifter: lifter,
         });
-        // Base on the ground line (+ lift), facing the square's centre.
-        panel.setAttribute(
-          "position",
-          `${(s.cx + R * Math.sin(t)).toFixed(3)} ${(h / 2 + d.skylineLift).toFixed(3)} ` +
-            `${(s.cz - R * Math.cos(t)).toFixed(3)}`
-        );
-        panel.setAttribute("rotation", `0 ${(-deg).toFixed(3)} 0`);
-        if (lifter) panel.setAttribute("visible", false);
-        root.appendChild(panel);
-        const onLoaded = () => {
-          const mesh = panel.getObject3D("mesh");
-          if (!mesh) return;
-          // Far band first, then near, then every other transparent thing
-          // (the cues on the ground are all nearer).
-          mesh.renderOrder = order;
-          if (!lifter) return;
-          cropped(src).then((tex) => {
-            if (!tex || token !== this.skylineToken) return;
-            mesh.material.map = tex;
-            mesh.material.needsUpdate = true;
-            panel.setAttribute("visible", true);
-          });
-        };
-        if (panel.hasLoaded) onLoaded();
-        else panel.addEventListener("loaded", onLoaded, { once: true });
       }
       const cover = 2 * THREE.MathUtils.radToDeg(Math.atan(w / (2 * R)));
       const gap = Math.max(0, 2 * R * Math.tan(Math.PI / n) - w);
@@ -1603,10 +1668,151 @@ AFRAME.registerComponent("park-root", {
         reach: +reach.toFixed(1),
       });
     };
+    // Render order, back to front: far band, near band, boats, then everything
+    // else transparent (the ground cues, all nearer than any of this).
     band("far", d.skylineRadius2, d.skylineHeight2, d.skylineHaze2,
-      d.skylineHazeOpacity2, d.skylinePanelsMax2, 0.5, 2, -2);
+      d.skylineHazeOpacity2, d.skylinePanelsMax2, 0.5, 2, -3);
     band("near", d.skylineRadius, d.skylineHeight, d.skylineHaze,
-      d.skylineHazeOpacity, d.skylinePanelsMax, 0, 0, -1);
+      d.skylineHazeOpacity, d.skylinePanelsMax, 0, 0, -2);
+  },
+
+  // ---------------------------------------------------------------
+  // THE BOATS — a third band, on the river and nowhere else.
+  //
+  // It is built out of the same parts as the skyline bands (SkylineKit's plane,
+  // the same crop window, the same white-lifted canvases through
+  // CorridorTextures) so it costs no new machinery and no duplicated texture.
+  // Three things make it a different band rather than a third ring:
+  //
+  //   IT IS AN ARC, NOT A RING. Boats belong on water, so the panels only exist
+  //   between riverBearingDeg ± riverArcDeg/2, and they are inset from the arc's
+  //   ends by half a panel's own angular width so no boat hangs off the edge of
+  //   the water it is floating on. boatRadius (100 m) sits between the lawn's
+  //   outer edge (~40-56 m out) and the near skyline band (130 m), so the whole
+  //   band stands on the river surface with city behind it.
+  //
+  //   IT IS SPACED, NOT PACKED. A skyline band works out how many panels it
+  //   takes to CLOSE, because a gap in a skyline is a hole. Boats want gaps:
+  //   boatCount panels are dealt one to a slot across the arc and each wanders
+  //   up to boatJitter of its own slot, seeded by boatSeed. Bounding the wander
+  //   by the slot is what keeps them from clumping or swapping places, so the
+  //   spacing reads as scattered rather than as a row with one pushed out.
+  //
+  //   IT SIZES ITSELF FROM THE PICTURES. The skyline bands fix a panel height
+  //   and let the picture fill it; that only works because the four originals
+  //   are framed almost identically (spires at 0.436-0.503 of the cropped
+  //   height). The boat pictures are not: a low sampan is 0.229 and a
+  //   tall-masted fishing boat 0.971, four times as much. Fixing the panel
+  //   height would make every boat the same size on the water, which is the one
+  //   thing they visibly are not. So the band trims to its TALLEST picture,
+  //   boatHeight is that boat's height, and every other picture comes out at its
+  //   own share of it — a 6 m mast next to a 1.4 m sampan. That is also why the
+  //   trim is fitted rather than taken from skylineTopTrim: 0.45 would keep only
+  //   0.55 of the cropped height and cut the masts off nine of the nineteen.
+  // ---------------------------------------------------------------
+  buildBoats: function (s) {
+    const d = this.data;
+    this.boatInfo = null;
+    if (this.boatEl && this.boatEl.parentNode) {
+      this.boatEl.parentNode.removeChild(this.boatEl);
+    }
+    this.boatEl = null;
+    if (!d.boats || d.boatCount <= 0) return;
+    const kit = window.SkylineKit;
+    if (!kit) return; // buildSkyline has already warned
+    const pool = kit.boats || [];
+    if (!pool.length) {
+      console.warn("[park] SkylineKit has no boat pictures; no boat band");
+      return;
+    }
+    const lifter = typeof CorridorTextures !== "undefined" ? CorridorTextures : null;
+    const token = this.skylineToken;
+
+    const root = document.createElement("a-entity");
+    root.setAttribute("data-park", "boats");
+    this.el.appendChild(root);
+    this.boatEl = root;
+
+    // Trim fitted to the tallest picture in the pool: keep exactly as much of
+    // the cropped height as the tallest subject occupies, and not a row more.
+    const maxSpire = pool.reduce((m, src) => Math.max(m, kit.spire(src)), 0);
+    const trim = Math.max(0, 1 - maxSpire);
+    const keep = (1 - kit.crop) * (1 - trim);
+    const h = d.boatHeight;
+    const w = (h / keep) * kit.aspect;
+
+    const R = d.boatRadius;
+    const arc = Math.max(0, Math.min(360, d.riverArcDeg));
+    // Half a panel's angular width, so a boat at either end still floats.
+    const halfPanelDeg = THREE.MathUtils.radToDeg(Math.atan(w / (2 * R)));
+    const from = d.riverBearingDeg - arc / 2 + halfPanelDeg;
+    const to = d.riverBearingDeg + arc / 2 - halfPanelDeg;
+    const span = to - from;
+    if (span <= 0) {
+      console.warn(
+        `[park] the river arc (${arc}°) is narrower than one ${w.toFixed(0)} m boat panel ` +
+          `at ${R} m — widen riverArcDeg, lower boatHeight, or move boatRadius out`
+      );
+      return;
+    }
+
+    const rand = mulberry32(d.boatSeed * 7681 + 29);
+    const n = d.boatCount;
+    const slot = span / n;
+    const jitter = Math.max(0, Math.min(1, d.boatJitter));
+    // Dealt without replacement: five boats drawn independently from fourteen
+    // pictures show a duplicate more often than not (birthday problem — about
+    // a 1 in 2 chance), and two identical hulls side by side on open water is
+    // the one thing that gives a seeded scatter away. Reshuffled if the band
+    // ever asks for more boats than there are pictures.
+    let deck = parkShuffle(pool, rand);
+    const placed = [];
+    for (let i = 0; i < n; i++) {
+      const centre = from + slot * (i + 0.5);
+      const deg = centre + (rand() - 0.5) * slot * jitter;
+      if (!deck.length) deck = parkShuffle(pool, rand);
+      const src = deck.pop();
+      const spire = kit.spire(src);
+      // This picture's own height, as its share of the tallest one's.
+      const ph = h * (spire / maxSpire);
+      const pw = (ph / keep) * kit.aspect;
+      this.farPanel({
+        root: root, src: src, w: pw, h: ph, keep: keep,
+        deg: deg, cx: s.cx, cz: s.cz, R: R,
+        haze: d.boatHaze, opacity: d.boatHazeOpacity,
+        order: -1, token: token, lifter: lifter,
+      });
+      placed.push({ deg: +deg.toFixed(1), src: src.split("/").pop(), h: +ph.toFixed(1) });
+    }
+
+    // A boat has to be ON the water. buildRiver ran first, so its measured
+    // extent is known: inside innerMax the boat would be standing on the lawn
+    // (or on the square), past `outer` it would be beyond the far shore, out on
+    // the sky sphere's ground band with the skyline behind it.
+    const riv = this.riverInfo;
+    if (!riv) {
+      console.warn(
+        `[park] the boat band is on at ${R} m but the river is off — the boats ` +
+          "will be standing on the sky sphere's ground band"
+      );
+    } else {
+      if (R >= riv.outer) {
+        console.warn(`[park] boatRadius ${R} m is past the river's far edge ` +
+          `(${riv.outer} m) — the boats are aground`);
+      }
+      if (R <= riv.innerMax) {
+        console.warn(`[park] boatRadius ${R} m is inside the lawn's outer edge ` +
+          `(up to ${riv.innerMax} m at the corners) — the boats are on the grass`);
+      }
+    }
+
+    const reach = Math.sqrt(R * R + (w / 2) * (w / 2) + (h + d.skylineLift) * (h + d.skylineLift));
+    this.boatInfo = {
+      radius: R, count: n, arcFrom: +from.toFixed(1), arcTo: +to.toFixed(1),
+      trim: +trim.toFixed(3), maxSpire: +maxSpire.toFixed(3),
+      tallest: +h.toFixed(1), shortest: +Math.min.apply(null, placed.map((p) => p.h)).toFixed(1),
+      widest: +w.toFixed(1), reach: +reach.toFixed(1), placed: placed,
+    };
   },
 
   // ---------------------------------------------------------------
@@ -1642,11 +1848,23 @@ AFRAME.registerComponent("park-root", {
           : "off")
     );
 
+    const bo = this.boatInfo;
+    console.log(
+      "[park] boats " +
+        (bo
+          ? `${bo.count} on the river at ${bo.radius} m, bearings ` +
+            `${bo.arcFrom}-${bo.arcTo}°, ${bo.shortest}-${bo.tallest} m tall ` +
+            `(trim ${bo.trim} fitted to the tallest picture, spire ${bo.maxSpire}), ` +
+            `at ${bo.placed.map((x) => `${x.deg}° ${x.src}`).join(", ")}`
+          : "off")
+    );
+
     // Everything far off reduced to a centre and a farthest point — the shape
     // both of the two limits are measured against.
     this.farCenter = { x: s.cx, z: s.cz };
     this.farReach = bands.map((b) => ({ label: b.band + " band", reach: b.reach }));
     if (r) this.farReach.push({ label: "river", reach: r.outer });
+    if (bo) this.farReach.push({ label: "boat band", reach: bo.reach });
     this.farReach.forEach((f) => {
       if (f.reach >= d.skyRadius) {
         console.warn(`[park] the ${f.label} reaches ${f.reach} m, through the ` +
@@ -1701,6 +1919,7 @@ AFRAME.registerComponent("park-root", {
     if (this.far.visible !== inside) {
       this.far.visible = inside;
       if (this.skylineEl) this.skylineEl.object3D.visible = inside;
+      if (this.boatEl) this.boatEl.object3D.visible = inside;
     }
   },
 
@@ -1714,6 +1933,9 @@ AFRAME.registerComponent("park-root", {
     this.skylineToken++;
     if (this.skylineEl && this.skylineEl.parentNode) {
       this.skylineEl.parentNode.removeChild(this.skylineEl);
+    }
+    if (this.boatEl && this.boatEl.parentNode) {
+      this.boatEl.parentNode.removeChild(this.boatEl);
     }
     // The clones only: their canvases belong to CorridorTextures' cache.
     Object.keys(this.skylineCrops).forEach((k) => this.skylineCrops[k].dispose());

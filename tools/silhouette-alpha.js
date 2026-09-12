@@ -244,6 +244,11 @@ const JOBS = [
 
 // `0_1 (3).png` is byte-identical to `0_1.png` (md5 8f36437f...), so it is
 // deliberately absent from JOBS — converting it would just duplicate city-05.
+// The four originals the park's skyline has always used. Not converted (they
+// already are what this script produces) — only MEASURED, so the scene has their
+// subject heights on the same scale as the new pictures'.
+const LEGACY_SRCS = ["saigon1.png", "saigon2.png", "saigon3.png", "saigon4.png"];
+
 const SKIPPED_DUPLICATES = [
   { src: "0_1 (3).png", sameAs: "0_1.png" },
   { src: "0_3 (2).png", sameAs: "0_3.png" },
@@ -304,6 +309,57 @@ function firstCoveredRow(cov, minCov) {
 }
 
 // ======================================================================
+// HOW TALL THE SUBJECT IS, in the only units the scene cares about: a fraction
+// of the CROPPED height. The panels crop the bottom SKYLINE_CROP away, so what
+// a panel actually shows is rows 0..GROUND_ROW-1 — GROUND_ROW rows — and a
+// subject whose top row is `topRow` fills (GROUND_ROW - topRow) / GROUND_ROW of
+// that. This is the number the Zone B park's top-trim is set against: a band
+// trimming `t` off the top keeps (1 - t) of the cropped height, so anything
+// with `spire` above that gets its top cut off. Reported here so the scene can
+// check it instead of someone noticing a decapitated spire in the headset.
+//
+// `roof` is the same measure at the height where a fifth of the columns are
+// still subject — the "rooftop line" the park's existing note quotes — which
+// says how much of the panel is massed city rather than lone spires.
+// ======================================================================
+function measureSubject(alpha) {
+  const cols = (y) => {
+    let n = 0;
+    for (let x = 0; x < OUT_W; x++) if (alpha[y * OUT_W + x] > 127) n++;
+    return n / OUT_W;
+  };
+  let topRow = GROUND_ROW;
+  let roofRow = GROUND_ROW;
+  for (let y = 0; y < GROUND_ROW; y++) {
+    const c = cols(y);
+    if (c > 0 && topRow === GROUND_ROW) topRow = y;
+    if (c >= 0.2) { roofRow = y; break; }
+  }
+  return {
+    topRow: topRow,
+    roofRow: roofRow,
+    spire: +((GROUND_ROW - topRow) / GROUND_ROW).toFixed(3),
+    roof: +((GROUND_ROW - roofRow) / GROUND_ROW).toFixed(3),
+  };
+}
+
+// The four originals are not produced here, but the scene needs their numbers on
+// the same scale to compare against — they are the reference the park's top-trim
+// was chosen from. Measured straight off their existing alpha.
+async function measureLegacy(files) {
+  const out = [];
+  for (const f of files) {
+    const p = path.join(SRC_DIR, f);
+    if (!fs.existsSync(p)) continue;
+    const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const a = new Uint8Array(info.width * info.height);
+    for (let i = 0; i < a.length; i++) a[i] = data[i * info.channels + 3];
+    out.push(Object.assign({ name: f, source: "assets/" + f }, measureSubject(a)));
+  }
+  return out;
+}
+
+// ======================================================================
 // THE WATERLINE GUESS
 //
 // The brief's shape: coverage climbs into the subject's solid base, then DROPS
@@ -347,11 +403,14 @@ function autoCutRow(cov, h) {
 // `fitScale` says the subject genuinely does not fit, which on these eleven it
 // never does.
 // ======================================================================
-function compose(mask, w, h, cutRow, subjectTop) {
+function compose(mask, w, h, cutRow, subjectTop, forceScale) {
   const need = cutRow - subjectTop; // rows of real subject to preserve
   const room = GROUND_ROW; // rows available above the ground line
   let scale = 1;
   if (need > room) scale = room / need; // uniform, last resort; logged
+  // A deliberate shrink, to bring a tightly-framed picture down to the same
+  // apparent scale as the rest of its pool. Uniform, so nothing distorts.
+  if (forceScale && forceScale < scale) scale = forceScale;
 
   const out = new Uint8Array(OUT_W * OUT_H); // 0 = transparent
 
@@ -632,7 +691,33 @@ function esc(s) {
       );
     }
 
-    const { alpha, scale } = compose(mask, w, h, cutRow, subjectTop);
+    // COMPOSE, THEN FIT THE HEIGHT IF THE JOB ASKS FOR ONE.
+    //
+    // `maxSpire` caps how tall the subject may stand in the finished picture, as
+    // a fraction of the cropped height — the same measure the scene sizes its
+    // bands by. It exists for the two bridges: both are framed far tighter than
+    // any of the city pictures (measured 0.926 and 1.000 against the cities'
+    // 0.53-0.72), so on a panel of the same width they would tower over a
+    // skyline whose real buildings are three times their height. bridge-02 was
+    // worse than merely out of scale — its topmost cables ran off the top of
+    // the frame and were being cut.
+    //
+    // IT ITERATES rather than solving for the scale directly, because the two
+    // measures of "the top" disagree. `subjectTop` is the first row with 0.4% of
+    // columns covered, which is what the layout needs; a bridge's cables are a
+    // few pixels wide and reach far above it, and it is those that get clipped.
+    // Composing, measuring the real top, and rescaling by the ratio converges in
+    // one pass and needs no special case for thin detail.
+    let { alpha, scale } = compose(mask, w, h, cutRow, subjectTop);
+    let metrics = measureSubject(alpha);
+    if (job.maxSpire && metrics.spire > job.maxSpire) {
+      const before = metrics.spire;
+      ({ alpha, scale } = compose(
+        mask, w, h, cutRow, subjectTop, (job.maxSpire / metrics.spire) * scale
+      ));
+      metrics = measureSubject(alpha);
+      log(`      fitted: spire ${before} -> ${metrics.spire} (cap ${job.maxSpire}), scale ${scale.toFixed(3)}`);
+    }
 
     const n = (counters[job.category] = (counters[job.category] || 0) + 1);
     const name = `${job.category}-${String(n).padStart(2, "0")}.png`;
@@ -657,6 +742,10 @@ function esc(s) {
       width: OUT_W,
       height: OUT_H,
       format: "LA (grey + alpha), black on transparent",
+      // Subject height as a fraction of the CROPPED height — what the scene
+      // checks its top-trim against. See measureSubject.
+      spire: metrics.spire,
+      roof: metrics.roof,
     };
     entries.push(entry);
     log(
@@ -690,12 +779,15 @@ function esc(s) {
           droppedComponents: res.dropped,
           widestSpanFrac: Number(res.widest.toFixed(4)),
         };
+        const bm = measureSubject(c2.alpha);
         entries.push({
           ...entry,
           name: bName,
           file: bPath,
           category: job.category + "-only",
           boatsOnly: undefined,
+          spire: bm.spire,
+          roof: bm.roof,
         });
         log(
           `      boats-only: ${bName} — kept ${res.kept} components, dropped ${res.dropped} ` +
@@ -706,6 +798,7 @@ function esc(s) {
   }
 
   // --- manifest ------------------------------------------------------
+  const legacy = await measureLegacy(LEGACY_SRCS);
   const manifest = {
     generatedBy: "tools/silhouette-alpha.js",
     generatedAt: new Date().toISOString(),
@@ -721,6 +814,9 @@ function esc(s) {
     },
     defaults: { threshold: THRESHOLD, ramp: RAMP, minBlob: MIN_BLOB, mixedSpan: MIXED_SPAN },
     skippedDuplicates: SKIPPED_DUPLICATES,
+    // The four originals, on the same scale, as the reference the scene's
+    // top-trim was chosen against.
+    legacy: legacy,
     outputs: entries.map((e) => {
       const { file, ...rest } = e;
       return rest;
@@ -744,6 +840,15 @@ function esc(s) {
   for (const m of mixed) {
     console.log(`  ${m.src} (${m.name}) — widest component spans ${(m.widest * 100).toFixed(1)}% of the width`);
   }
+  // The scene cannot fetch this manifest at build time, so it carries a copy
+  // of these two numbers per picture. Printed ready to paste into
+  // js/environment.js's SKYLINE_METRICS so the two can never drift silently.
+  console.log("\nSKYLINE_METRICS (paste into js/environment.js):");
+  const row = (src, m) =>
+    `  "${src}": { spire: ${m.spire.toFixed(3)}, roof: ${m.roof.toFixed(3)} },`;
+  legacy.forEach((m) => console.log(row(m.source, m)));
+  entries.forEach((e) => console.log(row("assets/skyline/" + e.name, e)));
+
   console.log("\ncontact sheet: assets/skyline/contact-sheet.png");
 })().catch((e) => {
   console.error(e);

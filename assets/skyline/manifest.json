@@ -1,6 +1,6 @@
 {
   "generatedBy": "tools/silhouette-alpha.js",
-  "generatedAt": "2026-09-12T07:01:39.098Z",
+  "generatedAt": "2026-09-12T08:12:26.363Z",
   "layout": {
     "width": 1456,
     "height": 816,
@@ -28,6 +28,40 @@
       "sameAs": "boat (11).png"
     }
   ],
+  "legacy": [
+    {
+      "name": "saigon1.png",
+      "source": "assets/saigon1.png",
+      "topRow": 304,
+      "roofRow": 458,
+      "spire": 0.503,
+      "roof": 0.252
+    },
+    {
+      "name": "saigon2.png",
+      "source": "assets/saigon2.png",
+      "topRow": 341,
+      "roofRow": 501,
+      "spire": 0.443,
+      "roof": 0.181
+    },
+    {
+      "name": "saigon3.png",
+      "source": "assets/saigon3.png",
+      "topRow": 345,
+      "roofRow": 515,
+      "spire": 0.436,
+      "roof": 0.158
+    },
+    {
+      "name": "saigon4.png",
+      "source": "assets/saigon4.png",
+      "topRow": 325,
+      "roofRow": 453,
+      "spire": 0.469,
+      "roof": 0.26
+    }
+  ],
   "outputs": [
     {
       "name": "city-01.png",
@@ -45,7 +79,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.533,
+      "roof": 0.199
     },
     {
       "name": "city-02.png",
@@ -63,7 +99,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.549,
+      "roof": 0.219
     },
     {
       "name": "city-03.png",
@@ -81,7 +119,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.575,
+      "roof": 0.245
     },
     {
       "name": "city-04.png",
@@ -99,7 +139,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.719,
+      "roof": 0.422
     },
     {
       "name": "city-05.png",
@@ -117,7 +159,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.676,
+      "roof": 0.405
     },
     {
       "name": "bridge-01.png",
@@ -135,7 +179,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.926,
+      "roof": 0.299
     },
     {
       "name": "bridge-02.png",
@@ -153,7 +199,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 1,
+      "roof": 0.273
     },
     {
       "name": "boat-01.png",
@@ -172,6 +220,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.307,
+      "roof": 0.134,
       "boatsOnly": {
         "emitted": true,
         "name": "boat-01-boats.png",
@@ -196,7 +246,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.263,
+      "roof": 0.134
     },
     {
       "name": "boat-02.png",
@@ -215,6 +267,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.477,
+      "roof": 0.206,
       "boatsOnly": {
         "emitted": false,
         "reason": "MIXED — one component spans 100.0% of the frame width (> 85%), so the background city is fused to the boats and cannot be cut away"
@@ -237,6 +291,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.557,
+      "roof": 0.317,
       "boatsOnly": {
         "emitted": false,
         "reason": "MIXED — one component spans 100.0% of the frame width (> 85%), so the background city is fused to the boats and cannot be cut away"
@@ -259,6 +315,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.315,
+      "roof": 0.144,
       "boatsOnly": {
         "emitted": true,
         "name": "boat-04-boats.png",
@@ -283,7 +341,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.283,
+      "roof": 0.142
     },
     {
       "name": "boat-05.png",
@@ -302,6 +362,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.596,
+      "roof": 0.214,
       "boatsOnly": {
         "emitted": true,
         "name": "boat-05-boats.png",
@@ -326,7 +388,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.596,
+      "roof": 0.214
     },
     {
       "name": "boat-06.png",
@@ -345,6 +409,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.386,
+      "roof": 0.163,
       "boatsOnly": {
         "emitted": true,
         "name": "boat-06-boats.png",
@@ -369,7 +435,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.386,
+      "roof": 0.162
     },
     {
       "name": "boat-07.png",
@@ -388,6 +456,8 @@
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.471,
+      "roof": 0.217,
       "boatsOnly": {
         "emitted": true,
         "name": "boat-07-boats.png",
@@ -412,7 +482,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.431,
+      "roof": 0.217
     },
     {
       "name": "solo-01.png",
@@ -430,7 +502,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.94,
+      "roof": 0.214
     },
     {
       "name": "solo-02.png",
@@ -448,7 +522,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.229,
+      "roof": 0.181
     },
     {
       "name": "solo-03.png",
@@ -466,7 +542,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.338,
+      "roof": 0.31
     },
     {
       "name": "solo-04.png",
@@ -484,7 +562,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.25,
+      "roof": 0.109
     },
     {
       "name": "solo-05.png",
@@ -502,7 +582,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.444,
+      "roof": 0.397
     },
     {
       "name": "solo-06.png",
@@ -520,7 +602,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.252,
+      "roof": 0.15
     },
     {
       "name": "solo-07.png",
@@ -538,7 +622,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.538,
+      "roof": 0.162
     },
     {
       "name": "solo-08.png",
@@ -556,7 +642,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.364,
+      "roof": 0.342
     },
     {
       "name": "solo-09.png",
@@ -574,7 +662,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.333,
+      "roof": 0.142
     },
     {
       "name": "solo-10.png",
@@ -592,7 +682,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.521,
+      "roof": 0.203
     },
     {
       "name": "solo-11.png",
@@ -610,7 +702,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.528,
+      "roof": 0.258
     },
     {
       "name": "solo-12.png",
@@ -628,7 +722,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.709,
+      "roof": 0.325
     },
     {
       "name": "solo-13.png",
@@ -646,7 +742,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.575,
+      "roof": 0.283
     },
     {
       "name": "solo-14.png",
@@ -664,7 +762,9 @@
       "fitScale": 1,
       "width": 1456,
       "height": 816,
-      "format": "LA (grey + alpha), black on transparent"
+      "format": "LA (grey + alpha), black on transparent",
+      "spire": 0.971,
+      "roof": 0.299
     }
   ]
 }
