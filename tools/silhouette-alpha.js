@@ -39,11 +39,24 @@
 //   (measured: opaque pixels are pure luma 0, coverage reaches 1.0 below the
 //   seam); these outputs follow it exactly rather than approximately.
 //
-// WHAT THE INPUTS ARE. Twelve pictures dropped into assets/ — plain RGB, NO
-// alpha, 1456x816, black silhouettes over white/grey. Several carry a mirror
-// reflection under the skyline, some sit over a flat dark river, two are
-// cable-stayed bridges and four are river-boat scenes. Two of them
-// (0_1.png and "0_1 (3).png") are byte-identical, so eleven get converted.
+// WHAT THE INPUTS ARE. Thirty-one pictures dropped into assets/ in two batches
+// — all plain RGB, NO alpha, 1456x816, black silhouettes over white/grey.
+// Several carry a mirror reflection under the subject, a good many sit over a
+// flat dark river. They sort into four kinds, which is what `category` names:
+//
+//   city   5   plain skylines
+//   bridge 2   cable-stayed bridges
+//   boat   7   several hulls together, usually with a city behind them
+//   solo  14   ONE boat and open water, nothing behind it
+//
+// The solo series is the second batch and is kept apart on purpose: a single
+// hull still reads as a boat on a park-ring panel at 40-60 m, where a harbour
+// full of overlapping masts collapses into noise. Same pipeline, different
+// thing to place.
+//
+// Three pairs are byte-identical ("0_1 (3)" = "0_1", "0_3 (2)" = "0_3",
+// "boat (13)" = "boat (11)"), so twenty-eight of the thirty-one convert and the
+// duplicates are recorded in the manifest instead — see SKIPPED_DUPLICATES.
 //
 // THE THREE THINGS THIS DOES TO EACH ONE:
 //
@@ -77,13 +90,14 @@
 //   if one ever did not fit, fitScale uniformly scales it down rather than
 //   distorting it, and says so).
 //
-// PLUS, FOR THE BOATS: a boats-only cut. Three of the four boat scenes have
-// their background city in HAZE — much lighter than the boats — so the
-// threshold has already dropped it and the boats come out alone. "saigon (2)"
-// does not: its skyline is the same black as the boats and the far bank fuses
-// them into one blob. That is what the connected-component span test detects
-// (one component wider than MIXED_SPAN of the frame = fused), and those get
-// reported as MIXED and skipped rather than mangled.
+// PLUS, FOR THE `boat` SCENES: a boats-only cut. Most of them have their
+// background city in HAZE — much lighter than the hulls — so the threshold has
+// already dropped it and the boats come out alone. Some do not: where the
+// skyline is the same black as the boats and the far bank welds them together,
+// no threshold can separate them. That is what the connected-component span
+// test detects (one component wider than MIXED_SPAN of the frame = fused), and
+// those are reported as MIXED and skipped rather than mangled. The `solo`
+// series never asks for one — there is no city in the frame to remove.
 //
 // HOW TO RUN:
 //   cd tools
@@ -91,8 +105,9 @@
 //   node silhouette-alpha.js     # add --quiet to drop the per-file log
 //
 // WRITES (originals in assets/ are never touched):
-//   assets/skyline/city-01..05.png, bridge-01..02.png, boat-01..04.png
-//   assets/skyline/boat-0N-boats.png   (boats-only, where separable)
+//   assets/skyline/city-01..05.png, bridge-01..02.png, boat-01..07.png
+//   assets/skyline/solo-01..14.png     (one boat each)
+//   assets/skyline/boat-NN-boats.png   (boats-only, where separable)
 //   assets/skyline/manifest.json       (source, threshold, cutRow, category)
 //   assets/skyline/contact-sheet.png   (every output on white, labelled)
 // ================================================================
@@ -177,11 +192,63 @@ const JOBS = [
   // the ground line is CORRECT here: boats do not span the frame the way a
   // skyline does.
   { src: "0_1 (1).png", category: "boat", cutRow: 542, boats: true },
+
+  // --- more boat scenes, second batch -----------------------------------
+  // Same treatment, and they keep the `boat` series going because they are the
+  // same kind of picture: several hulls with a city behind them.
+  //
+  // WHY EVERY ONE OF THESE IS A MANUAL CUT TOO. On a boat the waterline is not
+  // a step in coverage the way a skyline's is. A hull is a small dark island in
+  // a frame full of rippled water that is ALSO dark, so coverage wanders
+  // between 0.3 and 0.9 for two hundred rows and the "first drop" rule fires on
+  // a ripple. Three of them (boat 1, boat 10) sit over water dark enough that
+  // coverage RISES at the waterline instead, which is the same failure the
+  // bridges have. All of these were read off a gridded overlay and then checked
+  // against the row numbers.
+  //
+  // AND WHY THEY ARE BIASED A FEW ROWS HIGH. The error is not symmetric. Cut a
+  // little high and the last rows of hull are replaced by the solid band, which
+  // is the same black — the hull simply merges into it and nothing shows. Cut a
+  // little low and a sliver of reflection is left stranded above the band,
+  // where it reads as speckle. So where the water is noisy, round toward the
+  // boat.
+  { src: "boat (1).png", category: "boat", cutRow: 612, boats: true },
+  { src: "boat (14).png", category: "boat", cutRow: 554, boats: true },
+  { src: "boat (15).png", category: "boat", cutRow: 573, boats: true },
+
+  // --- SOLO: one boat, nothing behind it --------------------------------
+  // A separate series because they are a different thing to place, not just
+  // more of the same. A park-ring panel showing one hull reads at 40-60 m; a
+  // harbour full of overlapping masts turns to noise at that distance, which is
+  // the whole reason these were shot. No boats-only variant is emitted for them
+  // — there is no city in the frame to take out, and what little far shore
+  // there is (a tree line on "boat (11)", a horizon on "0_3") sits in haze well
+  // above the threshold and drops on its own.
+  { src: "boat (2).png", category: "solo", cutRow: 578 },
+  { src: "boat (3).png", category: "solo", cutRow: 526 },
+  { src: "boat (4).png", category: "solo", cutRow: 524 },
+  { src: "boat (5).png", category: "solo", cutRow: 598 },
+  { src: "boat (6).png", category: "solo", cutRow: 592 },
+  { src: "boat (7).png", category: "solo", cutRow: 522 },
+  { src: "boat (8).png", category: "solo", cutRow: 520 },
+  { src: "boat (9).png", category: "solo", cutRow: 592 },
+  // Dark river: coverage JUMPS 0.45 -> 0.82 at 594 as the water starts, the
+  // one place in this batch where the boundary is unmistakable in the numbers.
+  { src: "boat (10).png", category: "solo", cutRow: 593 },
+  { src: "boat (11).png", category: "solo", cutRow: 658 },
+  { src: "boat (12).png", category: "solo", cutRow: 600 },
+  { src: "0_2.png", category: "solo", cutRow: 594 },
+  { src: "0_3.png", category: "solo", cutRow: 646 },
+  { src: "0_3 (1).png", category: "solo", cutRow: 594 },
 ];
 
 // `0_1 (3).png` is byte-identical to `0_1.png` (md5 8f36437f...), so it is
 // deliberately absent from JOBS — converting it would just duplicate city-05.
-const SKIPPED_DUPLICATES = [{ src: "0_1 (3).png", sameAs: "0_1.png" }];
+const SKIPPED_DUPLICATES = [
+  { src: "0_1 (3).png", sameAs: "0_1.png" },
+  { src: "0_3 (2).png", sameAs: "0_3.png" },
+  { src: "boat (13).png", sameAs: "boat (11).png" },
+];
 
 // ======================================================================
 // PIXELS
@@ -419,10 +486,29 @@ function boatsOnlyMask(fullMask, w, h, cutRow) {
 async function writeLA(alpha, file) {
   const rgba = Buffer.alloc(OUT_W * OUT_H * 4);
   for (let p = 0; p < alpha.length; p++) rgba[p * 4 + 3] = alpha[p]; // RGB stay 0
-  await sharp(rgba, { raw: { width: OUT_W, height: OUT_H, channels: 4 } })
-    .toColourspace("b-w")
-    .png({ compressionLevel: 9 })
-    .toFile(file);
+  await toFileRetrying(
+    sharp(rgba, { raw: { width: OUT_W, height: OUT_H, channels: 4 } })
+      .toColourspace("b-w")
+      .png({ compressionLevel: 9 }),
+    file
+  );
+}
+
+// Writing into assets/ intermittently fails on this machine with "unable to
+// open for write / The device does not recognize the command" — a Windows
+// sharing error, not a bad buffer: an indexer or a picture viewer has the file
+// open for the moment it takes to replace it. It clears immediately, so back
+// off briefly and try again rather than losing a whole batch to one locked file.
+async function toFileRetrying(pipeline, file, tries = 5) {
+  for (let i = 1; ; i++) {
+    try {
+      return await pipeline.toFile(file);
+    } catch (e) {
+      if (i >= tries) throw e;
+      console.warn(`  . ${path.basename(file)} locked, retry ${i}/${tries - 1}`);
+      await new Promise((r) => setTimeout(r, 200 * i));
+    }
+  }
 }
 
 // Every output on white, labelled, so the batch can be judged in one look. A
@@ -484,10 +570,12 @@ async function contactSheet(entries, file) {
       top: y + TH + 2,
     });
   }
-  await sharp({ create: { width: W, height: H, channels: 3, background: "#ffffff" } })
-    .composite(comps)
-    .png()
-    .toFile(file);
+  await toFileRetrying(
+    sharp({ create: { width: W, height: H, channels: 3, background: "#ffffff" } })
+      .composite(comps)
+      .png(),
+    file
+  );
 }
 
 function esc(s) {
@@ -504,7 +592,7 @@ function esc(s) {
   };
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  const counters = { city: 0, bridge: 0, boat: 0 };
+  const counters = {}; // one running number per category, in JOBS order
   const entries = [];
   const manual = [];
   const mixed = [];
@@ -546,7 +634,7 @@ function esc(s) {
 
     const { alpha, scale } = compose(mask, w, h, cutRow, subjectTop);
 
-    const n = ++counters[job.category];
+    const n = (counters[job.category] = (counters[job.category] || 0) + 1);
     const name = `${job.category}-${String(n).padStart(2, "0")}.png`;
     const outPath = path.join(OUT_DIR, name);
     await writeLA(alpha, outPath);
