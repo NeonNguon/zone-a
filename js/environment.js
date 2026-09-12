@@ -153,7 +153,7 @@ const SKYLINE_METRICS = {
   "assets/saigon4.png": { spire: 0.469, roof: 0.260 },
   "assets/skyline/city-01.png": { spire: 0.533, roof: 0.199 },
   "assets/skyline/city-02.png": { spire: 0.549, roof: 0.221 },
-  "assets/skyline/city-03.png": { spire: 0.575, roof: 0.245 },
+  "assets/skyline/city-03.png": { spire: 0.575, roof: 0.232 },
   "assets/skyline/city-04.png": { spire: 0.719, roof: 0.422 },
   "assets/skyline/city-05.png": { spire: 0.676, roof: 0.407 },
   "assets/skyline/bridge-01.png": { spire: 0.621, roof: 0.199 },

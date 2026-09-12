@@ -181,7 +181,13 @@ const JOBS = [
   // Gradient sky, long mirror reflection over water; the bridge at the left
   // edge is part of the skyline here, not the subject. Coverage holds ~0.9
   // through 602 and only then breaks up into ripples.
-  { src: "saigon (6).png", category: "city", cutRow: 600, fillHoles: true },
+  // The cable-stayed bridge at its left edge comes out: three pylons and their
+  // fans across x 0-290, cut at the deck line so the far bank underneath stays.
+  {
+    src: "saigon (6).png", category: "city", cutRow: 600, fillHoles: true,
+    erase: [{ x0: 0, x1: 298, y0: 0, y1: 555 }],
+    eraseWhy: "the cable-stayed bridge at the left edge",
+  },
   // Dark blue-grey city over a solid foreground band, white below it: 1.00
   // through 657, 0.00 at 659.
   { src: "saigon (7).png", category: "city", cutRow: 658, fillHoles: true },
@@ -532,6 +538,40 @@ function fillHoles(alpha) {
     }
   }
   return filled;
+}
+
+// ======================================================================
+// RUB SOMETHING OUT OF A PICTURE.
+//
+// One job needs it. "saigon (6)" is a fine Saigon skyline that happens to have
+// a cable-stayed bridge built into its left edge — three pylons and their cable
+// fans, occupying the first fifth of the frame. The bridge BAND is switched off
+// because a bridge on a 60-degree panel always ends in mid-air, and this one
+// was doing exactly that inside a city picture, so it had to come out too.
+//
+// It is erased ABOVE THE DECK ONLY. Everything below row ~555 there is the far
+// bank, already a solid mass and continuous with the city to its right, so
+// cutting the pylons off at the deck line leaves a low flat shoreline rather
+// than a hole punched down to the ground line. Rectangles are in output pixels,
+// and this runs LAST — after fillHoles, which would otherwise see the new
+// transparent region as an enclosed pocket and fill it straight back in.
+// ======================================================================
+function eraseRects(alpha, rects) {
+  let n = 0;
+  (rects || []).forEach((r) => {
+    const x0 = Math.max(0, r.x0 | 0);
+    const x1 = Math.min(OUT_W, r.x1 | 0);
+    const y0 = Math.max(0, r.y0 | 0);
+    const y1 = Math.min(OUT_H, r.y1 | 0);
+    for (let y = y0; y < y1; y++) {
+      const base = y * OUT_W;
+      for (let x = x0; x < x1; x++) {
+        if (alpha[base + x]) n++;
+        alpha[base + x] = 0;
+      }
+    }
+  });
+  return n;
 }
 
 // ======================================================================
@@ -912,6 +952,12 @@ function esc(s) {
       metrics = measureSubject(alpha);
     }
 
+    if (job.erase) {
+      const n = eraseRects(alpha, job.erase);
+      log(`      erased ${n} px (${job.eraseWhy || "masked out"})`);
+      metrics = measureSubject(alpha);
+    }
+
     const n = (counters[job.category] = (counters[job.category] || 0) + 1);
     const name = `${job.category}-${String(n).padStart(2, "0")}.png`;
     const outPath = path.join(OUT_DIR, name);
@@ -926,6 +972,7 @@ function esc(s) {
       ramp,
       extendSides: job.extendSides || 0,
       fillHoles: !!job.fillHoles,
+      erased: job.erase || null,
       cutRow,
       cutRowSource,
       cutRowAuto: guess.row,
