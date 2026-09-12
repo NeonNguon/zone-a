@@ -171,10 +171,18 @@ const JOBS = [
   // never drops, so the guess runs off the bottom. Mean luma separates them
   // outright — the land strip is pure black (~1) to row 719, the water is grey
   // (~30-51) from 722 down.
-  { src: "saigon (8).png", category: "bridge", cutRow: 719 },
+  //
+  // BOTH BRIDGES ARE SHRUNK TO FIT (maxSpire). They are framed far tighter than
+  // any city picture — measured 0.926 and 1.000 of the cropped height against
+  // the cities' 0.53-0.72 — so dropped straight onto a skyline panel of the
+  // same width they stand nearly twice as tall as a skyline whose real towers
+  // are three times their height. bridge-02 was also losing the tips of its
+  // topmost cables off the top of the frame. 0.62 puts them in the middle of
+  // the city pool's range, which is where a bridge belongs against a skyline.
+  { src: "saigon (8).png", category: "bridge", cutRow: 719, maxSpire: 0.62 },
   // Same shape, softer join: luma bottoms out at ~47 through 746 and lifts from
   // 748 as the water catches the light. Piers enter the water right there.
-  { src: "0_1 (2).png", category: "bridge", cutRow: 747 },
+  { src: "0_1 (2).png", category: "bridge", cutRow: 747, maxSpire: 0.62 },
 
   // --- river boats ------------------------------------------------------
   // Hazy: the distant city at the right is far lighter than the boats, so the

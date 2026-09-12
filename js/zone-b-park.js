@@ -664,6 +664,26 @@ AFRAME.registerComponent("park-root", {
     skylineHaze2: { type: "color", default: "#a7b1b8" },
     skylineHazeOpacity2: { type: "number", default: 0.7 },
     skylinePanelsMax2: { type: "int", default: 16 },
+    // Which pictures the bands deal from, and in what order. See buildSkyline.
+    skylineSeed: { type: "number", default: 17 },
+    bridges: { type: "boolean", default: true },
+    // Where the two bridges stand, in the panels' bearing convention. "auto"
+    // puts one at each end of the river arc, which is where a bridge crossing
+    // this stretch of water would be. Otherwise a list: "40 140".
+    bridgeBearingsDeg: {
+      default: "auto",
+      parse: function (v) {
+        if (Array.isArray(v)) return v.map(Number).filter((n) => !isNaN(n));
+        if (typeof v === "number") return [v];
+        const t = String(v == null ? "" : v).trim();
+        if (t === "" || t === "auto") return "auto";
+        const out = t.split(/[\s,]+/).map(Number).filter((n) => !isNaN(n));
+        return out.length ? out : "auto";
+      },
+      stringify: function (v) {
+        return v === "auto" || v == null ? "auto" : [].concat(v).join(" ");
+      },
+    },
     // boats — a third band, on the water only. See buildBoats.
     boats: { type: "boolean", default: true },
     boatRadius: { type: "number", default: 100 }, // between the lawn and the near band
@@ -738,6 +758,7 @@ AFRAME.registerComponent("park-root", {
     this.riverInfo = null; // the river's build facts, or null when it is off
     this.boatEl = null; // the boat band's container entity
     this.boatInfo = null; // the boat band's build facts, or null when it is off
+    this.picsUsed = {}; // source path -> true, the pictures this build lifted
     this.skylineCrops = {}; // src -> the cropped clone every panel of it shares
     this.benchEl = null; // the benches' container entity
     this.instanced = []; // InstancedMeshes, which own buffers of their own
@@ -1616,6 +1637,7 @@ AFRAME.registerComponent("park-root", {
     }
     this.skylineEl = null;
     this.skylineInfo = [];
+    this.picsUsed = {}; // distinct source paths this build lifts into canvases
     Object.keys(this.skylineCrops).forEach((k) => this.skylineCrops[k].dispose());
     this.skylineCrops = {};
     const kit = window.SkylineKit;
@@ -1632,29 +1654,170 @@ AFRAME.registerComponent("park-root", {
     this.el.appendChild(root);
     this.skylineEl = root;
 
-    // The texture window: from SKYLINE_CROP up, minus the top trim.
-    const keep = (1 - kit.crop) * (1 - d.skylineTopTrim);
+    // THE POOL: the five new city pictures AND the four originals. The old four
+    // are not retired — they are the reference everything here is scaled to, and
+    // dropping them would change the skyline's character for no reason.
+    const pool = (kit.cities || []).concat(kit.srcs);
+    const bridgeSrcs = d.bridges ? (kit.bridges || []) : [];
 
-    const band = (label, R, h, haze, opacity, max, phase, first, order) => {
+    // THE TOP TRIM, FITTED PER BAND rather than taken on trust.
+    //
+    // skylineTopTrim 0.45 keeps 0.55 of the cropped height, and that number was
+    // chosen when the pool was four pictures whose spires reach 0.436-0.503 —
+    // it dropped only sky. The pool is now nine and they are not all framed the
+    // same way: city-04 reaches 0.719. Left at 0.45 it would be beheaded, and
+    // nothing would say so.
+    //
+    // So each band trims to ITS OWN tallest picture and RAISES ITS PANEL by the
+    // same ratio. That second half is what keeps the change invisible: what sets
+    // the city's apparent size is metres per unit of cropped height,
+    // h / (1 - trim), so holding that fixed leaves every picture standing
+    // exactly where it did before — saigon1's spires at 36.6 m in the near band,
+    // as ever — while a taller picture is simply taller. Panel WIDTH comes out
+    // unchanged for the same reason (w = h / keep x aspect, and keep scales with
+    // 1 - trim), so the ring still closes with the same number of panels.
+    const trimWant = d.skylineTopTrim;
+    const fitTrim = (srcs) => {
+      const maxSpire = srcs.reduce((m, src) => Math.max(m, kit.spire(src)), 0);
+      const trim = Math.min(trimWant, Math.max(0, 1 - maxSpire));
+      const tallest = srcs.reduce((a, b) => (kit.spire(a) >= kit.spire(b) ? a : b));
+      return { trim: trim, maxSpire: maxSpire, tallest: tallest };
+    };
+
+    // DEAL PICTURES TO PANELS, without replacement from a shuffled deck, so a
+    // ring of six shows six different cities rather than the same one twice.
+    // `forbid` rejects a card for a slot; the deck is re-shuffled when it runs
+    // out of legal ones. The bounded retry is there because a constraint set CAN
+    // be unsatisfiable — a two-picture pool cannot fill a ring of three without
+    // a repeat somewhere — and a scene must not hang on that. It takes the
+    // least-bad card instead, and the seam check in the build log says so.
+    const deal = (srcs, n, rand, forbid) => {
+      const out = [];
+      let deck = parkShuffle(srcs, rand);
+      for (let i = 0; i < n; i++) {
+        let pick = null;
+        for (let pass = 0; pass < 3 && pick == null; pass++) {
+          for (let k = deck.length - 1; k >= 0; k--) {
+            if (!forbid(i, deck[k], out)) {
+              pick = deck.splice(k, 1)[0];
+              break;
+            }
+          }
+          if (pick == null) deck = parkShuffle(srcs, rand);
+        }
+        out.push(pick == null ? srcs[i % srcs.length] : pick);
+        if (!deck.length) deck = parkShuffle(srcs, rand);
+      }
+      return out;
+    };
+
+    const built = {}; // label -> { degs, pics }, so `near` can consult `far`
+
+    const band = (label, R, h0, haze, opacity, max, phase, seedOffset, order) => {
+      const fit = fitTrim(pool.concat(label === "near" ? bridgeSrcs : []));
+      const keep = (1 - kit.crop) * (1 - fit.trim);
+      const h = h0 * ((1 - fit.trim) / (1 - trimWant)); // same metres per unit
       const w = (h / keep) * kit.aspect;
       const need = Math.ceil(Math.PI / Math.atan(w / (2 * R)));
       const n = Math.max(3, Math.min(max, need));
-      // Alternate the four pictures; if the ring's closing seam would put the
-      // same one either side of it, the last panel takes one that is neither.
-      const pics = [];
-      for (let i = 0; i < n; i++) pics.push((first + i) % kit.srcs.length);
-      if (pics[n - 1] === pics[0]) {
-        for (let k = 0; k < kit.srcs.length; k++) {
-          if (k !== pics[0] && k !== pics[n - 2]) {
-            pics[n - 1] = k;
-            break;
+      const degs = [];
+      for (let i = 0; i < n; i++) degs.push((360 / n) * (i + phase));
+
+      const rand = mulberry32(d.skylineSeed * 2749 + seedOffset);
+      const far = built.far;
+      const pics = deal(pool, n, rand, (i, src, got) => {
+        if (i > 0 && src === got[i - 1]) return true; // neighbours differ
+        if (i === n - 1 && src === got[0]) return true; // and across the seam
+        // The near band must not repeat the far band's picture behind itself.
+        //
+        // BOTH NEIGHBOURS COUNT, not just the nearest. The far band is turned
+        // half a panel against the near one so their seams never line up, which
+        // means no far panel is ever squarely behind a near one — every near
+        // panel is EXACTLY equidistant from two of them, and both show through
+        // its gaps. Taking "the closest" would pick one of the two arbitrarily
+        // (whichever the loop saw first) and leave the other free to repeat.
+        if (far) {
+          const reach = (360 / far.degs.length) * 0.5 + 1e-6;
+          for (let k = 0; k < far.degs.length; k++) {
+            if (Math.abs(parkAngleDelta(degs[i], far.degs[k])) > reach) continue;
+            if (src === far.pics[k]) return true;
           }
         }
+        return false;
+      });
+
+      // THE BRIDGES: one each, on a bearing over the water, taking over the
+      // panel that would otherwise stand there — so the ring still closes and
+      // nothing else moves. Placed once, in this band, never repeated.
+      //
+      // THE PANEL HAS TO BE OVER THE WATER, which is a stronger condition than
+      // "nearest to the asked-for bearing" and the reason this does not simply
+      // take the closest. A bridge wants the END of the river arc, and an end
+      // falls between panels as often as not: at the defaults it asks for 30°
+      // while the panels sit at 0° and 60°, both exactly 30° away. Nearest-wins
+      // then turns on which one the loop happened to see first, and it put a
+      // cable-stayed bridge at 0° — due north, standing on grass. So the
+      // candidates are filtered to panels INSIDE the arc first, and only then
+      // sorted by distance.
+      const placedBridges = [];
+      if (label === "near" && bridgeSrcs.length) {
+        const wanted = this.bridgeBearings();
+        const half = Math.max(0, Math.min(360, d.riverArcDeg)) / 2;
+        const overWater = (deg) =>
+          Math.abs(parkAngleDelta(d.riverBearingDeg, deg)) <= half + 1e-6;
+        const taken = {};
+        bridgeSrcs.forEach((src, bi) => {
+          const want = wanted[bi];
+          if (want == null) return;
+          const pick = (requireWater) => {
+            let best = -1;
+            let bestD = 360;
+            for (let k = 0; k < n; k++) {
+              if (taken[k]) continue;
+              if (requireWater && !overWater(degs[k])) continue;
+              const dd = Math.abs(parkAngleDelta(want, degs[k]));
+              if (dd < bestD) {
+                bestD = dd;
+                best = k;
+              }
+            }
+            return { best: best, d: bestD };
+          };
+          let got = pick(true);
+          let dry = false;
+          if (got.best < 0) {
+            got = pick(false); // no water panel free: take one anyway, and say so
+            dry = true;
+          }
+          if (got.best < 0) {
+            console.warn("[park] no free near panel left for " + src.split("/").pop());
+            return;
+          }
+          if (dry) {
+            console.warn(
+              `[park] ${src.split("/").pop()} could not get a panel over the river ` +
+                `(${d.riverArcDeg}° arc, ${n} panels) — it stands on land at ` +
+                `${degs[got.best].toFixed(0)}°. Widen riverArcDeg or raise skylinePanelsMax.`
+            );
+          }
+          taken[got.best] = true;
+          pics[got.best] = src;
+          placedBridges.push({
+            src: src.split("/").pop(),
+            wanted: +want.toFixed(1),
+            at: +degs[got.best].toFixed(1),
+            offBy: +got.d.toFixed(1),
+            overWater: !dry,
+          });
+        });
       }
+
+      built[label] = { degs: degs, pics: pics };
+      pics.forEach((src) => { this.picsUsed[src] = true; });
       for (let i = 0; i < n; i++) {
         this.farPanel({
-          root: root, src: kit.srcs[pics[i]], w: w, h: h, keep: keep,
-          deg: (360 / n) * (i + phase), cx: s.cx, cz: s.cz, R: R,
+          root: root, src: pics[i], w: w, h: h, keep: keep,
+          deg: degs[i], cx: s.cx, cz: s.cz, R: R,
           haze: haze, opacity: opacity, order: order, token: token, lifter: lifter,
         });
       }
@@ -1663,17 +1826,50 @@ AFRAME.registerComponent("park-root", {
       // The ring's farthest point: a panel's top corner.
       const reach = Math.sqrt(R * R + (w / 2) * (w / 2) + (h + d.skylineLift) * (h + d.skylineLift));
       this.skylineInfo.push({
-        band: label, radius: R, height: h, panelWidth: +w.toFixed(1),
-        panels: n, needed: need, degEach: +cover.toFixed(1), gapM: +gap.toFixed(1),
-        reach: +reach.toFixed(1),
+        band: label, radius: R, height: +h.toFixed(1), heightWas: h0,
+        panelWidth: +w.toFixed(1), panels: n, needed: need,
+        degEach: +cover.toFixed(1), gapM: +gap.toFixed(1), reach: +reach.toFixed(1),
+        trim: +fit.trim.toFixed(3), trimWant: trimWant,
+        tallest: fit.tallest.split("/").pop(), maxSpire: +fit.maxSpire.toFixed(3),
+        seamOk: pics[n - 1] !== pics[0],
+        bridges: placedBridges,
+        pics: pics.map((x) => x.split("/").pop()),
       });
     };
     // Render order, back to front: far band, near band, boats, then everything
     // else transparent (the ground cues, all nearer than any of this).
+    // FAR IS BUILT FIRST because the near band's deal reads it, to avoid
+    // standing the same picture at the same bearing at both depths.
     band("far", d.skylineRadius2, d.skylineHeight2, d.skylineHaze2,
-      d.skylineHazeOpacity2, d.skylinePanelsMax2, 0.5, 2, -3);
+      d.skylineHazeOpacity2, d.skylinePanelsMax2, 0.5, 0, -3);
     band("near", d.skylineRadius, d.skylineHeight, d.skylineHaze,
-      d.skylineHazeOpacity, d.skylinePanelsMax, 0, 0, -2);
+      d.skylineHazeOpacity, d.skylinePanelsMax, 0, 977, -2);
+  },
+
+  // Where the bridges stand. "auto" is the two ends of the river arc: the water
+  // is the only place a bridge makes sense, and its ends are where a crossing
+  // would leave the frame. Explicit bearings are NOT clamped into the arc —
+  // that is the author's call — but the build log says whether each one landed
+  // over water.
+  // The build log keeps picture BASENAMES (a full path per panel makes it
+  // unreadable); this puts one back to the path SkylineKit knows it by, so the
+  // log can look its measurements up again.
+  srcForName: function (name) {
+    const kit = window.SkylineKit;
+    if (!kit) return null;
+    const all = (kit.cities || []).concat(kit.bridges || [], kit.boats || [], kit.srcs || []);
+    for (let i = 0; i < all.length; i++) {
+      if (all[i].split("/").pop() === name) return all[i];
+    }
+    return null;
+  },
+
+  bridgeBearings: function () {
+    const d = this.data;
+    const v = d.bridgeBearingsDeg;
+    if (v !== "auto" && v && v.length) return v;
+    const half = Math.max(0, Math.min(360, d.riverArcDeg)) / 2;
+    return [d.riverBearingDeg - half, d.riverBearingDeg + half];
   },
 
   // ---------------------------------------------------------------
@@ -1782,6 +1978,7 @@ AFRAME.registerComponent("park-root", {
         haze: d.boatHaze, opacity: d.boatHazeOpacity,
         order: -1, token: token, lifter: lifter,
       });
+      this.picsUsed[src] = true;
       placed.push({ deg: +deg.toFixed(1), src: src.split("/").pop(), h: +ph.toFixed(1) });
     }
 
@@ -1833,11 +2030,61 @@ AFRAME.registerComponent("park-root", {
       "[park] skyline " +
         (bands.length
           ? bands.map((b) =>
-              `${b.band} ${b.panels} × ${b.panelWidth} m at ${b.radius} m, reaching ${b.reach} m` +
+              `${b.band} ${b.panels} × ${b.panelWidth} m at ${b.radius} m, ${b.height} m tall, ` +
+                `reaching ${b.reach} m` +
                 (b.gapM > 0 ? ` (GAPS of ${b.gapM} m — raise skylinePanelsMax)` : "")
             ).join(", ")
           : "off")
     );
+
+    // What each band is actually showing, and why it is that tall. The trim is
+    // the interesting number: it is fitted to the band's tallest picture, so a
+    // value below skylineTopTrim means a picture in the pool needed the room.
+    const kit = window.SkylineKit;
+    bands.forEach((b) => {
+      console.log(
+        `[park]   ${b.band}: ${b.pics.join(", ")}` +
+          (b.seamOk ? "" : " — SEAM REPEATS (pool too small for this many panels)")
+      );
+      if (b.trim < b.trimWant) {
+        console.log(
+          `[park]   ${b.band}: top trim ${b.trimWant} → ${b.trim} to clear ${b.tallest} ` +
+            `(spire ${b.maxSpire}); panel ${b.heightWas} → ${b.height} m so the city keeps its scale`
+        );
+      }
+      if (b.bridges && b.bridges.length) {
+        console.log(
+          `[park]   ${b.band}: bridges ` +
+            b.bridges.map((x) =>
+              `${x.src} at ${x.at}° (wanted ${x.wanted}°, off by ${x.offBy}°` +
+                (x.overWater ? ", over the river)" : ", ON LAND)")
+            ).join(", ")
+        );
+      }
+    });
+
+    // A picture framed far tighter than the originals is not broken, but it will
+    // not sit at the same apparent scale as the rest of the pool — it is the
+    // thing that makes one panel tower over its neighbours for no reason in the
+    // world. Reported rather than left to be noticed in a headset.
+    if (kit && kit.referenceSpire) {
+      const limit = kit.referenceSpire.max * 1.5;
+      const odd = [];
+      bands.forEach((b) => {
+        b.pics.forEach((name) => {
+          const src = this.srcForName(name);
+          if (src && kit.spire(src) > limit && odd.indexOf(name) < 0) odd.push(name);
+        });
+      });
+      if (odd.length) {
+        console.warn(
+          `[park] these pictures are framed much tighter than the four originals ` +
+            `(spire over ${limit.toFixed(2)} against their ${kit.referenceSpire.min}-` +
+            `${kit.referenceSpire.max}), so they stand well taller than their neighbours: ` +
+            odd.join(", ") + " — re-cut them with maxSpire in tools/silhouette-alpha.js"
+        );
+      }
+    }
     const r = this.riverInfo;
     console.log(
       "[park] river " +
@@ -1857,6 +2104,23 @@ AFRAME.registerComponent("park-root", {
             `(trim ${bo.trim} fitted to the tallest picture, spire ${bo.maxSpire}), ` +
             `at ${bo.placed.map((x) => `${x.deg}° ${x.src}`).join(", ")}`
           : "off")
+    );
+
+    // WHAT THIS COSTS IN TEXTURE MEMORY, because it is the one number that grew
+    // a lot. Each picture is lifted into a 1456x816 canvas (4.5 MB, 6 MB with
+    // mipmaps) by CorridorTextures, and the park used to share the corridor's
+    // four and add nothing. Shuffling a pool of nine cities, two bridges and
+    // fourteen boats means it lifts whatever it actually deals — so the count
+    // is reported rather than assumed. The levers, in order: boatCount, then
+    // skylinePanelsMax (fewer panels deal fewer distinct pictures), then the
+    // pool sizes in js/environment.js.
+    const used = Object.keys(this.picsUsed || {});
+    const legacy = (kit && kit.srcs) || [];
+    const shared = used.filter((x) => legacy.indexOf(x) >= 0).length;
+    console.log(
+      `[park] pictures ${used.length} lifted into canvases, ~${(used.length * 4.53).toFixed(0)} MB ` +
+        `(~${(used.length * 6.05).toFixed(0)} MB with mipmaps); ${shared} of them shared with the ` +
+        "Zone A corridor window, which lifts the same four"
     );
 
     // Everything far off reduced to a centre and a farthest point — the shape

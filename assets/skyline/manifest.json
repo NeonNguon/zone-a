@@ -1,6 +1,6 @@
 {
   "generatedBy": "tools/silhouette-alpha.js",
-  "generatedAt": "2026-09-12T08:12:26.363Z",
+  "generatedAt": "2026-09-12T08:13:47.055Z",
   "layout": {
     "width": 1456,
     "height": 816,
@@ -176,12 +176,12 @@
       "subjectTop": 152,
       "shift": -107,
       "groundRow": 612,
-      "fitScale": 1,
+      "fitScale": 0.6695,
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
-      "spire": 0.926,
-      "roof": 0.299
+      "spire": 0.621,
+      "roof": 0.199
     },
     {
       "name": "bridge-02.png",
@@ -196,12 +196,12 @@
       "subjectTop": 154,
       "shift": -135,
       "groundRow": 612,
-      "fitScale": 1,
+      "fitScale": 0.62,
       "width": 1456,
       "height": 816,
       "format": "LA (grey + alpha), black on transparent",
-      "spire": 1,
-      "roof": 0.273
+      "spire": 0.626,
+      "roof": 0.167
     },
     {
       "name": "boat-01.png",
