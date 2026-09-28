@@ -13,7 +13,8 @@ window.ZoneA = window.ZoneA || {};
   // Kick the fetch off immediately on load. `whenReady` is available if any
   // caller ever needs to await it; `getEntry()` is the simple synchronous
   // accessor used at click time (by then the small JSON has long loaded).
-  ZoneA.whenReady = fetch("ATPIHL/captions.json")
+  // no-cache: always revalidate, so edits to captions.json show on reload.
+  ZoneA.whenReady = fetch("ATPIHL/captions.json", { cache: "no-cache" })
     .then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
       return res.json(); // res.json() decodes the body as UTF-8
