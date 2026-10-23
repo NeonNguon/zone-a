@@ -27,6 +27,11 @@
 //                at row 709 of 720 on every frame -> 10/720). The plane is sunk
 //                by this much so the soles, not the frame's edge, meet y = 0.
 //   billboard  — turn about Y (only) to face the camera every frame.
+//   contactRadius — the soft floor shadow under the feet (0 = none). Read
+//                once, at init.
+//
+// guide-avatar-spawn (below) places the entity in front of the rig once the
+// scene has loaded: `distance` metres along the rig's facing, on the floor.
 // ================================================================
 
 // Native size of ONE half of the stacked frame (the colour image).
@@ -40,6 +45,7 @@ AFRAME.registerComponent("guide-avatar", {
     billboard: { type: "boolean", default: true },
     figureFill: { type: "number", default: 0.97 },
     footMargin: { type: "number", default: 10 / AVATAR_FRAME_H },
+    contactRadius: { type: "number", default: 0.35 }, // 0 = no ground contact
   },
 
   init: function () {
@@ -104,10 +110,24 @@ AFRAME.registerComponent("guide-avatar", {
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
+      // three draws a transparent DoubleSide material twice (back faces, then
+      // front) so a closed shape blends in order. A flat plane cannot overlap
+      // itself, so the second pass is a wasted draw call.
+      forceSinglePass: true,
     });
 
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.el.setObject3D("mesh", this.mesh);
+
+    // GROUND CONTACT: the exhibition's shared spot-contact-cue (js/components.js)
+    // — the same soft radial pool, depthWrite:false, tuned to the environment
+    // like every other prop's — so the figure stands on the floor rather than
+    // hovering over it. A circle, so the billboard turning it changes nothing.
+    if (this.data.contactRadius > 0) {
+      this.cueEl = document.createElement("a-entity");
+      this.cueEl.setAttribute("spot-contact-cue", { radius: this.data.contactRadius });
+      this.el.appendChild(this.cueEl);
+    }
 
     // Scratch for the billboard tick (no per-frame allocation).
     this._cam = new THREE.Vector3();
@@ -172,9 +192,62 @@ AFRAME.registerComponent("guide-avatar", {
   remove: function () {
     if (!this.mesh) return;
     this.dropGesture();
+    if (this.cueEl && this.cueEl.parentNode) {
+      this.cueEl.parentNode.removeChild(this.cueEl); // its remove() disposes
+    }
     this.el.removeObject3D("mesh");
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.texture.dispose();
+  },
+});
+
+// ----------------------------------------------------------------
+// guide-avatar-spawn: put this entity `distance` metres ahead of the rig, on
+// the floor, facing it — ONCE, when the scene has loaded (so the rig is where
+// it is going to start). "Ahead" is the rig's own yaw, flattened to the floor;
+// the rig sits at floor level, so its world y is the floor's.
+// ----------------------------------------------------------------
+AFRAME.registerComponent("guide-avatar-spawn", {
+  schema: {
+    rig: { type: "selector", default: "#rig" },
+    distance: { type: "number", default: 2.2 },
+  },
+
+  init: function () {
+    this.place = this.place.bind(this);
+    const scene = this.el.sceneEl;
+    // `loaded` may already have fired (entity added later, fast device).
+    if (scene.hasLoaded) this.place();
+    else scene.addEventListener("loaded", this.place, { once: true });
+  },
+
+  place: function () {
+    const rig = this.data.rig;
+    const parent = this.el.object3D.parent;
+    if (!rig || !parent) {
+      console.warn("guide-avatar-spawn: no rig to stand in front of");
+      return;
+    }
+    const origin = new THREE.Vector3();
+    rig.object3D.getWorldPosition(origin);
+    const q = new THREE.Quaternion();
+    rig.object3D.getWorldQuaternion(q);
+    // A-Frame's forward is -z. Yaw only: drop any tilt, back to unit length.
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+    fwd.normalize();
+
+    const pos = origin.clone().addScaledVector(fwd, this.data.distance);
+    parent.worldToLocal(pos);
+    this.el.object3D.position.copy(pos);
+    // Face the rig (back along -fwd). The billboard keeps this up to date while
+    // it is on; with it off, this is the pose it keeps.
+    this.el.object3D.rotation.set(0, Math.atan2(-fwd.x, -fwd.z), 0);
+  },
+
+  remove: function () {
+    this.el.sceneEl.removeEventListener("loaded", this.place);
   },
 });
