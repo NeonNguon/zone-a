@@ -99,6 +99,10 @@
          whose teleport starts and stops it from inside the arrival click. -->
     <script src="js/corridor-audio.js"></script>
     <script src="js/zone-a-corridor.js"></script>
+    <!-- Guide avatar: the artist as a video cut-out on the floor (stacked
+         colour/matte MP4 through one shader). Standalone. See
+         js/guide-avatar.js. -->
+    <script src="js/guide-avatar.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -220,6 +224,10 @@
         <img id="atpihl-7" src="ATPIHL/ATPIHL7.jpg" />
         <img id="atpihl-8" src="ATPIHL/ATPIHL8.jpg" />
         <img id="atpihl-9" src="ATPIHL/ATPIHL9.jpg" />
+        <!-- Guide avatar: colour over matte, stacked in one H.264 file (see
+             js/guide-avatar.js). Muted + playsinline so it may play inline. -->
+        <video id="avatar-video" src="avatar/avatar-stacked.mp4" loop muted playsinline
+               crossorigin="anonymous" preload="auto"></video>
       </a-assets>
 
       <!-- ============================================================
@@ -1539,6 +1547,13 @@
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
            .clickable and emits mouseenter/mouseleave/click on the images. -->
       <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
+
+      <!-- GUIDE AVATAR: the artist, a flat video cut-out standing on the floor
+           and turning (about Y only) to face the visitor. No audio, no
+           interaction yet. Tunables: height (the person, metres) / figureFill
+           / footMargin / billboard. See js/guide-avatar.js. -->
+      <a-entity id="guide-avatar" position="0 0 -2.2"
+                guide-avatar="src: #avatar-video; height: 1.8"></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
