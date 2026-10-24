@@ -103,6 +103,9 @@
          colour/matte MP4 through one shader). Standalone. See
          js/guide-avatar.js. -->
     <script src="js/guide-avatar.js"></script>
+    <!-- Freestanding video screen (the lottery animation on the park square),
+         streamed, playing only while you are near. See js/video-screen.js. -->
+    <script src="js/video-screen.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -608,6 +611,29 @@
                       riverVolume: 0.85; riverRange: 50; riverWaterOffset: 5;
                       riverHeight: 1.5;
                       gateMargin: 5; fadeIn: 2.0; fadeOut: 1.2'
+      ></a-entity>
+
+      <!-- LOTTERY SCREEN — the animation of "The Lottery of Forgotten Dreams",
+           looping on a freestanding screen at the square's SOUTH edge, facing
+           north back across the square (yaw 180: the screen faces +z before
+           it). World coordinates, like everything on the square: x 33.5 puts
+           it to the right of the image wall's south end as you walk out of the
+           hallway, clear of the wall (ends z 11.2) by 7 m and of the nearest
+           south bench (x 40.2, z 18.6) by ~3 m; z 19.3 stands it 0.7 m in
+           from the square's edge (z 20), the lawn and the river behind it.
+           5.4 m wide, 16:9, its lower edge 0.9 m up.
+
+           The video STREAMS from Vimeo (7 min of 1080p is 300 MB — too big
+           for the repo), and only while you are out in the park: `region` is
+           everything east of the foyer's coral wall (x 5) — hallway, square
+           and lawn — and nothing in the gallery or the teleport sub-spaces
+           400 m out. (A radius would not do: the spawn point is 39 m from the
+           screen, the square's far corner 44 m.) See js/video-screen.js. If
+           the Vimeo link ever changes, `src` here is the one thing to update.
+           Muted. -->
+      <a-entity id="lottery-screen" position="33.5 0 19.3" rotation="0 180 0"
+        video-screen="src: https://player.vimeo.com/progressive_redirect/playback/1226353089/rendition/1080p/file.mp4%20%281080p%29.mp4?loc=external&amp;log_user=0&amp;signature=9d3b7af835b9ec509ef48a895049f57d86bb45b0364ada139114e295ec491c65;
+                      width: 5.4; bottom: 0.9; region: 5 -60 90 60"
       ></a-entity>
 
       <!-- ============================================================
