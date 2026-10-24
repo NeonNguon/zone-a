@@ -746,7 +746,10 @@ AFRAME.registerComponent("guide-avatar-spawn", {
 // Hidden until he has spoken (the avatar's `guide-avatar-spoke`: his clip
 // ending, or a click cutting him short), then they pop in one after another
 // from his feet to the booth, and a soft brightness pulse keeps running along
-// them toward it. Once shown they stay.
+// them toward it. They stay until the booth they lead to is USED (a click on
+// `to` — the same click its teleport listens for): then they fade out for
+// good, and are still gone when the visitor comes back. If the booth is used
+// before he has spoken, they never appear at all.
 //
 // THE PATH is world coordinates on the floor, worked out when they appear:
 //   start  — the avatar's position plus `startOffset` (just in front of his
@@ -780,12 +783,25 @@ AFRAME.registerComponent("guide-arrows", {
   init: function () {
     this.shown = false;
     this.built = false;
+    this.dismissed = false;
     this.onSpoke = () => this.show();
     if (this.data.from) this.data.from.addEventListener("guide-avatar-spoke", this.onSpoke);
+    // The booth's clicks bubble up from its hit box to the booth entity, which
+    // is where zone-a-teleport listens to jump; listening here too keeps the
+    // arrows out of the teleport's code.
+    this.onUsed = () => this.dismiss();
+    if (this.data.to) this.data.to.addEventListener("click", this.onUsed);
+  },
+
+  // The booth has been used: the arrows have done their job.
+  dismiss: function () {
+    if (this.dismissed) return;
+    this.dismissed = true;
+    if (this.shown) this.tGone = null; // the fade starts on the next tick
   },
 
   show: function () {
-    if (this.shown) return;
+    if (this.shown || this.dismissed) return;
     if (!this.build()) return;
     this.shown = true;
     this.t0 = null; // the pop starts on the next tick
@@ -891,6 +907,20 @@ AFRAME.registerComponent("guide-arrows", {
     if (!this.shown) return;
     if (this.t0 === null) this.t0 = t;
     const e = t - this.t0;
+
+    // Dismissed: fade out over ~400 ms (under the teleport's glitch, which
+    // takes the visitor away mid-fade), then hide and stop ticking for good.
+    if (this.dismissed) {
+      if (this.tGone === null) this.tGone = t;
+      const f = Math.max(0, 1 - (t - this.tGone) / 400);
+      this.material.opacity = 0.95 * f;
+      if (f === 0) {
+        this.mesh.visible = false; // no draw call
+        this.shown = false; // and no more ticks' worth of work
+        return;
+      }
+    }
+
     for (let i = 0; i < this.n; i++) {
       // The pop: each arrow 90 ms after the last, 300 ms to grow, a little
       // overshoot (ease-out-back) so it lands with a bounce.
@@ -907,6 +937,7 @@ AFRAME.registerComponent("guide-arrows", {
 
   remove: function () {
     if (this.data.from) this.data.from.removeEventListener("guide-avatar-spoke", this.onSpoke);
+    if (this.data.to) this.data.to.removeEventListener("click", this.onUsed);
     if (!this.built) return;
     this.el.object3D.remove(this.holder);
     this.mesh.geometry.dispose();
