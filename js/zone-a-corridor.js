@@ -6453,6 +6453,9 @@ AFRAME.registerComponent("zone-a-teleport", {
         );
       }
       this.corridorEl.setAttribute("corridor-root", "shown", out);
+      // Say so, page-wide, when the visitor is home: the foyer's guide
+      // welcomes them back (guide-avatar's backOn).
+      if (!out) this.el.sceneEl.emit("zoneareturned", null, false);
 
       // THE SOUND, started and stopped from INSIDE this click. That matters:
       // an AudioContext created outside a user gesture starts suspended on

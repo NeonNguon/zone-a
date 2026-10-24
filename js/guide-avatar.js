@@ -79,11 +79,13 @@
 // .mp3" and renamed to an ASCII name a URL can carry, like the files in audio/.
 //
 // HE CAN SAY MORE THAN ONE THING: a `first` line, an `again` line for any
-// later click, and a `done` line once a page-level event says the visitor
-// has done what he sent them to do (rooms-visited, bottom of this file, for
-// the corridor's three apartments). When he has had his say (clip ended, or
-// cut short by a click) the entity emits `guide-avatar-spoke` with
-// { line: "first" | "again" | "done" }; guide-arrows (bottom of this file)
+// later click, a `done` line once a page-level event says the visitor has
+// done what he sent them to do (rooms-visited, bottom of this file, for the
+// corridor's three apartments), and a `back` line he says UNPROMPTED a beat
+// after another event (the visitor teleported home). When he has had his say
+// (clip ended, or cut short by a click) the entity emits
+// `guide-avatar-spoke` with { line: "first" | "again" | "done" | "back" };
+// guide-arrows (bottom of this file)
 // waits on it — a set of arrows appears after one line and can be cleared by
 // another.
 //
@@ -124,6 +126,13 @@ AFRAME.registerComponent("guide-avatar", {
     doneSound: { type: "string", default: "" },
     doneCaptions: { type: "string", default: "" },
     doneOn: { type: "string", default: "" },
+    // A line he says UNPROMPTED: `backDelay` ms after the scene event `backOn`
+    // (the visitor teleported home: zone-a-teleport's `zoneareturned`), if
+    // he can be seen. Once said, it is also what a click plays.
+    backSound: { type: "string", default: "" },
+    backCaptions: { type: "string", default: "" },
+    backOn: { type: "string", default: "" },
+    backDelay: { type: "number", default: 1000 },
   },
 
   init: function () {
@@ -435,12 +444,28 @@ AFRAME.registerComponent("guide-avatar", {
     this.lines = { first: { sound: d.sound, captions: d.captions } };
     if (d.againSound) this.lines.again = { sound: d.againSound, captions: d.againCaptions };
     if (d.doneSound) this.lines.done = { sound: d.doneSound, captions: d.doneCaptions };
+    if (d.backSound) this.lines.back = { sound: d.backSound, captions: d.backCaptions };
     this.currentLine = "first";
     this.spoken = {}; // line name -> true once it has been started
     this.doneReached = false;
     if (d.doneOn) {
       this.onDone = () => (this.doneReached = true);
       this.el.sceneEl.addEventListener(d.doneOn, this.onDone);
+    }
+    // Unprompted: the beat after the event, then the `back` line — unless he
+    // cannot be seen, or is already talking. The jump that fires it is a
+    // click, so the page has its user activation and the AudioContext is
+    // running: playing outside the gesture a second later is allowed.
+    if (d.backOn && this.lines.back) {
+      this.onBack = () => {
+        clearTimeout(this.backTimer);
+        this.backTimer = setTimeout(() => {
+          const v = this.voiceEl;
+          if (!this.isShown() || (!v.paused && !v.ended)) return;
+          this.playVoice("back");
+        }, d.backDelay);
+      };
+      this.el.sceneEl.addEventListener(d.backOn, this.onBack);
     }
 
     // Tell whoever is waiting on him (guide-arrows) that he has had his say,
@@ -463,6 +488,7 @@ AFRAME.registerComponent("guide-avatar", {
   // `again` line after the first has been heard, else the first.
   pickLine: function () {
     if (this.doneReached && this.lines.done) return "done";
+    if (this.spoken.back) return "back"; // the latest thing he has to tell you
     if (this.spoken.first && this.lines.again) return "again";
     return "first";
   },
@@ -659,8 +685,10 @@ AFRAME.registerComponent("guide-avatar", {
     this.playVoice();
   },
 
-  // Called from INSIDE the click: the resume needs the gesture.
-  playVoice: function () {
+  // Called from INSIDE the click: the resume needs the gesture. `line` forces
+  // one (the unprompted `back`); otherwise pickLine chooses.
+  playVoice: function (line) {
+    this.signDismissed = true; // he is talking: no need to ask for a click
     const listener = AudioKit.resume();
     if (!this.voice) {
       if (!listener) {
@@ -680,7 +708,7 @@ AFRAME.registerComponent("guide-avatar", {
     }
     // Which line, and its clip into the one element (the PositionalAudio is
     // wired to the element, not the file, so a new src just plays through).
-    const line = this.pickLine();
+    line = line || this.pickLine();
     this.currentLine = line;
     this.spoken[line] = true;
     const src = this.lines[line].sound;
@@ -833,6 +861,8 @@ AFRAME.registerComponent("guide-avatar", {
       this.hitMat.dispose();
     }
     if (this.onDone) this.el.sceneEl.removeEventListener(this.data.doneOn, this.onDone);
+    if (this.onBack) this.el.sceneEl.removeEventListener(this.data.backOn, this.onBack);
+    clearTimeout(this.backTimer);
     if (this.voiceEl) {
       this.voiceEl.removeEventListener("ended", this.onVoiceEnded);
       this.voiceEl.pause();

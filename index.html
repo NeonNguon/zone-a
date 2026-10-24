@@ -1619,9 +1619,18 @@
            contactRadius / sound / soundRefDistance / soundRolloff, and the
            spawn's distance / lateral. See
            js/guide-avatar.js. -->
+      <!-- WELCOME BACK: when the visitor teleports home from the corridor
+           (zone-a-teleport fires `zoneareturned` and lands them back here at
+           the start), he says speech 5 a second later, unprompted: "Welcome
+           back! Please follow the arrows to the next part of the exhibition
+           – The Lottery of Forgotten Dreams!" — and from then on it is also
+           what a click plays. -->
       <a-entity id="guide-avatar"
                 guide-avatar="src: #avatar-video; height: 1.95; sound: avatar/Avatar-speech-1.mp3;
-                              captions: avatar/Avatar-speech-1.captions.json"
+                              captions: avatar/Avatar-speech-1.captions.json;
+                              backSound: avatar/Avatar-speech-5.mp3;
+                              backCaptions: avatar/Avatar-speech-5.captions.json;
+                              backOn: zoneareturned; backDelay: 1000"
                 guide-avatar-spawn="distance: 4.3; lateral: -1.6"></a-entity>
       <!-- GUIDE ARROWS: hot-pink chevrons on the floor from the avatar's feet,
            through the doorway (x 0), to the Zone A booth (#terminal-a2) — the
@@ -1633,6 +1642,15 @@
            spacing / color / size. See js/guide-avatar.js. -->
       <a-entity id="guide-arrows"
                 guide-arrows="from: #guide-avatar; to: #terminal-a2; via: 0 -4.6"></a-entity>
+      <!-- ...and after his WELCOME BACK: to the Lottery of Forgotten Dreams —
+           across the foyer to its coral +x doorway (z 0, 2.4 m wide), down
+           the hallway (x 5 to its open end at 10.2), and 5 m out onto the
+           park's concrete square, the image wall dead ahead at x 40. They
+           fade once you are within 2 m of the last one. -->
+      <a-entity id="guide-arrows-lottery"
+                guide-arrows="from: #guide-avatar; line: back;
+                              via: 1.5 -1.6, 4.2 0, 10.2 0; end: 15.5 0;
+                              reach: 2"></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
