@@ -42,7 +42,8 @@
 // the start; a click while it is speaking stops it — the same toggle as the
 // memories' audio control. Until that first click, a small "click to
 // interact" sign bobs over his head, pointing down at him; the click fades it
-// out for good.
+// out for good. While he speaks, a speech bubble in the sign's place shows
+// what he is saying, a line at a time, from the `captions` JSON cues.
 //
 // WHILE HE SPEAKS he glitches: rows tear sideways, the channels split into
 // red/blue fringes off the silhouette, scanlines, the odd dropout — the
@@ -67,6 +68,8 @@
 // Native size of ONE half of the stacked frame (the colour image).
 const AVATAR_FRAME_W = 544;
 const AVATAR_FRAME_H = 720;
+// The info terminals' face, for the sign and the speech bubble.
+const AVATAR_FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
 
 AFRAME.registerComponent("guide-avatar", {
   schema: {
@@ -79,6 +82,9 @@ AFRAME.registerComponent("guide-avatar", {
     sound: { type: "string", default: "" }, // voice clip URL; "" = no click
     soundRefDistance: { type: "number", default: 5 },
     soundRolloff: { type: "number", default: 1 },
+    // JSON cues for the speech bubble: [{ "start": seconds, "text": "..." }].
+    // Each line shows from its start until the next one's. "" = no bubble.
+    captions: { type: "string", default: "" },
   },
 
   init: function () {
@@ -270,6 +276,8 @@ AFRAME.registerComponent("guide-avatar", {
     if (this.voiceHolder) this.voiceHolder.position.set(0, d.height * 0.9, 0);
     // The sign's centre, clear of his hair (even mid hover-pop, +4%).
     this.signY = d.height + 0.28;
+    // The bubble's tail tip, just over his hair (clear of the hover pop).
+    if (this.bubble) this.bubble.position.y = d.height + 0.12;
     if (this.voice) {
       this.voice.setRefDistance(d.soundRefDistance);
       this.voice.setRolloffFactor(d.soundRolloff);
@@ -320,6 +328,116 @@ AFRAME.registerComponent("guide-avatar", {
     this.el.object3D.add(this.voiceHolder);
 
     this.buildSign();
+    if (this.data.captions) this.buildBubble();
+  },
+
+  // ---------------------------------------------------------------
+  // THE SPEECH BUBBLE — what he is saying, a line at a time, in a bubble
+  // whose tail points down at his head, so the voice is plainly HIS and not
+  // one floating in the room (and readable with the sound off). Same face as
+  // the sign, in the same place: the sign is gone by the time he speaks.
+  // Shown while he speaks and for a beat after; pulses with his level.
+  // The cues are a JSON file beside the clip, so a re-recorded line is a data
+  // edit, not a code one.
+  // ---------------------------------------------------------------
+  buildBubble: function () {
+    this.cues = null;
+    fetch(this.data.captions, { cache: "no-cache" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((cues) => {
+        this.cues = cues.slice().sort((a, b) => a.start - b.start);
+      })
+      .catch((err) => {
+        console.warn("guide-avatar: no captions from " + this.data.captions, err);
+      });
+
+    this.bubbleCanvas = document.createElement("canvas");
+    this.bubbleCanvas.width = 1024;
+    this.bubbleCanvas.height = 384;
+    this.bubbleTex = new THREE.CanvasTexture(this.bubbleCanvas);
+    this.bubbleTex.colorSpace = THREE.SRGBColorSpace;
+    this.bubbleMat = new THREE.MeshBasicMaterial({
+      map: this.bubbleTex,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      forceSinglePass: true,
+    });
+    const bw = 1.3; // metres; the text is ~7 cm tall at this size
+    const bh = bw * (this.bubbleCanvas.height / this.bubbleCanvas.width);
+    const geo = new THREE.PlaneGeometry(bw, bh);
+    geo.translate(0, bh / 2, 0); // origin at the tail's tip: it grows from there
+    this.bubble = new THREE.Mesh(geo, this.bubbleMat);
+    this.bubble.renderOrder = 1;
+    this.bubble.visible = false;
+    this.el.object3D.add(this.bubble);
+    this.bubbleFade = 0;
+    this.bubbleHold = 0; // scene time (ms) until which it stays up
+    this.cueIndex = -1;
+  },
+
+  // Redrawn only when the line changes (three times over the whole clip).
+  drawBubble: function (text) {
+    const c = this.bubbleCanvas;
+    const ctx = c.getContext("2d");
+    const W = c.width;
+    const H = c.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.font = "600 54px " + AVATAR_FONT;
+
+    // Wrap to at most three lines.
+    const lines = [];
+    let line = "";
+    text.split(/\s+/).forEach(function (word) {
+      const next = line ? line + " " + word : word;
+      if (line && ctx.measureText(next).width > 860) {
+        lines.push(line);
+        line = word;
+      } else line = next;
+    });
+    if (line) lines.push(line);
+    lines.length = Math.min(lines.length, 3);
+
+    const lineH = 66;
+    const padX = 52;
+    const padY = 36;
+    const tail = 40;
+    let textW = 0;
+    lines.forEach((l) => (textW = Math.max(textW, ctx.measureText(l).width)));
+    const bw = Math.min(W - 8, textW + 2 * padX);
+    const bh = lines.length * lineH + 2 * padY - 12;
+    const x0 = (W - bw) / 2;
+    const x1 = x0 + bw;
+    const y1 = H - 4 - tail; // the box's bottom edge
+    const y0 = y1 - bh;
+    const r = 34;
+    const cx = W / 2;
+
+    // Box and tail as ONE path: two overlapping translucent fills would leave
+    // a darker seam where they meet.
+    ctx.fillStyle = "rgba(11, 11, 16, 0.88)";
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.arcTo(x1, y0, x1, y1, r);
+    ctx.arcTo(x1, y1, cx + 28, y1, r);
+    ctx.lineTo(cx + 28, y1);
+    ctx.lineTo(cx, H - 4);
+    ctx.lineTo(cx - 28, y1);
+    ctx.arcTo(x0, y1, x0, y0, r);
+    ctx.arcTo(x0, y0, x1, y0, r);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#e8eef8";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    lines.forEach((l, i) => ctx.fillText(l, cx, y0 + padY + lineH / 2 - 6 + i * lineH));
+
+    this.bubbleTex.needsUpdate = true;
   },
 
   // ---------------------------------------------------------------
@@ -335,10 +453,9 @@ AFRAME.registerComponent("guide-avatar", {
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext("2d");
-    const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
     const label = "click to interact";
 
-    ctx.font = "600 46px " + FONT;
+    ctx.font = "600 46px " + AVATAR_FONT;
     const pillW = Math.min(W - 8, ctx.measureText(label).width + 84);
     const pillH = 96;
     const px = (W - pillW) / 2;
@@ -398,6 +515,7 @@ AFRAME.registerComponent("guide-avatar", {
       try {
         v.currentTime = 0;
       } catch (e) {}
+      this.bubbleHold = 0; // stopped: no lingering line
       return;
     }
     this.playVoice();
@@ -471,6 +589,34 @@ AFRAME.registerComponent("guide-avatar", {
       this.sign.position.y = this.signY + 0.025 * Math.sin(t / 650);
     }
 
+    // The bubble: the current line while he speaks, held 0.8 s after he
+    // finishes, fading in over ~150 ms and out over ~300 ms. It swells a few
+    // percent with his level — the glitch's smoothed value — from its tail.
+    if (this.bubble) {
+      if (speaking && this.cues) {
+        this.bubbleHold = t + 800;
+        const now = v.currentTime + 0.05;
+        let i = -1;
+        while (i + 1 < this.cues.length && this.cues[i + 1].start <= now) i++;
+        if (i !== this.cueIndex && i >= 0) {
+          this.cueIndex = i;
+          this.drawBubble(this.cues[i].text);
+        }
+      }
+      const show = t < this.bubbleHold && this.cueIndex >= 0 ? 1 : 0;
+      if (show || this.bubbleFade > 0) {
+        const rate = (dt || 16) / (show ? 150 : 300);
+        this.bubbleFade = show
+          ? Math.min(1, this.bubbleFade + rate)
+          : Math.max(0, this.bubbleFade - rate);
+        this.bubbleMat.opacity = this.bubbleFade;
+        this.bubble.visible = this.bubbleFade > 0;
+        const s = 1 + 0.05 * u.glitch.value;
+        this.bubble.scale.set(s, s, s);
+        if (!show && this.bubbleFade === 0) this.cueIndex = -1; // next play redraws
+      }
+    }
+
     if (!this.data.billboard) return;
     const cam = this.el.sceneEl.camera;
     const parent = this.el.object3D.parent;
@@ -512,6 +658,12 @@ AFRAME.registerComponent("guide-avatar", {
       this.sign.geometry.dispose();
       this.signMat.dispose();
       this.signTex.dispose();
+    }
+    if (this.bubble) {
+      this.el.object3D.remove(this.bubble);
+      this.bubble.geometry.dispose();
+      this.bubbleMat.dispose();
+      this.bubbleTex.dispose();
     }
     this.el.removeObject3D("mesh");
     this.mesh.geometry.dispose();
