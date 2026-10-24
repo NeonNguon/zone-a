@@ -228,6 +228,10 @@
              js/guide-avatar.js). Muted + playsinline so it may play inline. -->
         <video id="avatar-video" src="avatar/avatar-stacked.mp4" loop muted playsinline
                crossorigin="anonymous" preload="auto"></video>
+        <!-- The corridor's guide (avatar B). Each avatar has a <video>.json
+             beside it, measured by tools/measure-avatar.py. -->
+        <video id="avatar-b-video" src="avatar/avatar-b-stacked.mp4" loop muted playsinline
+               crossorigin="anonymous" preload="auto"></video>
       </a-assets>
 
       <!-- ============================================================
@@ -1192,6 +1196,34 @@
           id="terminal-a2-return"
           teleport-terminal="label: EXHIBITION; accent: #ffc400"
           spot-contact-cue="forceGlow: true"
+        ></a-entity>
+
+        <!-- CORRIDOR GUIDE (avatar B) — the artist with his camera, against the
+             RIGHT wall straight across from the bicycle (which leans on the
+             left wall at z -3.2), so he is the first thing on your right as
+             you step off the landing. Root-local, like everything in here: a
+             CHILD of the corridor root, so he hides with it — and while hidden
+             his video is paused and he says nothing. x 1.55 keeps his figure
+             (~0.48 m either side of centre) 0.2 m off the 2.2 m wall face.
+             Same component as the foyer guide (js/guide-avatar.js); his
+             framing comes from avatar/avatar-b-stacked.json. -->
+        <a-entity
+          id="guide-avatar-b"
+          position="1.55 0 -3.2"
+          guide-avatar="src: #avatar-b-video; height: 1.95;
+                        sound: avatar/Avatar-speech-2.mp3;
+                        captions: avatar/Avatar-speech-2.captions.json"
+        ></a-entity>
+        <!-- ...and his arrows, once he has spoken: from his feet, across the
+             corridor (left of the seats and table at z -9.1 on the right), to
+             the doorway of the first exhibition room on the LEFT — apartment
+             #1, the yellow one, its opening at x -2.2, z -10.175. They fade
+             once you are within 1.2 m of the doorway. Root-local too. -->
+        <a-entity
+          id="guide-arrows-b"
+          guide-arrows="from: #guide-avatar-b; startOffset: -0.6 0 -0.5;
+                        via: 0.2 -5.4, -0.4 -8.7, -1.1 -10.1;
+                        end: -1.95 -10.175; reach: 1.2"
         ></a-entity>
       </a-entity>
 

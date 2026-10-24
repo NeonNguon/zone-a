@@ -1,15 +1,30 @@
 // ================================================================
 // Guide avatar — a flat video cut-out of the artist standing on the floor.
 //
-// THE VIDEO. avatar/avatar-stacked.mp4 is a plain H.264 file (544x1440) that
-// carries its own alpha by STACKING: the top half (rows 0-719) is the colour
-// image over black, the bottom half (rows 720-1439) is the matte, white =
-// opaque. Plain H.264 because it is the one format every target plays — Safari
-// and the Quest browser included. avatar/avatar-alpha.webm (VP9 with real
-// alpha) is reference only: Safari cannot decode it.
+// THE VIDEO. Each avatar (avatar/avatar-stacked.mp4, avatar-b-stacked.mp4,
+// ...) is a plain H.264 file that carries its own alpha by STACKING: the top
+// half is the colour image over black, the bottom half the matte, white =
+// opaque, both halves the same size. Plain H.264 because it is the one format
+// every target plays — Safari and the Quest browser included.
+// avatar/avatar-alpha.webm (VP9 with real alpha) is reference only: Safari
+// cannot decode it.
 //
-// ONE <video> (#avatar-video in <a-assets>), ONE VideoTexture, ONE draw call:
+// ONE <video> per avatar (in <a-assets>), ONE VideoTexture, ONE draw call:
 // the shader below samples both halves of the same texture.
+//
+// THE MATTE SIDECAR. Every avatar is framed differently — where the soles
+// are, how much of the frame the person fills, how far off centre they stand
+// — so those numbers are MEASURED, not typed: tools/measure-avatar.py reads
+// every frame's matte and writes <video>.json beside the video (feet / head
+// rows, left / right columns, the frame size). With `matte: auto` the
+// component fetches that file from the video's own src, and keeps the figure
+// hidden until it has it, so it never appears at the wrong size and jumps. A
+// new avatar is therefore: export the stacked MP4, run the script once, point
+// a guide-avatar at it.
+//
+// HIDDEN = PAUSED. An avatar in a sub-space that is switched off (the Zone A
+// corridor, 400 m out, `shown: false` until you teleport in) pauses its video
+// and stops its voice, so only the avatars you can see cost a decoder.
 //
 // PLAYBACK. The video is muted + playsinline, which most browsers will autoplay
 // anyway, so play() is tried once at init. Where that is refused (Quest before
@@ -21,11 +36,14 @@
 //
 // Tunables (setAttribute on the entity, no code edits):
 //   height     — the PERSON's real height in metres (top of head to soles).
+//   matte      — the sidecar JSON's URL; "auto" (default) = the video's src
+//                with .json for its extension; "none" = use the two below.
 //   figureFill — fraction of the frame height the figure occupies; the plane
 //                is height / figureFill tall so the person comes out `height`.
-//   footMargin — fraction of the frame height BELOW the soles (the matte ends
-//                at row 709 of 720 on every frame -> 10/720). The plane is sunk
-//                by this much so the soles, not the frame's edge, meet y = 0.
+//   footMargin — fraction of the frame height BELOW the soles. The plane is
+//                sunk by this much so the soles, not the frame's edge, meet
+//                y = 0. Both come from the sidecar when there is one; set
+//                either on the tag to override it by hand.
 //   billboard  — turn about Y (only) to face the camera every frame.
 //   contactRadius — the soft floor shadow under the feet (0 = none). Read
 //                once, at init.
@@ -68,7 +86,8 @@
 // metres across it (negative = left), on the floor.
 // ================================================================
 
-// Native size of ONE half of the stacked frame (the colour image).
+// ONE half of the stacked frame, until the sidecar or the video says
+// otherwise: the size every avatar so far has been exported at.
 const AVATAR_FRAME_W = 544;
 const AVATAR_FRAME_H = 720;
 // The info terminals' face, for the sign and the speech bubble.
@@ -79,6 +98,7 @@ AFRAME.registerComponent("guide-avatar", {
     src: { type: "selector" }, // the <video>
     height: { type: "number", default: 1.8 },
     billboard: { type: "boolean", default: true },
+    matte: { type: "string", default: "auto" },
     figureFill: { type: "number", default: 0.97 },
     footMargin: { type: "number", default: 10 / AVATAR_FRAME_H },
     contactRadius: { type: "number", default: 0.35 }, // 0 = no ground contact
@@ -210,6 +230,14 @@ AFRAME.registerComponent("guide-avatar", {
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.el.setObject3D("mesh", this.mesh);
 
+    // Framing: the defaults until the sidecar arrives. The figure stays hidden
+    // until then (a local file, so a matter of milliseconds), so it never
+    // shows at one size and jumps to another.
+    this.frame = { w: AVATAR_FRAME_W, h: AVATAR_FRAME_H };
+    this.fig = null; // measured: { fill, foot, width, centre } as fractions
+    this.mesh.visible = false;
+    this.loadMatte();
+
     // GROUND CONTACT: the exhibition's shared spot-contact-cue (js/components.js)
     // — the same soft radial pool, depthWrite:false, tuned to the environment
     // like every other prop's — so the figure stands on the floor rather than
@@ -229,7 +257,12 @@ AFRAME.registerComponent("guide-avatar", {
 
     if (this.data.sound) this.buildInteraction();
 
+    // `wantsVideo` remembers that playback has been asked for, so a hidden
+    // avatar (paused by tick) starts again the moment it is shown.
+    this.wantsVideo = false;
     this.playVideo = () => {
+      this.wantsVideo = true;
+      if (!this.isShown()) return; // tick starts it when it is
       const p = this.video.play();
       if (p && p.catch) p.catch(function () {});
     };
@@ -257,24 +290,79 @@ AFRAME.registerComponent("guide-avatar", {
     this.playVideo();
   },
 
+  // The sidecar (see the header): fetched once, then the layout redone with
+  // the measured framing. Missing or broken -> the schema's figureFill /
+  // footMargin, with a warning, so an unmeasured avatar still shows.
+  loadMatte: function () {
+    let url = this.data.matte;
+    if (url === "auto") {
+      const src = this.video.getAttribute("src") || "";
+      url = src ? src.replace(/\.[^./]+$/, "") + ".json" : "";
+    }
+    const done = () => {
+      this.matteReady = true;
+      this.layout();
+    };
+    if (!url || url === "none") return done();
+    fetch(url, { cache: "no-cache" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((m) => {
+        const W = m.frame.width;
+        const H = m.frame.height;
+        this.frame = { w: W, h: H };
+        this.fig = {
+          fill: (m.feet + 1 - m.head) / H, // soles to the top of the hair
+          foot: (H - 1 - m.feet) / H, // the empty strip under the soles
+          width: (m.right + 1 - m.left) / W,
+          centre: ((m.left + m.right + 1) / 2 - W / 2) / W, // + = right of centre
+        };
+      })
+      .catch((err) => {
+        console.warn(
+          "guide-avatar: no matte measurements at " + url +
+            " (run tools/measure-avatar.py on the video); using figureFill / footMargin",
+          err
+        );
+      })
+      .then(done);
+  },
+
   update: function () {
-    if (!this.mesh) return;
+    this.layout();
+  },
+
+  layout: function () {
+    if (!this.mesh || !this.matteReady) return;
     const d = this.data;
+    // Measured framing, unless the tag sets either number by hand.
+    const set = this.attrValue || {};
+    const fig = this.fig;
+    const fill = fig && set.figureFill === undefined ? fig.fill : d.figureFill;
+    const foot = fig && set.footMargin === undefined ? fig.foot : d.footMargin;
+    const figW = fig ? fig.width : 0.53;
+    const figC = fig ? fig.centre : 0;
+
     // Plane height is the whole FRAME, so the PERSON comes out `height` tall.
-    const h = d.height / d.figureFill;
-    const w = h * (AVATAR_FRAME_W / AVATAR_FRAME_H);
+    const h = d.height / fill;
+    const w = h * (this.frame.w / this.frame.h);
     const geo = new THREE.PlaneGeometry(w, h);
     // Bottom edge to y = 0, then down by the empty strip under the soles.
-    geo.translate(0, h / 2 - h * d.footMargin, 0);
+    geo.translate(0, h / 2 - h * foot, 0);
     if (this.mesh.geometry) this.mesh.geometry.dispose();
     this.mesh.geometry = geo;
+    this.mesh.visible = true;
+    // 2 texel rows of the FULL stacked frame (see the uniform).
+    this.material.uniforms.inset.value = 2 / (this.frame.h * 2);
 
     // The hit box covers the FIGURE: the person's height from the soles, and
-    // the middle 56% of the frame's width (the matte spans columns 140-413 of
-    // 544 — 50% — plus a margin for a hand or an elbow swinging out).
+    // the matte's measured width plus 10% for a hand or an elbow swinging out,
+    // centred where the figure stands in the frame.
     if (this.hitMesh) {
-      this.hitMesh.scale.set(w * 0.56, d.height, 0.3);
-      this.hitMesh.position.set(0, d.height / 2, 0);
+      this.hitMesh.scale.set(w * figW * 1.1, d.height, 0.3);
+      this.hitMesh.position.set(w * figC, d.height / 2, 0);
     }
     if (this.voiceHolder) this.voiceHolder.position.set(0, d.height * 0.9, 0);
     // The sign's centre, clear of his hair (even mid hover-pop, +4%).
@@ -327,7 +415,10 @@ AFRAME.registerComponent("guide-avatar", {
     this.voiceEl.src = this.data.sound;
     // Tell whoever is waiting on him (guide-arrows) that he has had his say:
     // on the clip's end, and on a click that stops him (see toggleVoice).
-    this.onVoiceEnded = () => this.el.emit("guide-avatar-spoke", null, false);
+    this.onVoiceEnded = () => {
+      this.duckOthers(false);
+      this.el.emit("guide-avatar-spoke", null, false);
+    };
     this.voiceEl.addEventListener("ended", this.onVoiceEnded);
 
     // From about the mouth, not the floor.
@@ -516,16 +607,11 @@ AFRAME.registerComponent("guide-avatar", {
   toggleVoice: function () {
     const v = this.voiceEl;
     if (!v) return;
+    // A ray can still reach a HIDDEN avatar's hit box (the corridor's guide,
+    // parked 400 m behind the gallery); a hidden guide does not answer.
+    if (!this.isShown()) return;
     this.signDismissed = true; // the sign has done its job
-    if (!v.paused && !v.ended) {
-      v.pause();
-      try {
-        v.currentTime = 0;
-      } catch (e) {}
-      this.bubbleHold = 0; // stopped: no lingering line
-      this.onVoiceEnded(); // cut short still counts as having spoken
-      return;
-    }
+    if (!v.paused && !v.ended) return this.stopVoice();
     this.playVoice();
   },
 
@@ -553,10 +639,49 @@ AFRAME.registerComponent("guide-avatar", {
     } catch (e) {}
     const p = this.voiceEl.play();
     if (p && p.catch) p.catch(function () {});
+    this.duckOthers(true);
+  },
+
+  // A voice ducks the ambience under it, exactly as a spoken memory does: the
+  // corridor's television and street (js/corridor-audio.js) listen for this
+  // page-level event, and the corridor's emitter hangs on the bicycle, right
+  // across from the corridor's guide. On the way back up, keep the duck if a
+  // memory is still speaking, so the guide never un-ducks over one.
+  duckOthers: function (on) {
+    const memory = !!(window.ZoneA && ZoneA.audio && ZoneA.audio.isPlaying());
+    this.el.sceneEl.emit("zonea-memory", { playing: on || memory }, false);
+  },
+
+  stopVoice: function () {
+    const v = this.voiceEl;
+    if (!v || v.paused || v.ended) return;
+    v.pause();
+    try {
+      v.currentTime = 0;
+    } catch (e) {}
+    this.bubbleHold = 0; // stopped: no lingering line
+    this.onVoiceEnded(); // cut short still counts as having spoken
+  },
+
+  // Every ancestor visible: the corridor hides by flipping its root's
+  // visibility, not by removing anything.
+  isShown: function () {
+    for (let o = this.el.object3D; o; o = o.parent) if (!o.visible) return false;
+    return true;
   },
 
   tick: function (t, dt) {
     if (!this.mesh) return;
+
+    // HIDDEN = PAUSED: no decoding a video nobody can see, no voice talking
+    // to an empty corridor 400 m away. Nothing else to do while hidden.
+    if (!this.isShown()) {
+      if (!this.video.paused) this.video.pause();
+      this.stopVoice();
+      this.hoverTarget = 0;
+      return;
+    }
+    if (this.wantsVideo && this.video.paused) this.playVideo();
 
     // Hover ease: ~100 ms each way, then the uniform and the pop follow it.
     if (this.hover !== this.hoverTarget) {
@@ -746,19 +871,24 @@ AFRAME.registerComponent("guide-avatar-spawn", {
 // Hidden until he has spoken (the avatar's `guide-avatar-spoke`: his clip
 // ending, or a click cutting him short), then they pop in one after another
 // from his feet to the booth, and a soft brightness pulse keeps running along
-// them toward it. They stay until the booth they lead to is USED (a click on
-// `to` — the same click its teleport listens for): then they fade out for
-// good, and are still gone when the visitor comes back. If the booth is used
-// before he has spoken, they never appear at all.
+// them toward it. They stay until they have done their job, then fade out
+// for good (still gone when the visitor comes back):
+//   - a booth they lead to (`to`) is USED — a click on it, the same click its
+//     teleport listens for. If it is used before he has spoken, they never
+//     appear at all;
+//   - the visitor REACHES the end (`reach` metres from the last arrow; 0 =
+//     off) — for a doorway, where there is nothing to click.
 //
-// THE PATH is world coordinates on the floor, worked out when they appear:
+// THE PATH is on the floor, in THIS entity's own frame (so a set of arrows
+// inside the Zone A corridor's root uses the corridor's coordinates and moves
+// and hides with it), worked out when they appear:
 //   start  — the avatar's position plus `startOffset` (just in front of his
-//            feet, toward the room's centre line),
-//   via    — waypoints in between, "x z, x z" (the doorway's line),
-//   end    — the `to` entity's position, `stopShort` metres back toward the
-//            visitor along the last leg, so the last arrow lands in front of
-//            the booth rather than under it.
-// The booth's position is read live (zone-a-teleport derives it from the
+//            feet, toward the middle of the floor),
+//   via    — waypoints in between, "x z, x z",
+//   end    — either `end`, "x z", or the `to` entity's position, `stopShort`
+//            metres back toward the visitor along the last leg, so the last
+//            arrow lands in front of the booth rather than under it.
+// A booth's position is read live (zone-a-teleport derives it from the
 // floorplan), so the arrows follow if the room or the booth moves. A smooth
 // curve (centripetal Catmull-Rom) through those points, an arrow every
 // `spacing` metres along it, each turned to the curve's direction.
@@ -771,9 +901,11 @@ AFRAME.registerComponent("guide-arrows", {
   schema: {
     from: { type: "selector", default: "#guide-avatar" },
     to: { type: "selector" },
+    end: { type: "string", default: "" }, // "x z", instead of `to`
     startOffset: { type: "vec3", default: { x: 0.6, y: 0, z: 0.5 } },
     via: { type: "string", default: "" },
     stopShort: { type: "number", default: 1.3 },
+    reach: { type: "number", default: 0 }, // metres from the end; 0 = off
     spacing: { type: "number", default: 0.7 },
     color: { type: "color", default: "#ff1f8f" },
     size: { type: "number", default: 0.36 }, // chevron width, metres
@@ -810,26 +942,40 @@ AFRAME.registerComponent("guide-arrows", {
 
   build: function () {
     const d = this.data;
-    if (!d.from || !d.to) {
-      console.warn("guide-arrows: need both `from` and `to`");
+    const xz = (str) =>
+      str
+        .split(",")
+        .map((s) => s.trim().split(/\s+/).map(Number))
+        .filter((p) => p.length === 2 && p.every(isFinite))
+        .map((p) => new THREE.Vector3(p[0], 0, p[1]));
+    const endPts = xz(d.end);
+    if (!d.from || (!d.to && !endPts.length)) {
+      console.warn("guide-arrows: need `from`, and `to` or `end`");
       return false;
     }
-    const start = new THREE.Vector3();
-    d.from.object3D.getWorldPosition(start);
-    start.add(d.startOffset);
-    const pts = [start];
-    d.via
-      .split(",")
-      .map((s) => s.trim().split(/\s+/).map(Number))
-      .filter((p) => p.length === 2 && p.every(isFinite))
-      .forEach((p) => pts.push(new THREE.Vector3(p[0], 0, p[1])));
-    const end = new THREE.Vector3();
-    d.to.object3D.getWorldPosition(end);
-    const prev = pts[pts.length - 1];
-    const back = new THREE.Vector3(prev.x - end.x, 0, prev.z - end.z);
-    if (back.lengthSq() > 1e-6) end.addScaledVector(back.normalize(), d.stopShort);
+    // Everything in this entity's frame: world positions come in through
+    // worldToLocal; `via` / `end` / startOffset are already in it.
+    this.el.object3D.updateMatrixWorld(true);
+    const local = (obj) => {
+      const v = new THREE.Vector3();
+      obj.getWorldPosition(v);
+      return this.el.object3D.worldToLocal(v);
+    };
+    const start = local(d.from.object3D).add(d.startOffset);
+    const pts = [start].concat(xz(d.via));
+    let end;
+    if (endPts.length) {
+      end = endPts[0];
+    } else {
+      end = local(d.to.object3D);
+      const prev = pts[pts.length - 1];
+      const back = new THREE.Vector3(prev.x - end.x, 0, prev.z - end.z);
+      if (back.lengthSq() > 1e-6) end.addScaledVector(back.normalize(), d.stopShort);
+    }
     pts.push(end);
     pts.forEach((p) => (p.y = 0));
+    this.endPt = end.clone();
+    this._cam = new THREE.Vector3();
 
     const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
     const length = curve.getLength();
@@ -883,13 +1029,7 @@ AFRAME.registerComponent("guide-arrows", {
     this._up = new THREE.Vector3(0, 1, 0);
     for (let i = 0; i < n; i++) this.setArrow(i, 0, 1);
 
-    // World coordinates: undo wherever this entity sits.
-    const inv = new THREE.Matrix4().copy(this.el.object3D.matrixWorld).invert();
-    this.holder = new THREE.Object3D();
-    this.holder.matrixAutoUpdate = false;
-    this.holder.matrix.copy(inv);
-    this.holder.add(this.mesh);
-    this.el.object3D.add(this.holder);
+    this.el.object3D.add(this.mesh); // positions are already in this frame
     this.built = true;
     return true;
   },
@@ -919,6 +1059,16 @@ AFRAME.registerComponent("guide-arrows", {
         this.shown = false; // and no more ticks' worth of work
         return;
       }
+    } else if (this.data.reach > 0) {
+      // Reached: the visitor is standing at the end of the path.
+      const cam = this.el.sceneEl.camera;
+      if (cam) {
+        cam.getWorldPosition(this._cam);
+        this.el.object3D.worldToLocal(this._cam);
+        const dx = this._cam.x - this.endPt.x;
+        const dz = this._cam.z - this.endPt.z;
+        if (dx * dx + dz * dz < this.data.reach * this.data.reach) this.dismiss();
+      }
     }
 
     for (let i = 0; i < this.n; i++) {
@@ -939,7 +1089,7 @@ AFRAME.registerComponent("guide-arrows", {
     if (this.data.from) this.data.from.removeEventListener("guide-avatar-spoke", this.onSpoke);
     if (this.data.to) this.data.to.removeEventListener("click", this.onUsed);
     if (!this.built) return;
-    this.el.object3D.remove(this.holder);
+    this.el.object3D.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.mesh.dispose();
