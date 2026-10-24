@@ -1551,10 +1551,10 @@
       <!-- GUIDE AVATAR: the artist, a flat video cut-out standing on the floor
            and turning (about Y only) to face the visitor. A "click to
            interact" sign floats over him until the first click. Hover
-           highlights him; a click plays his voice (avatar/avatar-voice.mp3)
+           highlights him; a click plays his voice (avatar/Avatar-speech-1.mp3)
            from where he stands, glitching him while he speaks, with a speech
            bubble over his head showing each line as he says it (cues in
-           avatar/avatar-voice.captions.json: edit there if the line is
+           avatar/Avatar-speech-1.captions.json: edit there if the line is
            re-recorded), and a second click stops it. guide-avatar-spawn stands it relative to #rig when
            the scene loads, on the floor, with a soft contact shadow under the
            feet: 4.3 m ahead and 1.6 m left puts it beside the doorway in the
@@ -1565,8 +1565,8 @@
            spawn's distance / lateral. See
            js/guide-avatar.js. -->
       <a-entity id="guide-avatar"
-                guide-avatar="src: #avatar-video; height: 1.95; sound: avatar/avatar-voice.mp3;
-                              captions: avatar/avatar-voice.captions.json"
+                guide-avatar="src: #avatar-video; height: 1.95; sound: avatar/Avatar-speech-1.mp3;
+                              captions: avatar/Avatar-speech-1.captions.json"
                 guide-avatar-spawn="distance: 4.3; lateral: -1.6"></a-entity>
       <!-- GUIDE ARROWS: hot-pink chevrons on the floor from the avatar's feet,
            through the doorway (x 0), to the Zone A booth (#terminal-a2) — the

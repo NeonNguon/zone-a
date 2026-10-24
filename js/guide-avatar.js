@@ -56,7 +56,7 @@
 // reused HTMLAudioElement, mixed into AudioKit's listener — the page's ONE
 // listener (js/audio.js), never a second. AudioKit.resume() is called inside
 // the click, because an AudioContext started outside a gesture stays silent
-// on Quest. The clip is avatar/avatar-voice.mp3; it was generated as
+// on Quest. The clip is avatar/Avatar-speech-1.mp3; it was generated as
 // "ElevenLabs_2026-10-24T06_31_03_Tobias - German accent_pvc_sp90_s50_sb50_v3
 // .mp3" and renamed to an ASCII name a URL can carry, like the files in audio/.
 //
