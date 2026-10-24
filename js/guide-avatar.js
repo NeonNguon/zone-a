@@ -29,6 +29,26 @@
 //   billboard  — turn about Y (only) to face the camera every frame.
 //   contactRadius — the soft floor shadow under the feet (0 = none). Read
 //                once, at init.
+//   sound      — URL of the voice clip a click plays ("" = not clickable).
+//                Read once, at init.
+//   soundRefDistance / soundRolloff — how the voice falls off with distance
+//                (inverse model): full level within soundRefDistance of him.
+//
+// HOVER + CLICK. With a `sound`, an invisible hit box the size of the FIGURE
+// (not the 1.8 m-wide plane, most of which is transparent) carries the
+// `.clickable` class, so the desktop cursor and both lasers find it like any
+// other clickable. Hover lifts the figure's brightness and pops it up a few
+// percent (the images and terminals pop by 5%). A click plays the voice from
+// the start; a click while it is speaking stops it — the same toggle as the
+// memories' audio control.
+//
+// THE VOICE is spatial: a THREE.PositionalAudio on the avatar, fed from one
+// reused HTMLAudioElement, mixed into AudioKit's listener — the page's ONE
+// listener (js/audio.js), never a second. AudioKit.resume() is called inside
+// the click, because an AudioContext started outside a gesture stays silent
+// on Quest. The clip is avatar/avatar-voice.mp3; it was generated as
+// "ElevenLabs_2026-10-24T06_31_03_Tobias - German accent_pvc_sp90_s50_sb50_v3
+// .mp3" and renamed to an ASCII name a URL can carry, like the files in audio/.
 //
 // guide-avatar-spawn (below) places the entity in front of the rig once the
 // scene has loaded: `distance` metres along the rig's facing and `lateral`
@@ -47,6 +67,9 @@ AFRAME.registerComponent("guide-avatar", {
     figureFill: { type: "number", default: 0.97 },
     footMargin: { type: "number", default: 10 / AVATAR_FRAME_H },
     contactRadius: { type: "number", default: 0.35 }, // 0 = no ground contact
+    sound: { type: "string", default: "" }, // voice clip URL; "" = no click
+    soundRefDistance: { type: "number", default: 5 },
+    soundRolloff: { type: "number", default: 1 },
   },
 
   init: function () {
@@ -73,6 +96,8 @@ AFRAME.registerComponent("guide-avatar", {
         // codec's deblocking smears a pixel or two across row 720, so neither
         // half samples right up to the seam.
         inset: { value: 2 / (AVATAR_FRAME_H * 2) },
+        // Hover, eased 0..1 by tick: a brightness lift on the figure.
+        highlight: { value: 0 },
       },
       vertexShader: [
         "varying vec2 vUv;",
@@ -84,6 +109,7 @@ AFRAME.registerComponent("guide-avatar", {
       fragmentShader: [
         "uniform sampler2D map;",
         "uniform float inset;",
+        "uniform float highlight;",
         "varying vec2 vUv;",
         // three stores a VIDEO texture's bytes as they are (sRGB) and leaves
         // the decode to the shader — its own materials do this under
@@ -103,7 +129,10 @@ AFRAME.registerComponent("guide-avatar", {
         "  float alpha = texture2D(map, vec2(vUv.x, va)).r;",
         "  if (alpha < 0.03) discard;",
         "  vec3 colour = texture2D(map, vec2(vUv.x, vc)).rgb;",
-        "  gl_FragColor = vec4(avatarSRGBToLinear(colour), alpha);",
+        // Hover lift, in linear light: up to +35%. The artist is dressed in
+        // dark olive, so a multiply is what shows; nothing here clips.
+        "  vec3 lin = avatarSRGBToLinear(colour) * (1.0 + 0.35 * highlight);",
+        "  gl_FragColor = vec4(lin, alpha);",
         "  #include <tonemapping_fragment>",
         "  #include <colorspace_fragment>",
         "}",
@@ -132,6 +161,12 @@ AFRAME.registerComponent("guide-avatar", {
 
     // Scratch for the billboard tick (no per-frame allocation).
     this._cam = new THREE.Vector3();
+
+    // Hover state, eased toward its target in tick.
+    this.hover = 0;
+    this.hoverTarget = 0;
+
+    if (this.data.sound) this.buildInteraction();
 
     this.playVideo = () => {
       const p = this.video.play();
@@ -172,10 +207,116 @@ AFRAME.registerComponent("guide-avatar", {
     geo.translate(0, h / 2 - h * d.footMargin, 0);
     if (this.mesh.geometry) this.mesh.geometry.dispose();
     this.mesh.geometry = geo;
+
+    // The hit box covers the FIGURE: the person's height from the soles, and
+    // the middle 56% of the frame's width (the matte spans columns 140-413 of
+    // 544 — 50% — plus a margin for a hand or an elbow swinging out).
+    if (this.hitMesh) {
+      this.hitMesh.scale.set(w * 0.56, d.height, 0.3);
+      this.hitMesh.position.set(0, d.height / 2, 0);
+    }
+    if (this.voiceHolder) this.voiceHolder.position.set(0, d.height * 0.9, 0);
+    if (this.voice) {
+      this.voice.setRefDistance(d.soundRefDistance);
+      this.voice.setRolloffFactor(d.soundRolloff);
+    }
   },
 
-  tick: function () {
-    if (!this.mesh || !this.data.billboard) return;
+  // ---------------------------------------------------------------
+  // HOVER + CLICK — the hit box, its handlers, and the voice's element. The
+  // PositionalAudio itself waits for the first click (see playVoice).
+  // ---------------------------------------------------------------
+  buildInteraction: function () {
+    // Invisible but ray-hittable: opacity 0 + colorWrite off, the terminals'
+    // hit-box recipe (js/terminal-kit.js). A unit box, sized in update().
+    this.hitMat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    this.hitMat.colorWrite = false;
+    this.hitMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.hitMat);
+    this.hitEl = document.createElement("a-entity");
+    this.hitEl.setAttribute("class", "clickable");
+    this.hitEl.addEventListener(
+      "loaded",
+      () => this.hitEl.setObject3D("hit", this.hitMesh),
+      { once: true }
+    );
+    this.el.appendChild(this.hitEl);
+
+    // The same mouseenter/mouseleave/click arrive from the desktop cursor and
+    // both lasers.
+    this.onEnter = () => (this.hoverTarget = 1);
+    this.onLeave = () => (this.hoverTarget = 0);
+    this.onClick = () => this.toggleVoice();
+    this.hitEl.addEventListener("mouseenter", this.onEnter);
+    this.hitEl.addEventListener("mouseleave", this.onLeave);
+    this.hitEl.addEventListener("click", this.onClick);
+
+    // ONE element, reused for every play. Loaded now so the first click is not
+    // kept waiting; nothing is routed anywhere until that click.
+    this.voiceEl = new Audio();
+    this.voiceEl.preload = "auto";
+    this.voiceEl.crossOrigin = null; // same origin: asking for CORS would only break it
+    this.voiceEl.src = this.data.sound;
+
+    // From about the mouth, not the floor.
+    this.voiceHolder = new THREE.Object3D();
+    this.el.object3D.add(this.voiceHolder);
+  },
+
+  toggleVoice: function () {
+    const v = this.voiceEl;
+    if (!v) return;
+    if (!v.paused && !v.ended) {
+      v.pause();
+      try {
+        v.currentTime = 0;
+      } catch (e) {}
+      return;
+    }
+    this.playVoice();
+  },
+
+  // Called from INSIDE the click: the resume needs the gesture.
+  playVoice: function () {
+    const listener = AudioKit.resume();
+    if (!this.voice) {
+      if (!listener) {
+        console.warn("guide-avatar: no AudioListener yet; the voice is silent");
+        return;
+      }
+      const d = this.data;
+      this.voice = new THREE.PositionalAudio(listener);
+      this.voice.setMediaElementSource(this.voiceEl);
+      this.voice.setDistanceModel("inverse");
+      this.voice.setRefDistance(d.soundRefDistance);
+      this.voice.setRolloffFactor(d.soundRolloff);
+      this.voiceHolder.add(this.voice);
+    }
+    try {
+      this.voiceEl.currentTime = 0;
+    } catch (e) {}
+    const p = this.voiceEl.play();
+    if (p && p.catch) p.catch(function () {});
+  },
+
+  tick: function (t, dt) {
+    if (!this.mesh) return;
+
+    // Hover ease: ~100 ms each way, then the uniform and the pop follow it.
+    if (this.hover !== this.hoverTarget) {
+      const step = Math.min(1, (dt || 16) / 100);
+      this.hover += (this.hoverTarget - this.hover) * step;
+      if (Math.abs(this.hoverTarget - this.hover) < 0.01) this.hover = this.hoverTarget;
+      this.material.uniforms.highlight.value = this.hover;
+      // The mesh's origin is at the soles, so the pop grows him upward.
+      const s = 1 + 0.04 * this.hover;
+      this.mesh.scale.set(s, s, s);
+    }
+
+    if (!this.data.billboard) return;
     const cam = this.el.sceneEl.camera;
     const parent = this.el.object3D.parent;
     if (!cam || !parent) return;
@@ -196,6 +337,21 @@ AFRAME.registerComponent("guide-avatar", {
     if (this.cueEl && this.cueEl.parentNode) {
       this.cueEl.parentNode.removeChild(this.cueEl); // its remove() disposes
     }
+    if (this.hitEl) {
+      this.hitEl.removeEventListener("mouseenter", this.onEnter);
+      this.hitEl.removeEventListener("mouseleave", this.onLeave);
+      this.hitEl.removeEventListener("click", this.onClick);
+      if (this.hitEl.parentNode) this.hitEl.parentNode.removeChild(this.hitEl);
+      this.hitMesh.geometry.dispose();
+      this.hitMat.dispose();
+    }
+    if (this.voiceEl) {
+      this.voiceEl.pause();
+      this.voiceEl.removeAttribute("src");
+    }
+    // The listener stays: it is AudioKit's, shared with the rest of the page.
+    if (this.voice) this.voice.disconnect();
+    if (this.voiceHolder) this.el.object3D.remove(this.voiceHolder);
     this.el.removeObject3D("mesh");
     this.mesh.geometry.dispose();
     this.material.dispose();
