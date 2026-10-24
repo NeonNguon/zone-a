@@ -40,7 +40,16 @@
 // other clickable. Hover lifts the figure's brightness and pops it up a few
 // percent (the images and terminals pop by 5%). A click plays the voice from
 // the start; a click while it is speaking stops it — the same toggle as the
-// memories' audio control.
+// memories' audio control. Until that first click, a small "click to
+// interact" sign bobs over his head, pointing down at him; the click fades it
+// out for good.
+//
+// WHILE HE SPEAKS he glitches: rows tear sideways, the channels split into
+// red/blue fringes off the silhouette, scanlines, the odd dropout — the
+// teleport glitch's vocabulary (js/transition.js), stepped at 24 fps. Its
+// strength follows his voice's level (an AudioAnalyser on the clip), so it
+// flares on syllables and settles in pauses, and it is exactly off — the
+// shader's plain two-sample path — whenever he is silent.
 //
 // THE VOICE is spatial: a THREE.PositionalAudio on the avatar, fed from one
 // reused HTMLAudioElement, mixed into AudioKit's listener — the page's ONE
@@ -98,6 +107,10 @@ AFRAME.registerComponent("guide-avatar", {
         inset: { value: 2 / (AVATAR_FRAME_H * 2) },
         // Hover, eased 0..1 by tick: a brightness lift on the figure.
         highlight: { value: 0 },
+        // While he speaks: 0..1, following his voice's level (see tick), and
+        // the clock the glitch is stepped on.
+        glitch: { value: 0 },
+        time: { value: 0 },
       },
       vertexShader: [
         "varying vec2 vUv;",
@@ -110,7 +123,12 @@ AFRAME.registerComponent("guide-avatar", {
         "uniform sampler2D map;",
         "uniform float inset;",
         "uniform float highlight;",
+        "uniform float glitch;",
+        "uniform float time;",
         "varying vec2 vUv;",
+        "float hash(vec2 p) {",
+        "  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);",
+        "}",
         // three stores a VIDEO texture's bytes as they are (sRGB) and leaves
         // the decode to the shader — its own materials do this under
         // DECODE_VIDEO_TEXTURE. A ShaderMaterial gets no such help, so decode
@@ -126,9 +144,43 @@ AFRAME.registerComponent("guide-avatar", {
         // half is v 0.5..1 and the matte (bottom) half is v 0..0.5.
         "  float vc = mix(0.5 + inset, 1.0, vUv.y);",
         "  float va = mix(0.0, 0.5 - inset, vUv.y);",
-        "  float alpha = texture2D(map, vec2(vUv.x, va)).r;",
-        "  if (alpha < 0.03) discard;",
-        "  vec3 colour = texture2D(map, vec2(vUv.x, vc)).rgb;",
+        "  float alpha;",
+        "  vec3 colour;",
+        // GLITCH (while he speaks). `glitch` is uniform across the draw, so
+        // this branch costs nothing while he is silent: the plain path is the
+        // same two samples as ever.
+        "  if (glitch > 0.0) {",
+        // Same vocabulary as the teleport glitch (js/transition.js): time
+        // stepped to 24 fps for a blocky retiming, rows torn sideways. Only
+        // SOME rows tear (more as glitch rises), so the figure stays legible.
+        "    float t = floor(time * 24.0);",
+        "    float row = floor(vUv.y * 48.0);",
+        "    float pick = step(1.0 - 0.3 * glitch, hash(vec2(row, t)));",
+        "    float x = vUv.x + pick * (hash(vec2(row, t + 7.0)) - 0.5) * 0.1 * glitch;",
+        // ...and now and then a whole band jumps further.
+        "    float band = floor(vUv.y * 7.0);",
+        "    float jump = hash(vec2(band, floor(time * 9.0)));",
+        "    x += step(0.93, jump) * (jump - 0.965) * 1.2 * glitch;",
+        // RGB split: each channel from its own offset sample, each weighted by
+        // its own matte, so the fringes hang off the SILHOUETTE in red and
+        // blue rather than smearing the black ground into it.
+        "    float s = 0.01 * glitch;",
+        "    float aR = texture2D(map, vec2(x + s, va)).r;",
+        "    float aG = texture2D(map, vec2(x, va)).r;",
+        "    float aB = texture2D(map, vec2(x - s, va)).r;",
+        "    alpha = max(aG, max(aR, aB));",
+        "    if (alpha < 0.03) discard;",
+        "    colour = vec3(texture2D(map, vec2(x + s, vc)).r * aR,",
+        "                  texture2D(map, vec2(x, vc)).g * aG,",
+        "                  texture2D(map, vec2(x - s, vc)).b * aB) / alpha;",
+        // Scanlines, and an occasional dropout flicker of the whole figure.
+        "    colour *= 1.0 - 0.3 * glitch * step(0.5, fract(vUv.y * 160.0));",
+        "    alpha *= 1.0 - 0.45 * glitch * step(0.88, hash(vec2(t, 3.0)));",
+        "  } else {",
+        "    alpha = texture2D(map, vec2(vUv.x, va)).r;",
+        "    if (alpha < 0.03) discard;",
+        "    colour = texture2D(map, vec2(vUv.x, vc)).rgb;",
+        "  }",
         // Hover lift, in linear light: up to +35%. The artist is dressed in
         // dark olive, so a multiply is what shows; nothing here clips.
         "  vec3 lin = avatarSRGBToLinear(colour) * (1.0 + 0.35 * highlight);",
@@ -216,6 +268,8 @@ AFRAME.registerComponent("guide-avatar", {
       this.hitMesh.position.set(0, d.height / 2, 0);
     }
     if (this.voiceHolder) this.voiceHolder.position.set(0, d.height * 0.9, 0);
+    // The sign's centre, clear of his hair (even mid hover-pop, +4%).
+    this.signY = d.height + 0.28;
     if (this.voice) {
       this.voice.setRefDistance(d.soundRefDistance);
       this.voice.setRolloffFactor(d.soundRolloff);
@@ -264,11 +318,81 @@ AFRAME.registerComponent("guide-avatar", {
     // From about the mouth, not the floor.
     this.voiceHolder = new THREE.Object3D();
     this.el.object3D.add(this.voiceHolder);
+
+    this.buildSign();
+  },
+
+  // ---------------------------------------------------------------
+  // THE SIGN — "click to interact" over his head, a chevron pointing down at
+  // him. The info terminals' face (dark ground, light Helvetica, the pale blue
+  // accent) on a pill. A child of the entity, so it turns with the billboard.
+  // Bobs gently until the first click, then fades out for good.
+  // ---------------------------------------------------------------
+  buildSign: function () {
+    const W = 512;
+    const H = 192;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
+    const label = "click to interact";
+
+    ctx.font = "600 46px " + FONT;
+    const pillW = Math.min(W - 8, ctx.measureText(label).width + 84);
+    const pillH = 96;
+    const px = (W - pillW) / 2;
+    const r = pillH / 2;
+    ctx.fillStyle = "rgba(11, 11, 16, 0.88)";
+    ctx.beginPath();
+    ctx.moveTo(px + r, 4);
+    ctx.arcTo(px + pillW, 4, px + pillW, 4 + pillH, r);
+    ctx.arcTo(px + pillW, 4 + pillH, px, 4 + pillH, r);
+    ctx.arcTo(px, 4 + pillH, px, 4, r);
+    ctx.arcTo(px, 4, px + pillW, 4, r);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#e8eef8";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, W / 2, 4 + pillH / 2 + 2);
+
+    // The chevron, in the family's accent, pointing down at him.
+    ctx.strokeStyle = "#bfe6ff";
+    ctx.lineWidth = 10;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - 30, 128);
+    ctx.lineTo(W / 2, 162);
+    ctx.lineTo(W / 2 + 30, 128);
+    ctx.stroke();
+
+    this.signTex = new THREE.CanvasTexture(canvas);
+    this.signTex.colorSpace = THREE.SRGBColorSpace;
+    this.signMat = new THREE.MeshBasicMaterial({
+      map: this.signTex,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      forceSinglePass: true, // flat: one pass is enough (see the avatar's)
+    });
+    const signW = 0.6;
+    this.sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(signW, signW * (H / W)),
+      this.signMat
+    );
+    this.sign.renderOrder = 1; // after the figure, so it is never behind him
+    this.el.object3D.add(this.sign);
+    this.signFade = 1; // 1 shown .. 0 gone
+    this.signDismissed = false;
   },
 
   toggleVoice: function () {
     const v = this.voiceEl;
     if (!v) return;
+    this.signDismissed = true; // the sign has done its job
     if (!v.paused && !v.ended) {
       v.pause();
       try {
@@ -294,6 +418,9 @@ AFRAME.registerComponent("guide-avatar", {
       this.voice.setRefDistance(d.soundRefDistance);
       this.voice.setRolloffFactor(d.soundRolloff);
       this.voiceHolder.add(this.voice);
+      // His LEVEL drives the glitch, so it spikes on syllables and settles in
+      // the pauses. 32 bins is plenty for a loudness reading.
+      this.voiceLevel = new THREE.AudioAnalyser(this.voice, 32);
     }
     try {
       this.voiceEl.currentTime = 0;
@@ -314,6 +441,34 @@ AFRAME.registerComponent("guide-avatar", {
       // The mesh's origin is at the soles, so the pop grows him upward.
       const s = 1 + 0.04 * this.hover;
       this.mesh.scale.set(s, s, s);
+    }
+
+    // GLITCH while he speaks: a floor of 0.15 so it never quite settles, plus
+    // his level. Fast attack, slower release, and back to exactly 0 (the
+    // shader's cheap path) once he has stopped.
+    const u = this.material.uniforms;
+    const v = this.voiceEl;
+    const speaking = !!v && !v.paused && !v.ended;
+    let target = 0;
+    if (speaking) {
+      const level = this.voiceLevel ? this.voiceLevel.getAverageFrequency() / 160 : 0.5;
+      target = 0.15 + 0.85 * Math.min(1, level);
+    }
+    if (target > 0 || u.glitch.value > 0) {
+      const k = Math.min(1, (dt || 16) / (target > u.glitch.value ? 40 : 160));
+      u.glitch.value += (target - u.glitch.value) * k;
+      if (target === 0 && u.glitch.value < 0.01) u.glitch.value = 0;
+      u.time.value = t / 1000;
+    }
+
+    // The sign: a slow bob, and a ~300 ms fade once dismissed.
+    if (this.sign && this.sign.visible) {
+      if (this.signDismissed) {
+        this.signFade = Math.max(0, this.signFade - (dt || 16) / 300);
+        this.signMat.opacity = this.signFade;
+        if (this.signFade === 0) this.sign.visible = false; // no draw call
+      }
+      this.sign.position.y = this.signY + 0.025 * Math.sin(t / 650);
     }
 
     if (!this.data.billboard) return;
@@ -352,6 +507,12 @@ AFRAME.registerComponent("guide-avatar", {
     // The listener stays: it is AudioKit's, shared with the rest of the page.
     if (this.voice) this.voice.disconnect();
     if (this.voiceHolder) this.el.object3D.remove(this.voiceHolder);
+    if (this.sign) {
+      this.el.object3D.remove(this.sign);
+      this.sign.geometry.dispose();
+      this.signMat.dispose();
+      this.signTex.dispose();
+    }
     this.el.removeObject3D("mesh");
     this.mesh.geometry.dispose();
     this.material.dispose();

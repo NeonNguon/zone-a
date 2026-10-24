@@ -1549,9 +1549,11 @@
       <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
 
       <!-- GUIDE AVATAR: the artist, a flat video cut-out standing on the floor
-           and turning (about Y only) to face the visitor. Hover highlights
-           him; a click plays his voice (avatar/avatar-voice.mp3) from where he
-           stands, and a second click stops it. guide-avatar-spawn stands it relative to #rig when
+           and turning (about Y only) to face the visitor. A "click to
+           interact" sign floats over him until the first click. Hover
+           highlights him; a click plays his voice (avatar/avatar-voice.mp3)
+           from where he stands, glitching him while he speaks, and a second
+           click stops it. guide-avatar-spawn stands it relative to #rig when
            the scene loads, on the floor, with a soft contact shadow under the
            feet: 4.3 m ahead and 1.6 m left puts it beside the doorway in the
            foyer's back wall (wall face z -4.925, doorway x -0.95..0.95), 0.6 m
