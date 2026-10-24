@@ -78,8 +78,14 @@
 // "ElevenLabs_2026-10-24T06_31_03_Tobias - German accent_pvc_sp90_s50_sb50_v3
 // .mp3" and renamed to an ASCII name a URL can carry, like the files in audio/.
 //
-// When he has had his say (clip ended, or cut short by a click) the entity
-// emits `guide-avatar-spoke`; guide-arrows (bottom of this file) waits on it.
+// HE CAN SAY MORE THAN ONE THING: a `first` line, an `again` line for any
+// later click, and a `done` line once a page-level event says the visitor
+// has done what he sent them to do (rooms-visited, bottom of this file, for
+// the corridor's three apartments). When he has had his say (clip ended, or
+// cut short by a click) the entity emits `guide-avatar-spoke` with
+// { line: "first" | "again" | "done" }; guide-arrows (bottom of this file)
+// waits on it — a set of arrows appears after one line and can be cleared by
+// another.
 //
 // guide-avatar-spawn (below) places the entity in front of the rig once the
 // scene has loaded: `distance` metres along the rig's facing and `lateral`
@@ -108,6 +114,16 @@ AFRAME.registerComponent("guide-avatar", {
     // JSON cues for the speech bubble: [{ "start": seconds, "text": "..." }].
     // Each line shows from its start until the next one's. "" = no bubble.
     captions: { type: "string", default: "" },
+    // MORE THAN ONE THING TO SAY. `sound` / `captions` are his FIRST line.
+    // `again*` is what he says on any later click (unset: the first line
+    // again); `done*` is what he says once the page-level event `doneOn` has
+    // fired on the scene (e.g. rooms-visited's, below) — from then on, every
+    // click. Each line's end is announced with its name (see the header).
+    againSound: { type: "string", default: "" },
+    againCaptions: { type: "string", default: "" },
+    doneSound: { type: "string", default: "" },
+    doneCaptions: { type: "string", default: "" },
+    doneOn: { type: "string", default: "" },
   },
 
   init: function () {
@@ -413,11 +429,25 @@ AFRAME.registerComponent("guide-avatar", {
     this.voiceEl.preload = "auto";
     this.voiceEl.crossOrigin = null; // same origin: asking for CORS would only break it
     this.voiceEl.src = this.data.sound;
-    // Tell whoever is waiting on him (guide-arrows) that he has had his say:
-    // on the clip's end, and on a click that stops him (see toggleVoice).
+
+    // His LINES, by name. Only the ones with a sound exist; pickLine chooses.
+    const d = this.data;
+    this.lines = { first: { sound: d.sound, captions: d.captions } };
+    if (d.againSound) this.lines.again = { sound: d.againSound, captions: d.againCaptions };
+    if (d.doneSound) this.lines.done = { sound: d.doneSound, captions: d.doneCaptions };
+    this.currentLine = "first";
+    this.spoken = {}; // line name -> true once it has been started
+    this.doneReached = false;
+    if (d.doneOn) {
+      this.onDone = () => (this.doneReached = true);
+      this.el.sceneEl.addEventListener(d.doneOn, this.onDone);
+    }
+
+    // Tell whoever is waiting on him (guide-arrows) that he has had his say,
+    // and WHICH line: on the clip's end, and on a click that stops him.
     this.onVoiceEnded = () => {
       this.duckOthers(false);
-      this.el.emit("guide-avatar-spoke", null, false);
+      this.el.emit("guide-avatar-spoke", { line: this.currentLine }, false);
     };
     this.voiceEl.addEventListener("ended", this.onVoiceEnded);
 
@@ -426,7 +456,15 @@ AFRAME.registerComponent("guide-avatar", {
     this.el.object3D.add(this.voiceHolder);
 
     this.buildSign();
-    if (this.data.captions) this.buildBubble();
+    if (Object.keys(this.lines).some((k) => this.lines[k].captions)) this.buildBubble();
+  },
+
+  // The line a click plays now: the `done` line once it is earned, else the
+  // `again` line after the first has been heard, else the first.
+  pickLine: function () {
+    if (this.doneReached && this.lines.done) return "done";
+    if (this.spoken.first && this.lines.again) return "again";
+    return "first";
   },
 
   // ---------------------------------------------------------------
@@ -439,18 +477,24 @@ AFRAME.registerComponent("guide-avatar", {
   // edit, not a code one.
   // ---------------------------------------------------------------
   buildBubble: function () {
-    this.cues = null;
-    fetch(this.data.captions, { cache: "no-cache" })
-      .then(function (res) {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
-      })
-      .then((cues) => {
-        this.cues = cues.slice().sort((a, b) => a.start - b.start);
-      })
-      .catch((err) => {
-        console.warn("guide-avatar: no captions from " + this.data.captions, err);
-      });
+    this.cues = null; // the playing line's cues (set by playVoice)
+    this.cuesBy = {}; // line name -> its cues, as they load
+    Object.keys(this.lines).forEach((name) => {
+      const url = this.lines[name].captions;
+      if (!url) return;
+      fetch(url, { cache: "no-cache" })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then((cues) => {
+          this.cuesBy[name] = cues.slice().sort((a, b) => a.start - b.start);
+          if (this.currentLine === name) this.cues = this.cuesBy[name];
+        })
+        .catch((err) => {
+          console.warn("guide-avatar: no captions from " + url, err);
+        });
+    });
 
     this.bubbleCanvas = document.createElement("canvas");
     this.bubbleCanvas.width = 1024;
@@ -634,6 +678,15 @@ AFRAME.registerComponent("guide-avatar", {
       // the pauses. 32 bins is plenty for a loudness reading.
       this.voiceLevel = new THREE.AudioAnalyser(this.voice, 32);
     }
+    // Which line, and its clip into the one element (the PositionalAudio is
+    // wired to the element, not the file, so a new src just plays through).
+    const line = this.pickLine();
+    this.currentLine = line;
+    this.spoken[line] = true;
+    const src = this.lines[line].sound;
+    if (this.voiceEl.getAttribute("src") !== src) this.voiceEl.src = src;
+    if (this.cuesBy) this.cues = this.cuesBy[line] || null;
+    this.cueIndex = -1; // the bubble redraws from this line's first cue
     try {
       this.voiceEl.currentTime = 0;
     } catch (e) {}
@@ -779,6 +832,7 @@ AFRAME.registerComponent("guide-avatar", {
       this.hitMesh.geometry.dispose();
       this.hitMat.dispose();
     }
+    if (this.onDone) this.el.sceneEl.removeEventListener(this.data.doneOn, this.onDone);
     if (this.voiceEl) {
       this.voiceEl.removeEventListener("ended", this.onVoiceEnded);
       this.voiceEl.pause();
@@ -876,6 +930,8 @@ AFRAME.registerComponent("guide-avatar-spawn", {
 //   - a booth they lead to (`to`) is USED — a click on it, the same click its
 //     teleport listens for. If it is used before he has spoken, they never
 //     appear at all;
+//   - the avatar speaks the line named in `until` (the corridor's arrows to
+//     the rooms make way when he sends you home);
 //   - the visitor REACHES the end (`reach` metres from the last arrow; 0 =
 //     off) — for a doorway, where there is nothing to click.
 //
@@ -906,6 +962,8 @@ AFRAME.registerComponent("guide-arrows", {
     via: { type: "string", default: "" },
     stopShort: { type: "number", default: 1.3 },
     reach: { type: "number", default: 0 }, // metres from the end; 0 = off
+    line: { type: "string", default: "first" }, // the avatar line that shows them
+    until: { type: "string", default: "" }, // the avatar line that clears them
     spacing: { type: "number", default: 0.7 },
     color: { type: "color", default: "#ff1f8f" },
     size: { type: "number", default: 0.36 }, // chevron width, metres
@@ -916,7 +974,11 @@ AFRAME.registerComponent("guide-arrows", {
     this.shown = false;
     this.built = false;
     this.dismissed = false;
-    this.onSpoke = () => this.show();
+    this.onSpoke = (e) => {
+      const line = (e.detail && e.detail.line) || "first";
+      if (line === this.data.line) this.show();
+      else if (line === this.data.until) this.dismiss();
+    };
     if (this.data.from) this.data.from.addEventListener("guide-avatar-spoke", this.onSpoke);
     // The booth's clicks bubble up from its hit box to the booth entity, which
     // is where zone-a-teleport listens to jump; listening here too keeps the
@@ -1093,5 +1155,57 @@ AFRAME.registerComponent("guide-arrows", {
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.mesh.dispose();
+  },
+});
+
+// ----------------------------------------------------------------
+// rooms-visited: notices when the visitor has stood inside EVERY apartment
+// off the Zone A corridor, and says so once, as a page-level event (default
+// `corridor-rooms-visited`) — which is what a guide-avatar's `doneOn` waits
+// for, to change what he says.
+//
+// The rooms come from the corridor itself (corridor-root's layout, the same
+// numbers the walls and the collider are built from), so nothing here is
+// typed: an apartment is entered when the camera is past the corridor's
+// outer wall face on the room's side, within its depth, and within its width
+// along the corridor. Checked four times a second, and only while the
+// corridor is shown; nothing at all once every room has been seen.
+// ----------------------------------------------------------------
+AFRAME.registerComponent("rooms-visited", {
+  schema: {
+    corridor: { type: "selector", default: "#zone-a-corridor" },
+    event: { type: "string", default: "corridor-rooms-visited" },
+  },
+
+  init: function () {
+    this.visited = {}; // room index -> true
+    this.fired = false;
+    this.next = 0;
+    this._cam = new THREE.Vector3();
+  },
+
+  tick: function (t) {
+    if (this.fired || t < this.next) return;
+    this.next = t + 250;
+    const c = this.data.corridor;
+    const root = c && c.components["corridor-root"];
+    const L = root && root.L;
+    if (!L || !c.object3D.visible) return;
+    const cam = this.el.sceneEl.camera;
+    if (!cam) return;
+    cam.getWorldPosition(this._cam);
+    c.object3D.worldToLocal(this._cam);
+    const x = this._cam.x;
+    const z = this._cam.z;
+    L.rooms.forEach((r) => {
+      const out = r.side * x; // metres out from the centreline, on its side
+      if (out > L.outerHalf && out < L.outerHalf + r.d && Math.abs(z - r.z) < r.w / 2) {
+        this.visited[r.index] = true;
+      }
+    });
+    if (Object.keys(this.visited).length >= L.rooms.length) {
+      this.fired = true;
+      this.el.sceneEl.emit(this.data.event, { rooms: L.rooms.length }, false);
+    }
   },
 });

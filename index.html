@@ -1206,24 +1206,47 @@
              his video is paused and he says nothing. x 1.55 keeps his figure
              (~0.48 m either side of centre) 0.2 m off the 2.2 m wall face.
              Same component as the foyer guide (js/guide-avatar.js); his
-             framing comes from avatar/avatar-b-stacked.json. -->
+             framing comes from avatar/avatar-b-stacked.json.
+
+             THREE LINES. First click: the welcome (speech 2), then the arrows
+             to the rooms. Any later click: the reminder that there are three
+             apartments (speech 3). Once you have stood in all three
+             (rooms-visited below): "you have seen all the places I have
+             lived" (speech 4), then arrows back to the return booth. -->
         <a-entity
           id="guide-avatar-b"
           position="1.55 0 -3.2"
           guide-avatar="src: #avatar-b-video; height: 1.95;
                         sound: avatar/Avatar-speech-2.mp3;
-                        captions: avatar/Avatar-speech-2.captions.json"
+                        captions: avatar/Avatar-speech-2.captions.json;
+                        againSound: avatar/Avatar-speech-3.mp3;
+                        againCaptions: avatar/Avatar-speech-3.captions.json;
+                        doneSound: avatar/Avatar-speech-4.mp3;
+                        doneCaptions: avatar/Avatar-speech-4.captions.json;
+                        doneOn: corridor-rooms-visited"
         ></a-entity>
-        <!-- ...and his arrows, once he has spoken: from his feet, across the
+        <!-- Fires `corridor-rooms-visited` once you have stood inside every
+             apartment, from the corridor's own room layout. -->
+        <a-entity id="corridor-rooms-visited" rooms-visited></a-entity>
+        <!-- ...his arrows after the FIRST line: from his feet, across the
              corridor (left of the seats and table at z -9.1 on the right), to
              the doorway of the first exhibition room on the LEFT — apartment
              #1, the yellow one, its opening at x -2.2, z -10.175. They fade
-             once you are within 1.2 m of the doorway. Root-local too. -->
+             once you are within 1.2 m of the doorway, or when he sends you
+             home. Root-local too. -->
         <a-entity
           id="guide-arrows-b"
           guide-arrows="from: #guide-avatar-b; startOffset: -0.6 0 -0.5;
                         via: 0.2 -5.4, -0.4 -8.7, -1.1 -10.1;
-                        end: -1.95 -10.175; reach: 1.2"
+                        end: -1.95 -10.175; reach: 1.2; until: done"
+        ></a-entity>
+        <!-- ...and after the DONE line: back up the corridor to the return
+             booth on the landing (read live from the booth), gone once the
+             booth is used. -->
+        <a-entity
+          id="guide-arrows-b-home"
+          guide-arrows="from: #guide-avatar-b; to: #terminal-a2-return;
+                        startOffset: -0.6 0 0.5; line: done"
         ></a-entity>
       </a-entity>
 
