@@ -99,6 +99,10 @@
          whose teleport starts and stops it from inside the arrival click. -->
     <script src="js/corridor-audio.js"></script>
     <script src="js/zone-a-corridor.js"></script>
+    <!-- Guide avatar: the artist as a video cut-out on the floor (stacked
+         colour/matte MP4 through one shader). Standalone. See
+         js/guide-avatar.js. -->
+    <script src="js/guide-avatar.js"></script>
 
     <!-- Desktop focus-overlay styles. -->
     <link rel="stylesheet" href="css/focus.css" />
@@ -220,6 +224,14 @@
         <img id="atpihl-7" src="ATPIHL/ATPIHL7.jpg" />
         <img id="atpihl-8" src="ATPIHL/ATPIHL8.jpg" />
         <img id="atpihl-9" src="ATPIHL/ATPIHL9.jpg" />
+        <!-- Guide avatar: colour over matte, stacked in one H.264 file (see
+             js/guide-avatar.js). Muted + playsinline so it may play inline. -->
+        <video id="avatar-video" src="avatar/avatar-stacked.mp4" loop muted playsinline
+               crossorigin="anonymous" preload="auto"></video>
+        <!-- The corridor's guide (avatar B). Each avatar has a <video>.json
+             beside it, measured by tools/measure-avatar.py. -->
+        <video id="avatar-b-video" src="avatar/avatar-b-stacked.mp4" loop muted playsinline
+               crossorigin="anonymous" preload="auto"></video>
       </a-assets>
 
       <!-- ============================================================
@@ -1185,6 +1197,57 @@
           teleport-terminal="label: EXHIBITION; accent: #ffc400"
           spot-contact-cue="forceGlow: true"
         ></a-entity>
+
+        <!-- CORRIDOR GUIDE (avatar B) — the artist with his camera, against the
+             RIGHT wall straight across from the bicycle (which leans on the
+             left wall at z -3.2), so he is the first thing on your right as
+             you step off the landing. Root-local, like everything in here: a
+             CHILD of the corridor root, so he hides with it — and while hidden
+             his video is paused and he says nothing. x 1.55 keeps his figure
+             (~0.48 m either side of centre) 0.2 m off the 2.2 m wall face.
+             Same component as the foyer guide (js/guide-avatar.js); his
+             framing comes from avatar/avatar-b-stacked.json.
+
+             THREE LINES. First click: the welcome (speech 2), then the arrows
+             to the rooms. Any later click: the reminder that there are three
+             apartments (speech 3). Once you have stood in all three
+             (rooms-visited below): "you have seen all the places I have
+             lived" (speech 4), then arrows back to the return booth. -->
+        <a-entity
+          id="guide-avatar-b"
+          position="1.55 0 -3.2"
+          guide-avatar="src: #avatar-b-video; height: 1.95;
+                        sound: avatar/Avatar-speech-2.mp3;
+                        captions: avatar/Avatar-speech-2.captions.json;
+                        againSound: avatar/Avatar-speech-3.mp3;
+                        againCaptions: avatar/Avatar-speech-3.captions.json;
+                        doneSound: avatar/Avatar-speech-4.mp3;
+                        doneCaptions: avatar/Avatar-speech-4.captions.json;
+                        doneOn: corridor-rooms-visited"
+        ></a-entity>
+        <!-- Fires `corridor-rooms-visited` once you have stood inside every
+             apartment, from the corridor's own room layout. -->
+        <a-entity id="corridor-rooms-visited" rooms-visited></a-entity>
+        <!-- ...his arrows after the FIRST line: from his feet, across the
+             corridor (left of the seats and table at z -9.1 on the right), to
+             the doorway of the first exhibition room on the LEFT — apartment
+             #1, the yellow one, its opening at x -2.2, z -10.175. They fade
+             once you are within 1.2 m of the doorway, or when he sends you
+             home. Root-local too. -->
+        <a-entity
+          id="guide-arrows-b"
+          guide-arrows="from: #guide-avatar-b; startOffset: -0.6 0 -0.5;
+                        via: 0.2 -5.4, -0.4 -8.7, -1.1 -10.1;
+                        end: -1.95 -10.175; reach: 1.2; until: done"
+        ></a-entity>
+        <!-- ...and after the DONE line: back up the corridor to the return
+             booth on the landing (read live from the booth), gone once the
+             booth is used. -->
+        <a-entity
+          id="guide-arrows-b-home"
+          guide-arrows="from: #guide-avatar-b; to: #terminal-a2-return;
+                        startOffset: -0.6 0 0.5; line: done"
+        ></a-entity>
       </a-entity>
 
       <!-- ============================================================
@@ -1539,6 +1602,55 @@
       <!-- Desktop mouse cursor + raycaster (rayOrigin: mouse). Limits hits to
            .clickable and emits mouseenter/mouseleave/click on the images. -->
       <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable"></a-entity>
+
+      <!-- GUIDE AVATAR: the artist, a flat video cut-out standing on the floor
+           and turning (about Y only) to face the visitor. A "click to
+           interact" sign floats over him until the first click. Hover
+           highlights him; a click plays his voice (avatar/Avatar-speech-1.mp3)
+           from where he stands, glitching him while he speaks, with a speech
+           bubble over his head showing each line as he says it (cues in
+           avatar/Avatar-speech-1.captions.json: edit there if the line is
+           re-recorded), and a second click stops it. guide-avatar-spawn stands it relative to #rig when
+           the scene loads, on the floor, with a soft contact shadow under the
+           feet: 4.3 m ahead and 1.6 m left puts it beside the doorway in the
+           foyer's back wall (wall face z -4.925, doorway x -0.95..0.95), 0.6 m
+           off the wall and clear of the left jamb. Tunables: height (the
+           person, metres) / figureFill / footMargin / billboard /
+           contactRadius / sound / soundRefDistance / soundRolloff, and the
+           spawn's distance / lateral. See
+           js/guide-avatar.js. -->
+      <!-- WELCOME BACK: when the visitor teleports home from the corridor
+           (zone-a-teleport fires `zoneareturned` and lands them back here at
+           the start), he says speech 5 a second later, unprompted: "Welcome
+           back! Please follow the arrows to the next part of the exhibition
+           – The Lottery of Forgotten Dreams!" — and from then on it is also
+           what a click plays. -->
+      <a-entity id="guide-avatar"
+                guide-avatar="src: #avatar-video; height: 1.95; sound: avatar/Avatar-speech-1.mp3;
+                              captions: avatar/Avatar-speech-1.captions.json;
+                              backSound: avatar/Avatar-speech-5.mp3;
+                              backCaptions: avatar/Avatar-speech-5.captions.json;
+                              backOn: zoneareturned; backDelay: 1000"
+                guide-avatar-spawn="distance: 4.3; lateral: -1.6"></a-entity>
+      <!-- GUIDE ARROWS: hot-pink chevrons on the floor from the avatar's feet,
+           through the doorway (x 0), to the Zone A booth (#terminal-a2) — the
+           "follow the arrows on the ground" he talks about. Hidden until he
+           has spoken; then they pop in one by one and a pulse runs along them
+           toward the booth. Using the booth fades them out for good. The
+           booth end is read live from the booth itself.
+           Tunables: startOffset / via ("x z, x z", world) / stopShort /
+           spacing / color / size. See js/guide-avatar.js. -->
+      <a-entity id="guide-arrows"
+                guide-arrows="from: #guide-avatar; to: #terminal-a2; via: 0 -4.6"></a-entity>
+      <!-- ...and after his WELCOME BACK: to the Lottery of Forgotten Dreams —
+           across the foyer to its coral +x doorway (z 0, 2.4 m wide), down
+           the hallway (x 5 to its open end at 10.2), and 5 m out onto the
+           park's concrete square, the image wall dead ahead at x 40. They
+           fade once you are within 2 m of the last one. -->
+      <a-entity id="guide-arrows-lottery"
+                guide-arrows="from: #guide-avatar; line: back;
+                              via: 1.5 -1.6, 4.2 0, 10.2 0; end: 15.5 0;
+                              reach: 2"></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
