@@ -31,7 +31,8 @@
 //                once, at init.
 //
 // guide-avatar-spawn (below) places the entity in front of the rig once the
-// scene has loaded: `distance` metres along the rig's facing, on the floor.
+// scene has loaded: `distance` metres along the rig's facing and `lateral`
+// metres across it (negative = left), on the floor.
 // ================================================================
 
 // Native size of ONE half of the stacked frame (the colour image).
@@ -212,6 +213,8 @@ AFRAME.registerComponent("guide-avatar-spawn", {
   schema: {
     rig: { type: "selector", default: "#rig" },
     distance: { type: "number", default: 2.2 },
+    // Metres to the rig's RIGHT (negative = left), across its facing.
+    lateral: { type: "number", default: 0 },
   },
 
   init: function () {
@@ -239,12 +242,19 @@ AFRAME.registerComponent("guide-avatar-spawn", {
     if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
     fwd.normalize();
 
-    const pos = origin.clone().addScaledVector(fwd, this.data.distance);
+    // Right of forward, on the floor: (-z forward) -> (+x right).
+    const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    const pos = origin
+      .clone()
+      .addScaledVector(fwd, this.data.distance)
+      .addScaledVector(right, this.data.lateral);
+    const dx = origin.x - pos.x;
+    const dz = origin.z - pos.z;
     parent.worldToLocal(pos);
     this.el.object3D.position.copy(pos);
-    // Face the rig (back along -fwd). The billboard keeps this up to date while
-    // it is on; with it off, this is the pose it keeps.
-    this.el.object3D.rotation.set(0, Math.atan2(-fwd.x, -fwd.z), 0);
+    // Face the rig. The billboard keeps this up to date while it is on; with
+    // it off, this is the pose it keeps.
+    this.el.object3D.rotation.set(0, Math.atan2(dx, dz), 0);
   },
 
   remove: function () {

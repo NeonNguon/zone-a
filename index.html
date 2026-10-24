@@ -1550,14 +1550,17 @@
 
       <!-- GUIDE AVATAR: the artist, a flat video cut-out standing on the floor
            and turning (about Y only) to face the visitor. No audio, no
-           interaction yet. guide-avatar-spawn stands it `distance` m ahead
-           of #rig when the scene loads, on the floor, with a soft contact
-           shadow under the feet. Tunables: height (the person, metres) /
-           figureFill / footMargin / billboard / contactRadius, and the
-           spawn's distance. See js/guide-avatar.js. -->
+           interaction yet. guide-avatar-spawn stands it relative to #rig when
+           the scene loads, on the floor, with a soft contact shadow under the
+           feet: 4.3 m ahead and 1.6 m left puts it beside the doorway in the
+           foyer's back wall (wall face z -4.925, doorway x -0.95..0.95), 0.6 m
+           off the wall and clear of the left jamb. Tunables: height (the
+           person, metres) / figureFill / footMargin / billboard /
+           contactRadius, and the spawn's distance / lateral. See
+           js/guide-avatar.js. -->
       <a-entity id="guide-avatar"
                 guide-avatar="src: #avatar-video; height: 1.8"
-                guide-avatar-spawn="distance: 2.2"></a-entity>
+                guide-avatar-spawn="distance: 4.3; lateral: -1.6"></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
