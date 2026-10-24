@@ -6243,8 +6243,12 @@ AFRAME.registerComponent("corridor-root", {
 //                   zoneacorridorrootchanged.
 //   Corridor spawn  root-local (0, 0, landingDepth/2) + arrivalOffset, facing
 //                   -z straight down the corridor.
-//   Return spawn    returnSpawnOffset from the booth, yawed to face it
-//                   (TeleportRig.yawToward, so any offset still faces it).
+//   Return spawn    returnTo "start" (default): the exhibition's own start —
+//                   where #rig stood when the scene loaded, facing the way it
+//                   faced — so coming home is starting the show again.
+//                   returnTo "booth": returnSpawnOffset from the booth, yawed
+//                   to face it (TeleportRig.yawToward, so any offset still
+//                   faces it).
 //
 // Sequence per jump, identical in shape to zone-b-teleport's: trigger the
 // glitch -> AT PEAK move the rig (TeleportRig.go, so the VISITOR and not the
@@ -6262,13 +6266,16 @@ AFRAME.registerComponent("corridor-root", {
 // TUNABLES (setAttribute on #zone-a-teleport):
 //   boothOffset       the outbound booth's offset from the Zone A room centre
 //   arrivalOffset     nudge on the corridor landing spawn (root-local)
+//   returnTo          "start" (land at the exhibition's start) | "booth"
 //   returnSpawnOffset where you land back in the Zone A room, from the booth
+//                     (returnTo: booth only)
 //   returnBoothInset  the return booth's clearance off the landing's back wall
 // ----------------------------------------------------------------
 AFRAME.registerComponent("zone-a-teleport", {
   schema: {
     boothOffset: { type: "vec3", default: { x: 0, y: 0, z: 0 } },
     arrivalOffset: { type: "vec3", default: { x: 0, y: 0, z: 0 } },
+    returnTo: { type: "string", default: "start" }, // "start" | "booth"
     returnSpawnOffset: { type: "vec3", default: { x: 0, y: 0, z: 1.8 } },
     returnBoothInset: { type: "number", default: 0.3 },
   },
@@ -6278,6 +6285,22 @@ AFRAME.registerComponent("zone-a-teleport", {
     this.corridorSpawn = new THREE.Vector3();
     this.returnSpawn = new THREE.Vector3();
     this.boothPos = new THREE.Vector3();
+
+    // The exhibition's START, read off #rig once the scene has loaded (the
+    // rig is the last entity, so it may not exist yet here) — never a copy of
+    // its position attribute. Its yaw is the RIG's, the way the show faces,
+    // not wherever a headset happened to be looking at load.
+    this.startSpawn = null;
+    this.startFaceDeg = 0;
+    this.captureStart = () => {
+      const rig = document.getElementById("rig");
+      if (!rig) return;
+      this.startSpawn = new THREE.Vector3();
+      rig.object3D.getWorldPosition(this.startSpawn);
+      this.startFaceDeg = THREE.MathUtils.radToDeg(rig.object3D.rotation.y);
+    };
+    if (this.el.sceneEl.hasLoaded) this.captureStart();
+    else this.el.sceneEl.addEventListener("loaded", this.captureStart, { once: true });
 
     this.booth = this.el.querySelector("#terminal-a2");
     this.floorplanEl = document.getElementById("floorplan");
@@ -6420,6 +6443,9 @@ AFRAME.registerComponent("zone-a-teleport", {
         // Face -z, straight down the run: in the corridor's own frame that is
         // A-Frame's zero yaw, which is why this needs no derived angle.
         TeleportRig.go(this.corridorSpawn, 0);
+      } else if (this.data.returnTo === "start" && this.startSpawn) {
+        // Home is the start of the exhibition, facing the way it begins.
+        TeleportRig.go(this.startSpawn, this.startFaceDeg);
       } else {
         TeleportRig.go(
           this.returnSpawn,
@@ -6485,6 +6511,7 @@ AFRAME.registerComponent("zone-a-teleport", {
   remove: function () {
     if (this.booth) this.booth.removeEventListener("click", this.onOut);
     if (this.returnBooth) this.returnBooth.removeEventListener("click", this.onBack);
+    this.el.sceneEl.removeEventListener("loaded", this.captureStart);
     if (this.floorplanEl) {
       this.floorplanEl.removeEventListener("floorplanbuilt", this.onFloorplanBuilt);
     }
