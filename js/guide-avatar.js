@@ -60,6 +60,9 @@
 // "ElevenLabs_2026-10-24T06_31_03_Tobias - German accent_pvc_sp90_s50_sb50_v3
 // .mp3" and renamed to an ASCII name a URL can carry, like the files in audio/.
 //
+// When he has had his say (clip ended, or cut short by a click) the entity
+// emits `guide-avatar-spoke`; guide-arrows (bottom of this file) waits on it.
+//
 // guide-avatar-spawn (below) places the entity in front of the rig once the
 // scene has loaded: `distance` metres along the rig's facing and `lateral`
 // metres across it (negative = left), on the floor.
@@ -322,6 +325,10 @@ AFRAME.registerComponent("guide-avatar", {
     this.voiceEl.preload = "auto";
     this.voiceEl.crossOrigin = null; // same origin: asking for CORS would only break it
     this.voiceEl.src = this.data.sound;
+    // Tell whoever is waiting on him (guide-arrows) that he has had his say:
+    // on the clip's end, and on a click that stops him (see toggleVoice).
+    this.onVoiceEnded = () => this.el.emit("guide-avatar-spoke", null, false);
+    this.voiceEl.addEventListener("ended", this.onVoiceEnded);
 
     // From about the mouth, not the floor.
     this.voiceHolder = new THREE.Object3D();
@@ -516,6 +523,7 @@ AFRAME.registerComponent("guide-avatar", {
         v.currentTime = 0;
       } catch (e) {}
       this.bubbleHold = 0; // stopped: no lingering line
+      this.onVoiceEnded(); // cut short still counts as having spoken
       return;
     }
     this.playVoice();
@@ -647,6 +655,7 @@ AFRAME.registerComponent("guide-avatar", {
       this.hitMat.dispose();
     }
     if (this.voiceEl) {
+      this.voiceEl.removeEventListener("ended", this.onVoiceEnded);
       this.voiceEl.pause();
       this.voiceEl.removeAttribute("src");
     }
@@ -728,5 +737,180 @@ AFRAME.registerComponent("guide-avatar-spawn", {
 
   remove: function () {
     this.el.sceneEl.removeEventListener("loaded", this.place);
+  },
+});
+
+// ----------------------------------------------------------------
+// guide-arrows: the hot-pink chevrons on the floor that lead from the guide
+// avatar to the booth he sends you to — "follow the arrows on the ground".
+// Hidden until he has spoken (the avatar's `guide-avatar-spoke`: his clip
+// ending, or a click cutting him short), then they pop in one after another
+// from his feet to the booth, and a soft brightness pulse keeps running along
+// them toward it. Once shown they stay.
+//
+// THE PATH is world coordinates on the floor, worked out when they appear:
+//   start  — the avatar's position plus `startOffset` (just in front of his
+//            feet, toward the room's centre line),
+//   via    — waypoints in between, "x z, x z" (the doorway's line),
+//   end    — the `to` entity's position, `stopShort` metres back toward the
+//            visitor along the last leg, so the last arrow lands in front of
+//            the booth rather than under it.
+// The booth's position is read live (zone-a-teleport derives it from the
+// floorplan), so the arrows follow if the room or the booth moves. A smooth
+// curve (centripetal Catmull-Rom) through those points, an arrow every
+// `spacing` metres along it, each turned to the curve's direction.
+//
+// ONE InstancedMesh: every arrow is one draw call together, which matters
+// on Quest. Per-arrow pop = its instance scale; the pulse = its instance
+// colour (a brightness on the hot pink).
+// ----------------------------------------------------------------
+AFRAME.registerComponent("guide-arrows", {
+  schema: {
+    from: { type: "selector", default: "#guide-avatar" },
+    to: { type: "selector" },
+    startOffset: { type: "vec3", default: { x: 0.6, y: 0, z: 0.5 } },
+    via: { type: "string", default: "" },
+    stopShort: { type: "number", default: 1.3 },
+    spacing: { type: "number", default: 0.7 },
+    color: { type: "color", default: "#ff1f8f" },
+    size: { type: "number", default: 0.36 }, // chevron width, metres
+    yoffset: { type: "number", default: 0.015 }, // above the floor
+  },
+
+  init: function () {
+    this.shown = false;
+    this.built = false;
+    this.onSpoke = () => this.show();
+    if (this.data.from) this.data.from.addEventListener("guide-avatar-spoke", this.onSpoke);
+  },
+
+  show: function () {
+    if (this.shown) return;
+    if (!this.build()) return;
+    this.shown = true;
+    this.t0 = null; // the pop starts on the next tick
+    this.mesh.visible = true;
+  },
+
+  build: function () {
+    const d = this.data;
+    if (!d.from || !d.to) {
+      console.warn("guide-arrows: need both `from` and `to`");
+      return false;
+    }
+    const start = new THREE.Vector3();
+    d.from.object3D.getWorldPosition(start);
+    start.add(d.startOffset);
+    const pts = [start];
+    d.via
+      .split(",")
+      .map((s) => s.trim().split(/\s+/).map(Number))
+      .filter((p) => p.length === 2 && p.every(isFinite))
+      .forEach((p) => pts.push(new THREE.Vector3(p[0], 0, p[1])));
+    const end = new THREE.Vector3();
+    d.to.object3D.getWorldPosition(end);
+    const prev = pts[pts.length - 1];
+    const back = new THREE.Vector3(prev.x - end.x, 0, prev.z - end.z);
+    if (back.lengthSq() > 1e-6) end.addScaledVector(back.normalize(), d.stopShort);
+    pts.push(end);
+    pts.forEach((p) => (p.y = 0));
+
+    const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
+    const length = curve.getLength();
+    const n = Math.max(2, Math.floor(length / d.spacing) + 1);
+
+    // A chevron pointing -z, flat on the floor. Proportions of `size` wide.
+    const s = d.size / 0.36;
+    const shape = new THREE.Shape();
+    [
+      [0, 0.12], [0.18, -0.06], [0.11, -0.12],
+      [0, -0.01], [-0.11, -0.12], [-0.18, -0.06],
+    ].forEach((p, i) => (i ? shape.lineTo(p[0] * s, p[1] * s) : shape.moveTo(p[0] * s, p[1] * s)));
+    shape.closePath();
+    const geo = new THREE.ShapeGeometry(shape);
+    geo.rotateX(-Math.PI / 2); // +y of the shape -> -z on the floor
+
+    // White, so the instance colour IS the colour. Unlit, like every floor
+    // cue; depthWrite off + polygonOffset so it never fights the floor.
+    this.material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    this.mesh = new THREE.InstancedMesh(geo, this.material, n);
+    // Instances start at scale 0, so three's own bounds would be a point;
+    // it is one draw call either way, so just never cull it.
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+
+    this.pos = [];
+    this.yaw = [];
+    const tan = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1);
+      const p = curve.getPointAt(u);
+      curve.getTangentAt(u, tan);
+      this.pos.push(new THREE.Vector3(p.x, d.yoffset, p.z));
+      // Yaw that turns -z onto the tangent.
+      this.yaw.push(Math.atan2(-tan.x, -tan.z));
+    }
+    this.n = n;
+    this.pink = new THREE.Color(d.color);
+    this._m = new THREE.Matrix4();
+    this._q = new THREE.Quaternion();
+    this._s = new THREE.Vector3();
+    this._c = new THREE.Color();
+    this._up = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < n; i++) this.setArrow(i, 0, 1);
+
+    // World coordinates: undo wherever this entity sits.
+    const inv = new THREE.Matrix4().copy(this.el.object3D.matrixWorld).invert();
+    this.holder = new THREE.Object3D();
+    this.holder.matrixAutoUpdate = false;
+    this.holder.matrix.copy(inv);
+    this.holder.add(this.mesh);
+    this.el.object3D.add(this.holder);
+    this.built = true;
+    return true;
+  },
+
+  setArrow: function (i, scale, bright) {
+    this._q.setFromAxisAngle(this._up, this.yaw[i]);
+    this._s.setScalar(Math.max(scale, 1e-4));
+    this._m.compose(this.pos[i], this._q, this._s);
+    this.mesh.setMatrixAt(i, this._m);
+    this._c.copy(this.pink).multiplyScalar(bright);
+    this.mesh.setColorAt(i, this._c);
+  },
+
+  tick: function (t) {
+    if (!this.shown) return;
+    if (this.t0 === null) this.t0 = t;
+    const e = t - this.t0;
+    for (let i = 0; i < this.n; i++) {
+      // The pop: each arrow 90 ms after the last, 300 ms to grow, a little
+      // overshoot (ease-out-back) so it lands with a bounce.
+      const k = Math.min(1, Math.max(0, (e - i * 90) / 300));
+      const c = 1.7;
+      const pop = k === 0 ? 0 : 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2);
+      // The pulse: a crest every 1.8 s, travelling toward the booth.
+      const wave = 0.5 + 0.5 * Math.cos(((e / 1800) - i / this.n) * Math.PI * 2);
+      this.setArrow(i, pop, 0.6 + 0.4 * Math.pow(wave, 3));
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor.needsUpdate = true;
+  },
+
+  remove: function () {
+    if (this.data.from) this.data.from.removeEventListener("guide-avatar-spoke", this.onSpoke);
+    if (!this.built) return;
+    this.el.object3D.remove(this.holder);
+    this.mesh.geometry.dispose();
+    this.material.dispose();
+    this.mesh.dispose();
   },
 });

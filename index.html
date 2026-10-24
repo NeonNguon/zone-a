@@ -1568,6 +1568,15 @@
                 guide-avatar="src: #avatar-video; height: 1.95; sound: avatar/avatar-voice.mp3;
                               captions: avatar/avatar-voice.captions.json"
                 guide-avatar-spawn="distance: 4.3; lateral: -1.6"></a-entity>
+      <!-- GUIDE ARROWS: hot-pink chevrons on the floor from the avatar's feet,
+           through the doorway (x 0), to the Zone A booth (#terminal-a2) — the
+           "follow the arrows on the ground" he talks about. Hidden until he
+           has spoken; then they pop in one by one and a pulse runs along them
+           toward the booth. The booth end is read live from the booth itself.
+           Tunables: startOffset / via ("x z, x z", world) / stopShort /
+           spacing / color / size. See js/guide-avatar.js. -->
+      <a-entity id="guide-arrows"
+                guide-arrows="from: #guide-avatar; to: #terminal-a2; via: 0 -4.6"></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
