@@ -39,6 +39,10 @@
     <!-- Reusable đá mài terrazzo park bench (primitives + runtime canvas
          texture, zone-agnostic — instances are placed per zone). -->
     <script src="js/bench.js"></script>
+    <!-- Sitting on the benches: every terrazzo-bench attaches it (its
+         `sittable`, on by default). Point, click, sit; click or move to get
+         up. See js/bench-sit.js. -->
+    <script src="js/bench-sit.js"></script>
     <!-- PropKit — the small furniture (seat row, low table, child's bike,
          plastic bag), primitives + runtime canvases like the bench, but as
          plain BUILDERS returning a THREE.Group rather than as components:

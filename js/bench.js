@@ -121,12 +121,19 @@ AFRAME.registerComponent("terrazzo-bench", {
     legColor: { type: "color", default: "#8f918b" }, // grey legs
     speckleDensity: { type: "number", default: 260 },
     speckleSeed: { type: "number", default: 7 },
+    // Visitors can sit on it (js/bench-sit.js). On by default, so every
+    // bench in the exhibition — the park's eight, Zone C's two, any added
+    // later — is a seat; false for a bench that is only scenery.
+    sittable: { type: "boolean", default: true },
   },
 
   init: function () {
     this.group = null;
     this.geometries = [];
     this.materials = [];
+    if (this.data.sittable && AFRAME.components["bench-sit"]) {
+      this.el.setAttribute("bench-sit", "");
+    }
   },
 
   // Rebuild on ANY tunable change (first update included) — a handful of
