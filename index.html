@@ -639,7 +639,15 @@
            400 m out. (A radius would not do: the spawn point is 39 m from the
            screen, the square's far corner 44 m.) See js/video-screen.js. If
            the Vimeo link ever changes, `src` here is the one thing to update.
-           Muted. -->
+           Muted.
+
+           IN THE HEADSET it plays on a WebXR compositor layer, not a WebGL
+           texture (the WebGL video upload made the park flicker on the Quest
+           — the same thing Zone C's cinema solved the same way). The layer is
+           drawn over everything, so it is shown only while you look at the
+           screen from in front with a clear view: `occluders` (the lottery
+           wall and the triptych) are ray-checked four times a second, and
+           the WebGL screen shows a still meanwhile. See js/video-screen.js. -->
       <!-- GRAFFITI on the building, facing the park — the original "The
            Lottery of Forgotten Dreams" piece (assets/lottery-graffiti.png,
            2:1) on the OUTSIDE of the Zone A room's east wall: the plain white
@@ -661,7 +669,8 @@
 
       <a-entity id="lottery-screen" position="33.5 0 19.3" rotation="0 180 0"
         video-screen="src: https://player.vimeo.com/progressive_redirect/playback/1226353089/rendition/1080p/file.mp4%20%281080p%29.mp4?loc=external&amp;log_user=0&amp;signature=9d3b7af835b9ec509ef48a895049f57d86bb45b0364ada139114e295ec491c65;
-                      width: 5.4; bottom: 0.9; region: 5 -60 90 60"
+                      width: 5.4; bottom: 0.9; region: 5 -60 90 60;
+                      occluders: #zone-b-wall, #zone-b-triptych"
       ></a-entity>
 
       <!-- ============================================================

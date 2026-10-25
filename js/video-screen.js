@@ -35,6 +35,32 @@
 //   region      "x0 z0 x1 z1", a world-space rectangle; when set, it plays
 //               while the visitor is INSIDE it instead (a radius big enough
 //               for the far side of a 40 m square also reaches the foyer)
+//   xrLayer     in the headset, use the compositor layer below (default on)
+//   occluders   selector for what can stand in front of the screen
+//
+// IN THE HEADSET the picture is NOT a WebGL texture. On the Quest, decoding a
+// video into a WebGL texture contends with the scene's own rendering and drops
+// whole frames — the park's floor, the wall edges and the shoreline flickered
+// while it played (Zone C's cinema hit the same thing and solved it the same
+// way; see tryCreateXRLayer in js/zone-c.js). So in an immersive session with
+// layers, the video goes on a WebXR QUAD LAYER: the headset's compositor pulls
+// the decoded frames on its own path, no contention, at full resolution. The
+// WebGL screen meanwhile does no per-frame video work at all — it shows a
+// STILL, captured once from the video.
+//
+// A quad layer has no depth: it is drawn over everything. Zone C only shows
+// its layer while you are inside the cinema. This screen stands in the open,
+// so the layer is shown only while you are IN FRONT of it with a CLEAR VIEW:
+// four times a second, rays from your eyes to the screen's corners are cast
+// against `occluders` (here the lottery wall and the triptych), and anything
+// in the way — or standing behind the screen, or leaving the park — switches
+// the layer off. Then the still on the WebGL screen is what you see, hidden
+// behind the wall properly like any other surface; it is re-captured each time
+// the layer goes off, so it is the moment you looked away from.
+//
+// The layer list is shared with Zone C's film layer: this adds and removes
+// only its own quad, never replaces the list. Desktop is unchanged — a
+// desktop GPU does not have the contention, and there are no layers.
 // ================================================================
 
 AFRAME.registerComponent("video-screen", {
@@ -47,6 +73,13 @@ AFRAME.registerComponent("video-screen", {
     playRadius: { type: "number", default: 45 },
     region: { type: "string", default: "" }, // "x0 z0 x1 z1"; overrides playRadius
     frameColor: { type: "color", default: "#1b1b1d" },
+    // In the headset: play on a WebXR compositor quad layer, not a WebGL
+    // texture (see "IN THE HEADSET" in the header). false = always WebGL.
+    xrLayer: { type: "boolean", default: true },
+    // Things that can stand between a visitor and the screen (a selector, any
+    // number of matches): the quad layer has no depth, so while any of them
+    // blocks the view it is switched off and the WebGL still takes over.
+    occluders: { type: "string", default: "" },
   },
 
   init: function () {
@@ -109,6 +142,21 @@ AFRAME.registerComponent("video-screen", {
     this._me = new THREE.Vector3();
     this._cam = new THREE.Vector3();
     this.nextCheck = 0;
+
+    // The compositor layer (headset only; see the header).
+    this.layer = null; // the XRQuadLayer, once made
+    this.layerShown = false; // in the session's layer list right now
+    this.still = null; // CanvasTexture: the WebGL screen's picture meanwhile
+    this.nextLayerCheck = 0;
+    this._rc = new THREE.Raycaster();
+    this._dir = new THREE.Vector3();
+    this._corner = new THREE.Vector3();
+    this._m = new THREE.Matrix4();
+    this._p = new THREE.Vector3();
+    this._q = new THREE.Quaternion();
+    this._s = new THREE.Vector3();
+    this.onExitVR = () => this.destroyLayer();
+    this.el.sceneEl.addEventListener("exit-vr", this.onExitVR);
   },
 
   update: function () {
@@ -148,10 +196,27 @@ AFRAME.registerComponent("video-screen", {
     return true;
   },
 
-  // Twice a second: near and shown -> (load and) play; otherwise pause.
   tick: function (t) {
+    // The layer, if there is one: re-posed EVERY frame (it lives in the XR
+    // reference space, the screen in the world, and locomotion slides one
+    // under the other), shown or hidden four times a second.
+    if (this.layer) {
+      if (this.layerShown) this.poseLayer();
+      if (t >= this.nextLayerCheck) {
+        this.nextLayerCheck = t + 250;
+        this.gateLayer();
+      }
+    }
+    this.checkPlay(t);
+  },
+
+  // Twice a second: near and shown -> (load and) play; otherwise pause.
+  checkPlay: function (t) {
     if (t < this.nextCheck || !this.data.src) return;
     this.nextCheck = t + 500;
+    // In the headset, move the picture onto a compositor layer as soon as the
+    // video can be bound (it needs its metadata). No-op on desktop.
+    if (!this.layer && this.loaded) this.tryCreateLayer();
     const cam = this.el.sceneEl.camera;
     if (!cam) return;
     cam.getWorldPosition(this._cam);
@@ -180,9 +245,168 @@ AFRAME.registerComponent("video-screen", {
     } else if (!v.paused) {
       v.pause();
     }
+    this.near = near;
+  },
+
+  // ---------------------------------------------------------------
+  // THE COMPOSITOR LAYER (headset only). The recipe is Zone C's
+  // (js/zone-c.js tryCreateXRLayer), proven on the Quest; it engages only
+  // when every piece is there and otherwise leaves the WebGL texture alone.
+  // ---------------------------------------------------------------
+  tryCreateLayer: function () {
+    const scene = this.el.sceneEl;
+    if (!this.data.xrLayer || !scene.is("vr-mode")) return;
+    if (typeof XRMediaBinding === "undefined" || typeof XRRigidTransform === "undefined") return;
+    const xr = scene.renderer.xr;
+    const session = xr.getSession();
+    const refSpace = xr.getReferenceSpace();
+    if (!session || !refSpace) return;
+    const layers = session.renderState.layers;
+    if (!layers || !layers.length) return; // session not in layers mode
+    const v = this.video;
+    if (!v.videoWidth || !v.videoHeight) return; // metadata not ready: next time
+    try {
+      const w = this.data.width;
+      const h = w / this.aspect;
+      this.layer = new XRMediaBinding(session).createQuadLayer(v, {
+        space: refSpace,
+        layout: "mono",
+        transform: new XRRigidTransform(),
+        // HALF-extents (centre to edge), as Zone C learned the hard way.
+        width: w / 2,
+        height: h / 2,
+      });
+      this.layerShown = false;
+      // The WebGL screen stops doing video work: a still instead.
+      this.showStill();
+      this.nextLayerCheck = 0;
+      console.log("video-screen: " + (this.el.id || "screen") + " on a WebXR compositor quad layer");
+    } catch (e) {
+      console.warn("video-screen: XR layer failed — WebGL texture fallback", e);
+      this.layer = null;
+    }
+  },
+
+  // The WebGL screen's picture while the layer owns the video: ONE frame,
+  // drawn into a small canvas and uploaded once — not 24 times a second.
+  showStill: function () {
+    const v = this.video;
+    if (!this.stillCanvas) {
+      this.stillCanvas = document.createElement("canvas");
+      this.stillCanvas.width = 960;
+      this.stillCanvas.height = 540;
+    }
+    const ctx = this.stillCanvas.getContext("2d");
+    try {
+      ctx.drawImage(v, 0, 0, this.stillCanvas.width, this.stillCanvas.height);
+    } catch (e) {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, this.stillCanvas.width, this.stillCanvas.height);
+    }
+    if (!this.still) {
+      this.still = new THREE.CanvasTexture(this.stillCanvas);
+      this.still.colorSpace = THREE.SRGBColorSpace;
+    } else {
+      this.still.needsUpdate = true;
+    }
+    if (this.screenMat.map !== this.still) {
+      this.screenMat.map = this.still;
+      this.screenMat.needsUpdate = true;
+    }
+  },
+
+  // refspacePose = inverse(rigWorld) · screenWorld, scale dropped (the
+  // layer's size is its own width/height).
+  poseLayer: function () {
+    const rig = this._rig || (this._rig = document.getElementById("rig"));
+    if (!rig) return;
+    this.screen.updateWorldMatrix(true, false);
+    rig.object3D.updateWorldMatrix(true, false);
+    this._m.copy(rig.object3D.matrixWorld).invert().multiply(this.screen.matrixWorld);
+    this._m.decompose(this._p, this._q, this._s);
+    this.layer.transform = new XRRigidTransform(
+      { x: this._p.x, y: this._p.y, z: this._p.z },
+      { x: this._q.x, y: this._q.y, z: this._q.z, w: this._q.w }
+    );
+  },
+
+  // Show the layer only when nothing could be in front of it: playing, in
+  // front of the screen, and a clear line from the eyes to all four corners.
+  gateLayer: function () {
+    let want = this.near && !this.video.paused && this.isShown();
+    const cam = this.el.sceneEl.camera;
+    if (want && cam) {
+      cam.getWorldPosition(this._cam);
+      // In front: the camera on the picture's +z side.
+      this._corner.copy(this._cam);
+      this.screen.worldToLocal(this._corner);
+      if (this._corner.z < 0.05) want = false;
+    }
+    if (want) want = this.clearView();
+    if (want) this.addLayer();
+    else this.removeLayer();
+  },
+
+  clearView: function () {
+    if (!this.data.occluders) return true;
+    const objs = [];
+    document.querySelectorAll(this.data.occluders).forEach((e) => objs.push(e.object3D));
+    if (!objs.length) return true;
+    for (let i = 0; i < 4; i++) {
+      this._corner.set(i & 1 ? 0.5 : -0.5, i & 2 ? 0.5 : -0.5, 0);
+      this.screen.localToWorld(this._corner);
+      this._dir.copy(this._corner).sub(this._cam);
+      const dist = this._dir.length();
+      this._rc.set(this._cam, this._dir.normalize());
+      this._rc.far = dist - 0.05;
+      if (this._rc.intersectObjects(objs, true).length) return false;
+    }
+    return true;
+  },
+
+  // Add / remove ONLY this quad in the session's layer list — Zone C's film
+  // layer may be in there too.
+  addLayer: function () {
+    if (this.layerShown) return;
+    const session = this.el.sceneEl.renderer.xr.getSession();
+    if (!session) return;
+    this.poseLayer();
+    const list = session.renderState.layers.filter((l) => l !== this.layer);
+    session.updateRenderState({ layers: list.concat([this.layer]) });
+    this.layerShown = true;
+  },
+
+  removeLayer: function () {
+    if (!this.layerShown) return;
+    const session = this.el.sceneEl.renderer.xr.getSession();
+    if (session) {
+      session.updateRenderState({
+        layers: session.renderState.layers.filter((l) => l !== this.layer),
+      });
+    }
+    this.layerShown = false;
+    this.showStill(); // the moment you looked away, on the WebGL screen
+  },
+
+  destroyLayer: function () {
+    if (!this.layer) return;
+    try {
+      this.removeLayer();
+      if (this.layer.destroy) this.layer.destroy();
+    } catch (e) {
+      /* the session may already be over */
+    }
+    this.layer = null;
+    this.layerShown = false;
+    // Back to the live WebGL texture (desktop after leaving the headset).
+    this.screenMat.map = this.texture;
+    this.screenMat.needsUpdate = true;
   },
 
   remove: function () {
+    this.el.sceneEl.removeEventListener("exit-vr", this.onExitVR);
+    this.destroyLayer();
+    if (this.still) this.still.dispose();
     const v = this.video;
     v.removeEventListener("loadedmetadata", this.onMeta);
     v.pause();
