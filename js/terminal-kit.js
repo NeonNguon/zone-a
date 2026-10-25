@@ -57,10 +57,17 @@ const TerminalKit = {
     head.setAttribute("rotation", `${tilt} 0 0`);
     el.appendChild(head);
 
-    const bezel = document.createElement("a-plane");
+    // The bezel is a thin BOX, not a plane: the screen and every plane here
+    // are one-sided, so with a flat bezel the whole head vanished from behind
+    // and edge-on, leaving a column holding nothing. The box gives the plate a
+    // back and edges from every angle; its front face sits where the plane's
+    // was (z -0.006), just behind the screen.
+    const BEZEL_DEPTH = 0.025;
+    const bezel = document.createElement("a-box");
     bezel.setAttribute("width", screenW + 0.05);
     bezel.setAttribute("height", screenH + 0.05);
-    bezel.setAttribute("position", "0 0 -0.006");
+    bezel.setAttribute("depth", BEZEL_DEPTH);
+    bezel.setAttribute("position", `0 0 ${-0.006 - BEZEL_DEPTH / 2}`);
     bezel.setAttribute("material", "color: #101014; shader: flat");
     head.appendChild(bezel);
 
