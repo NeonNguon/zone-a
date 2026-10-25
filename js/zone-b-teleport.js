@@ -360,6 +360,12 @@ AFRAME.registerComponent("zone-b-teleport", {
     // halfway between the hallway mouth and the centre, on the approach axis,
     // 20 m in front of the wall.
     terminalAOffset: { type: "vec3", default: { x: -10, y: 0, z: 0 } },
+    // OR stand Terminal A BESIDE another terminal (a selector): the same turn,
+    // `terminalAGap` metres (centre to centre) to that terminal's RIGHT as you
+    // face its screen — its own local +x. Overrides terminalAOffset. The return
+    // spawn then lands you in front of Terminal A, facing it.
+    terminalANextTo: { type: "selector" },
+    terminalAGap: { type: "number", default: 1.3 },
     mapSpawnOffset: { type: "vec3", default: { x: -0.6, y: 0, z: 0 } },
     returnSpawnOffset: { type: "vec3", default: { x: -1.6, y: 0, z: 0 } },
     // Each return terminal sits this far INSIDE its map edge (m), lifted returnY
@@ -394,7 +400,10 @@ AFRAME.registerComponent("zone-b-teleport", {
       : [];
 
     this.onClickA = () => this.jump(this.mapSpawn, -90, true);
-    this.onReturn = () => this.jump(this.returnSpawn, -90, false);
+    // The way you face on landing back from the map (camera convention, -90 =
+    // +x); layout() sets it to face Terminal A wherever it stands.
+    this.returnFace = -90;
+    this.onReturn = () => this.jump(this.returnSpawn, this.returnFace, false);
     if (this.termA) this.termA.addEventListener("click", this.onClickA);
     this.returnTerminals.forEach((t) =>
       t.addEventListener("click", this.onReturn)
@@ -415,6 +424,10 @@ AFRAME.registerComponent("zone-b-teleport", {
     }
 
     this.layout();
+    // Terminal A beside another terminal needs that terminal's FINAL world
+    // transform — its zone root may place it after this init — so lay out
+    // again once the scene has loaded.
+    this.el.sceneEl.addEventListener("loaded", this.onMapChange, { once: true });
   },
 
   update: function (oldData) {
@@ -442,22 +455,50 @@ AFRAME.registerComponent("zone-b-teleport", {
     // --- Terminal A: a freestanding sign on the park's square, offset from its
     // centre (read live from ParkConfig — no copied numbers), at FLOOR level;
     // screen faces -x (the hallway mouth / return-spawn side).
-    const c = this.zoneBCenter();
-    const ax = c.x + d.terminalAOffset.x;
-    const ay = 0 + d.terminalAOffset.y;
-    const az = c.z + d.terminalAOffset.z;
-    if (this.termA) {
-      this.termA.setAttribute("position", { x: ax, y: ay, z: az });
-      this.termA.setAttribute("rotation", "0 -90 0"); // plane normal -> -x
+    let ax, ay, az;
+    const next = d.terminalANextTo;
+    if (next && next.object3D) {
+      // BESIDE another terminal: its turn, terminalAGap along its local +x
+      // (its right, as you face its screen). World position and yaw read off
+      // the neighbour itself, so it follows wherever that terminal is moved.
+      next.object3D.updateWorldMatrix(true, false);
+      const p = new THREE.Vector3().setFromMatrixPosition(next.object3D.matrixWorld);
+      const q = new THREE.Quaternion();
+      next.object3D.getWorldQuaternion(q);
+      const yaw = new THREE.Euler().setFromQuaternion(q, "YXZ").y;
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+      right.y = 0;
+      right.normalize();
+      ax = p.x + right.x * d.terminalAGap;
+      ay = 0;
+      az = p.z + right.z * d.terminalAGap;
+      if (this.termA) {
+        this.termA.setAttribute("position", { x: ax, y: ay, z: az });
+        this.termA.setAttribute("rotation", { x: 0, y: THREE.MathUtils.radToDeg(yaw), z: 0 });
+      }
+      // Back from the map: 1.6 m (the returnSpawnOffset's length) in front of
+      // its screen (+z turned by its yaw), facing it.
+      const dist = Math.hypot(d.returnSpawnOffset.x, d.returnSpawnOffset.z) || 1.6;
+      this.returnSpawn.set(ax + Math.sin(yaw) * dist, 0, az + Math.cos(yaw) * dist);
+      this.returnFace = TeleportRig.yawToward(this.returnSpawn, { x: ax, z: az });
+    } else {
+      const c = this.zoneBCenter();
+      ax = c.x + d.terminalAOffset.x;
+      ay = 0 + d.terminalAOffset.y;
+      az = c.z + d.terminalAOffset.z;
+      if (this.termA) {
+        this.termA.setAttribute("position", { x: ax, y: ay, z: az });
+        this.termA.setAttribute("rotation", "0 -90 0"); // plane normal -> -x
+      }
+      // --- return spawn: beside Terminal A (the sign in the middle), facing +x
+      // toward it — so a jump back lands you at the same spot the sign stands.
+      this.returnSpawn.set(
+        ax + d.returnSpawnOffset.x,
+        0 + d.returnSpawnOffset.y,
+        az + d.returnSpawnOffset.z
+      );
+      this.returnFace = -90;
     }
-
-    // --- return spawn: beside Terminal A (the sign in the middle), facing +x
-    // toward it — so a jump back lands you at the same spot the sign stands.
-    this.returnSpawn.set(
-      ax + d.returnSpawnOffset.x,
-      0 + d.returnSpawnOffset.y,
-      az + d.returnSpawnOffset.z
-    );
 
     // --- map side: near-edge CENTRE from the map root's live position + the
     // board's own gap (the map extends +x from the root; see map-board).
@@ -566,5 +607,6 @@ AFRAME.registerComponent("zone-b-teleport", {
     if (this.parkEl) {
       this.parkEl.removeEventListener("zonebparkchanged", this.onMapChange);
     }
+    this.el.sceneEl.removeEventListener("loaded", this.onMapChange);
   },
 });

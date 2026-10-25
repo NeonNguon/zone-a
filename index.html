@@ -1596,7 +1596,17 @@
            beaconLabel, on each teleport-terminal; glitch dur / intensity / color /
            style / sound on the camera's transition-glitch.
            ============================================================ -->
-      <a-entity id="zone-b-teleport" zone-b-teleport>
+      <!-- Terminal A now stands right BESIDE the Lottery of Forgotten Dreams
+           info terminal (#info-terminal-b, at the image wall's south end), to
+           its right as you face it, 1.3 m centre to centre (their 1.14 m hit
+           boxes keep a ~0.16 m gap), turned the same way — the work's
+           statement and the way into its map as one pair. Read live off that
+           terminal, so it follows it. Back from the map you land 1.6 m in
+           front of Terminal A, facing it. (terminalAOffset, the old spot 10 m
+           west of the square's centre, applies again if terminalANextTo is
+           removed.) -->
+      <a-entity id="zone-b-teleport"
+                zone-b-teleport="terminalANextTo: #info-terminal-b; terminalAGap: 1.3">
         <a-entity
           id="terminal-a"
           teleport-terminal="screenSrc: assets/zone-b-map-saigon.jpg;
