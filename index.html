@@ -1776,17 +1776,36 @@
         position="20.2 0 0"
         guide-avatar="src: #avatar-a-video; height: 1.95;
                       sound: avatar/Avatar-speech-6.mp3;
-                      captions: avatar/Avatar-speech-6.captions.json"
+                      captions: avatar/Avatar-speech-6.captions.json;
+                      doneSound: avatar/Avatar-speech-7.mp3;
+                      doneCaptions: avatar/Avatar-speech-7.captions.json;
+                      doneOn: zonebreturned"
       ></a-entity>
       <!-- ...and his arrows, after he has spoken: across the square to the
            big wall's south end, stopping in front of the pair of terminals
            there — the work's statement and, to its right, the way into its
            map (Terminal A) — where the visitor lands back from the map too.
-           They fade once you are within 1.5 m of the last one. -->
+           They fade once you are within 1.5 m of the last one, or when he
+           sends you on to the cinema. -->
       <a-entity
         id="guide-arrows-a"
         guide-arrows="from: #guide-avatar-a; startOffset: 0.8 0 0.5;
-                      end: 36.7 11.7; reach: 1.5"
+                      end: 36.7 11.7; reach: 1.5; until: done"
+      ></a-entity>
+      <!-- ONCE YOU HAVE BEEN TO THE MAP AND BACK (zone-b-teleport fires
+           `zonebreturned`), a click on him plays speech 7: "After you've seen
+           'The Lottery of Forgotten Dreams', / I invite you now to proceed to
+           the final room." — and then these arrows lead to the middle of the
+           cinema (Zone C, the final room): back across the square, through
+           the coral hallway (z 0), across the foyer past the spawn point,
+           through the dark passage (z -0.2) and into the room's centre
+           (-14.7, 0.2, read off the floorplan's zoneC). They fade within 2 m
+           of the last one. -->
+      <a-entity
+        id="guide-arrows-a-cinema"
+        guide-arrows="from: #guide-avatar-a; line: done;
+                      startOffset: -0.8 0 0.3;
+                      via: 10.2 0, 4 0, -6 -0.2; end: -14.7 0.2; reach: 2"
       ></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both

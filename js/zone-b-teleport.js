@@ -581,6 +581,9 @@ AFRAME.registerComponent("zone-b-teleport", {
           collider.resync(); // seed last-valid to the return spot (no snap-back)
         }
       }
+      // Say so, page-wide, when the visitor is back from the map: the park
+      // guide (avatar A) has something new to tell them (guide-avatar's doneOn).
+      if (!showMap) this.el.sceneEl.emit("zonebreturned", null, false);
     };
     if (!glitch) {
       console.warn("zone-b-teleport: no transition-glitch on camera; hard cut");
