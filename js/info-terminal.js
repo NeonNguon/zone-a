@@ -86,6 +86,11 @@ AFRAME.registerComponent("info-terminal", {
     // The click fork, same convention as wall-focus: in-scene panel only in
     // the headset; the DOM overlay everywhere else.
     this.onClick = () => {
+      // A HIDDEN terminal does not answer. THREE's raycaster does not skip
+      // invisible objects, and a terminal can stand in a sub-space that is
+      // switched off (Zone A's, in the corridor 400 m out), where a stray
+      // desktop ray from the gallery could still reach its hit box.
+      for (let o = this.el.object3D; o; o = o.parent) if (!o.visible) return;
       if (this.el.sceneEl.is("vr-mode")) this.openPanel();
       else this.openWeb();
     };

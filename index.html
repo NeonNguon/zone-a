@@ -662,30 +662,18 @@
            (COUNT / IMG_SIZE / IMG_Y / ASSET_PREFIX in js/components.js)
            survives, and the corridor's apartment walls read it.
 
-           So this room holds exactly two things: the info terminal (the work's
-           statement) and — as a SIBLING entity, because it stands in world
-           coordinates derived from the floorplan rather than from this root —
-           the teleport booth that takes you to the corridor.
+           So this room holds ONE thing: the teleport booth that takes you to
+           the corridor — a SIBLING entity, because it stands in world
+           coordinates derived from the floorplan rather than from this root.
+           The info terminal (the work's statement) stood here too; it moved
+           into the corridor itself, by the first picture room (see
+           #info-terminal-a under #zone-a-corridor).
 
            zone-a-root still offsets everything parented HERE as one unit;
            default 12.5 m back (-z), which is where the room is. Sets no
            background / fog / lights / ground, like every zone root.
            ============================================================ -->
-      <a-entity id="zone-a" zone-a-root="offset: 0 0 -12.5">
-        <!-- Zone A info terminal: screen facing spawn (+z), off to the +x side
-             of the now-empty room and forward toward the doorway, so you pass
-             it on the way in and it never crowds the booth in the middle
-             (~2.5 m of clear floor between the two hit boxes). NUDGE BY EYE via
-             position/rotation (local; the zone-a-root offset carries it).
-             Cue = shared spot-contact-cue. -->
-        <a-entity
-          id="info-terminal-a"
-          info-terminal="key: a"
-          position="3.4 0 1.9"
-          rotation="0 0 0"
-          spot-contact-cue
-        ></a-entity>
-      </a-entity>
+      <a-entity id="zone-a" zone-a-root="offset: 0 0 -12.5"></a-entity>
 
       <!-- ============================================================
            ZONE A TELEPORT — the booth pair linking the (empty) Zone A room to
@@ -1251,6 +1239,27 @@
                         doneCaptions: avatar/Avatar-speech-4.captions.json;
                         doneOn: corridor-rooms-visited"
         ></a-entity>
+        <!-- ZONE A INFO TERMINAL — the work's statement, moved here from the
+             gallery's Zone A room so it is read where the work is. Against the
+             LEFT wall just before the first picture room (apartment #1, the
+             yellow one, doorway z -10.175): z -8.9 sits between the painted
+             phone number on that stretch of wall (centre z -7.5, 1.7 m wide)
+             and the room's door frame (~z -9.6), x -1.6 keeps its hit box off
+             the wall face (x -2.2). Yaw 45 turns the screen (+z at yaw 0) to
+             face back up the corridor and across it, toward you as you walk
+             down from the landing. Clear of the guide's arrows to that door
+             (they pass ~0.9 m out from it) and leaves ~2.2 m between it and
+             the seats and table opposite. Root-local, a child of the corridor
+             root, so it hides with it — and a hidden terminal ignores clicks
+             (js/info-terminal.js). NUDGE BY EYE via position/rotation. -->
+        <a-entity
+          id="info-terminal-a"
+          info-terminal="key: a"
+          position="-1.6 0 -8.9"
+          rotation="0 45 0"
+          spot-contact-cue
+        ></a-entity>
+
         <!-- Fires `corridor-rooms-visited` once you have stood inside every
              apartment, from the corridor's own room layout. -->
         <a-entity id="corridor-rooms-visited" rooms-visited></a-entity>
