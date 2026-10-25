@@ -248,7 +248,8 @@ const SKYLINE_CROP = 0.25; // fraction of the image height (from the BOTTOM) to
 //
 // Where these land (white #ffffff wall, after the sRGB output transform):
 //   wall facing the key ~#f9  |  lit only by fill ~#e5  |  edge-on ~#d8
-//   ceiling ~#d4 (no directional reaches it — it faces down)  |  floor ~#e7
+//   ceiling ~#d4 (no directional reaches it — it faces down)
+//   floor: ~30 levels under the walls (see GALLERY_FLOOR)
 // That spread across a room's four walls IS the thing that makes corners read.
 // Ambient + hemisphere are FILL only, kept LOW on purpose: they are flat (no
 // falloff, no direction), so every unit of them lights the corridors exactly as
@@ -263,9 +264,13 @@ const GALLERY_HEMI = { sky: "#ffffff", ground: "#dddddd", intensity: 0.35 };
 const GALLERY_KEY = { color: "#ffffff", intensity: 1.2, dir: "6 8 3" };
 const GALLERY_FILL = { color: "#ffffff", intensity: 0.5, dir: "-5 4 -6" };
 // Floor albedo, well off white: it faces the key almost head-on, so at #ffffff
-// it blows out to pure white and flattens. This lands it ~#e7 — below the lit
-// walls, so they stay the brightest surface, as in a real gallery.
-const GALLERY_FLOOR = "#dcdcdc";
+// it blows out to pure white and flattens. It must land clearly BELOW the lit
+// walls, so they stay the brightest surface, as in a real gallery and so
+// the floor-wall corner reads. #dcdcdc did not: measured in the foyer from
+// spawn, the floor rendered at 208 against the back wall's 205 (8-bit grey) —
+// no separation at all, with the room lamp's pool on top. #b4b4b4 renders it
+// ~30 levels under that wall: still a pale terrazzo, clearly a floor.
+const GALLERY_FLOOR = "#b4b4b4";
 
 // --- room fixtures ------------------------------------------------------
 // A lamp in each room, so rooms are lit by something that has a POSITION and
