@@ -244,7 +244,16 @@ AFRAME.registerComponent("guide-avatar", {
         "}",
       ].join("\n"),
       transparent: true,
-      depthWrite: false,
+      // HE WRITES DEPTH. He is a solid figure, not a soft mark: transparent
+      // only for his anti-aliased edge, and everything round him is already
+      // discarded (alpha < 0.03), so the depth he writes is exactly his shape.
+      // Without it, another depthWrite-off transparent surface BEHIND him (the
+      // corridor's painted phone-number stencils on the wall) could be sorted
+      // to draw after him — three sorts transparents by object origin, his is
+      // at his feet, a stencil's is up on the wall — and paint straight over
+      // his body. With it, anything behind him fails the depth test where he
+      // stands, whatever order it comes in.
+      depthWrite: true,
       side: THREE.DoubleSide,
       // three draws a transparent DoubleSide material twice (back faces, then
       // front) so a closed shape blends in order. A flat plane cannot overlap
