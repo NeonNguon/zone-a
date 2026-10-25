@@ -110,6 +110,9 @@ AFRAME.registerComponent("guide-avatar", {
     figureFill: { type: "number", default: 0.97 },
     footMargin: { type: "number", default: 10 / AVATAR_FRAME_H },
     contactRadius: { type: "number", default: 0.35 }, // 0 = no ground contact
+    // On a DARK floor (Zone C) the shadow pool is invisible: glow instead,
+    // like every other cue in that room (spot-contact-cue forceGlow).
+    contactGlow: { type: "boolean", default: false },
     sound: { type: "string", default: "" }, // voice clip URL; "" = no click
     soundRefDistance: { type: "number", default: 5 },
     soundRolloff: { type: "number", default: 1 },
@@ -278,7 +281,10 @@ AFRAME.registerComponent("guide-avatar", {
     // hovering over it. A circle, so the billboard turning it changes nothing.
     if (this.data.contactRadius > 0) {
       this.cueEl = document.createElement("a-entity");
-      this.cueEl.setAttribute("spot-contact-cue", { radius: this.data.contactRadius });
+      this.cueEl.setAttribute("spot-contact-cue", {
+        radius: this.data.contactRadius,
+        forceGlow: this.data.contactGlow,
+      });
       this.el.appendChild(this.cueEl);
     }
 

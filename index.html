@@ -240,6 +240,9 @@
              room's outer east wall facing the park (#zone-a-graffiti). -->
         <img id="lottery-graffiti-wide" src="assets/lottery-graffiti-wide.png" />
         <img id="lottery-graffiti" src="assets/lottery-graffiti.png" />
+        <!-- The cinema's guide (avatar C), by the Zone C info terminal. -->
+        <video id="avatar-c-video" src="avatar/avatar-c-stacked.mp4" loop muted playsinline
+               crossorigin="anonymous" preload="auto"></video>
         <!-- The park's guide (avatar A), on the square. -->
         <video id="avatar-a-video" src="avatar/avatar-a-stacked.mp4" loop muted playsinline
                crossorigin="anonymous" preload="auto"></video>
@@ -1703,6 +1706,25 @@
           position="3 -3 10.5"
           rotation="0 90 0"
           spot-contact-cue="forceGlow: true"
+        ></a-entity>
+
+        <!-- CINEMA GUIDE (avatar C) — waiting beside the info terminal, on its
+             LEFT as you face it (+z, toward the side wall), 1.25 m from it and
+             half a step forward: world (-18.6, 0, 11.25). NOT on its right:
+             that is toward the screen, and in the headset the film plays on a
+             compositor layer that is drawn over anything standing in front of
+             it — on this side he is only ever seen against wall (every line of
+             sight to him from inside the room meets the back wall beyond the
+             screen's +z edge). Local to #zone-c: y -3 counteracts the root's
+             raised y (floor). Speech 8: "This is the cinema room. / Press the
+             play button below the big screen to watch 'Go East, Young Man'."
+             Glowing floor cue, like every cue on this dark floor. -->
+        <a-entity
+          id="guide-avatar-c"
+          position="3.3 -3 11.75"
+          guide-avatar="src: #avatar-c-video; height: 1.95; contactGlow: true;
+                        sound: avatar/Avatar-speech-8.mp3;
+                        captions: avatar/Avatar-speech-8.captions.json"
         ></a-entity>
       </a-entity>
 
