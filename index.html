@@ -235,7 +235,10 @@
              js/guide-avatar.js). Muted + playsinline so it may play inline. -->
         <video id="avatar-video" src="avatar/avatar-stacked.mp4" loop muted playsinline
                crossorigin="anonymous" preload="auto"></video>
-        <!-- Graffiti on the BACK of the lottery wall (#lottery-graffiti-decal). -->
+        <!-- Graffiti: the wide banner on the BACK of the lottery wall
+             (#lottery-graffiti-decal), the original piece on the Zone A
+             room's outer east wall facing the park (#zone-a-graffiti). -->
+        <img id="lottery-graffiti-wide" src="assets/lottery-graffiti-wide.png" />
         <img id="lottery-graffiti" src="assets/lottery-graffiti.png" />
         <!-- The corridor's guide (avatar B). Each avatar has a <video>.json
              beside it, measured by tools/measure-avatar.py. -->
@@ -637,6 +640,25 @@
            screen, the square's far corner 44 m.) See js/video-screen.js. If
            the Vimeo link ever changes, `src` here is the one thing to update.
            Muted. -->
+      <!-- GRAFFITI on the building, facing the park — the original "The
+           Lottery of Forgotten Dreams" piece (assets/lottery-graffiti.png,
+           2:1) on the OUTSIDE of the Zone A room's east wall: the plain white
+           wall you look at across the lawn from the square's west side, the
+           coral hallway mouth to its left. Measured by ray: the face is at
+           x 5.675 (where the lawn starts), z -6.3..-17.4 (11.1 m, centre
+           -11.85), up to 5 m. 9.4 x 4.7 m, 1 cm proud of the face, lower edge
+           0.15 m up, ~0.85 m clear of each end; yaw 90 turns the plane (+z)
+           to face +x, toward the park. Unlit, transparent for the spray, like
+           the banner on the lottery wall's back. World coordinates: it rides
+           the floorplan's numbers, so it moves by hand if Zone A does. -->
+      <a-plane
+        id="zone-a-graffiti"
+        width="9.4" height="4.7"
+        position="5.685 2.5 -11.85"
+        rotation="0 90 0"
+        material="src: #lottery-graffiti; shader: flat; transparent: true; depthWrite: false"
+      ></a-plane>
+
       <a-entity id="lottery-screen" position="33.5 0 19.3" rotation="0 180 0"
         video-screen="src: https://player.vimeo.com/progressive_redirect/playback/1226353089/rendition/1080p/file.mp4%20%281080p%29.mp4?loc=external&amp;log_user=0&amp;signature=9d3b7af835b9ec509ef48a895049f57d86bb45b0364ada139114e295ec491c65;
                       width: 5.4; bottom: 0.9; region: 5 -60 90 60"
@@ -1346,22 +1368,24 @@
         >
           <!-- GRAFFITI on the wall's BACK — "The Lottery of Forgotten Dreams"
                sprayed across the plain slab you see from the east side of the
-               square (assets/lottery-graffiti.png, a 2:1 transparent PNG).
-               In the wall's own frame: the tiles face +z, the slab's back face
-               is at z -0.32 (2 cm gap + 0.3 m deep) facing -z, so the decal
-               turns 180° and stands 1 cm proud of it (z -0.33). The slab runs
-               from the floor (local y -3, the root is raised 3 m) to 5.16 m;
-               the decal is 9.6 x 4.8 m with its lower edge 0.15 m up (centre
-               local y -0.45), so the painted letters (87% of the PNG's
-               height, 93% of its width) span ~9 m x 4.2 m, centred, about
-               half a metre clear of the top. Unlit like the tiles,
-               transparent for the spray's soft edges. -->
+               square (assets/lottery-graffiti-wide.png, a 2368x512 banner,
+               ~4.6:1, made to run the length of the wall). In the wall's own
+               frame: the tiles face +z, the slab's back face is at z -0.32
+               (2 cm gap + 0.3 m deep) facing -z, so the decal turns 180° and
+               stands 1 cm proud of it (z -0.33). The slab is 22.96 m long and
+               runs from the floor (local y -3, the root is raised 3 m) to
+               5.16 m; the decal is 21.5 x 4.65 m (the PNG's aspect), ~0.7 m
+               short of each end, its lower edge 0.2 m up (centre local y
+               -0.475), so its top is 0.3 m under the slab's. The painted part
+               (97% of the PNG's width, 88% of its height) spans ~20.8 m x
+               4.1 m. Unlit like the tiles, transparent for the spray's soft
+               edges. -->
           <a-plane
             id="lottery-graffiti-decal"
-            width="9.6" height="4.8"
-            position="0 -0.45 -0.33"
+            width="21.5" height="4.65"
+            position="0 -0.475 -0.33"
             rotation="0 180 0"
-            material="src: #lottery-graffiti; shader: flat; transparent: true; depthWrite: false"
+            material="src: #lottery-graffiti-wide; shader: flat; transparent: true; depthWrite: false"
           ></a-plane>
         </a-entity>
 
