@@ -240,6 +240,9 @@
              room's outer east wall facing the park (#zone-a-graffiti). -->
         <img id="lottery-graffiti-wide" src="assets/lottery-graffiti-wide.png" />
         <img id="lottery-graffiti" src="assets/lottery-graffiti.png" />
+        <!-- The park's guide (avatar A), on the square. -->
+        <video id="avatar-a-video" src="avatar/avatar-a-stacked.mp4" loop muted playsinline
+               crossorigin="anonymous" preload="auto"></video>
         <!-- The corridor's guide (avatar B). Each avatar has a <video>.json
              beside it, measured by tools/measure-avatar.py. -->
         <video id="avatar-b-video" src="avatar/avatar-b-stacked.mp4" loop muted playsinline
@@ -1748,13 +1751,43 @@
                 guide-arrows="from: #guide-avatar; to: #terminal-a2; via: 0 -4.6"></a-entity>
       <!-- ...and after his WELCOME BACK: to the Lottery of Forgotten Dreams —
            across the foyer to its coral +x doorway (z 0, 2.4 m wide), down
-           the hallway (x 5 to its open end at 10.2), and 5 m out onto the
-           park's concrete square, the image wall dead ahead at x 40. They
-           fade once you are within 2 m of the last one. -->
+           the hallway (x 5 to its open end at 10.2), and out onto the park's
+           square to the PARK GUIDE (avatar A, #guide-avatar-a at x 20.2),
+           stopping 1.8 m in front of him: he takes it from there. They fade
+           once you are within 2 m of the last one. -->
       <a-entity id="guide-arrows-lottery"
                 guide-arrows="from: #guide-avatar; line: back;
-                              via: 1.5 -1.6, 4.2 0, 10.2 0; end: 15.5 0;
+                              via: 1.5 -1.6, 4.2 0, 10.2 0; end: 18.4 0;
                               reach: 2"></a-entity>
+
+      <!-- PARK GUIDE (avatar A) — the artist with his camera, standing where
+           Terminal A used to (10 m west of the square's centre, x 20.2, z 0,
+           on the approach axis from the hallway mouth): the first thing you
+           meet walking out onto the square, at the end of the foyer guide's
+           arrows. Speech 6: "This is a park along the banks of the Saigon
+           River. / Look around to enjoy the scenery and walk over to the big
+           wall / to check out 'The Lottery of Forgotten Dreams'. / Once you
+           have seen everything, you can come back to me for more guidance."
+           His framing comes from avatar/avatar-a-stacked.json (he stands lower
+           in his frame than the others: measured, not typed). World
+           coordinates, like everything on the square. -->
+      <a-entity
+        id="guide-avatar-a"
+        position="20.2 0 0"
+        guide-avatar="src: #avatar-a-video; height: 1.95;
+                      sound: avatar/Avatar-speech-6.mp3;
+                      captions: avatar/Avatar-speech-6.captions.json"
+      ></a-entity>
+      <!-- ...and his arrows, after he has spoken: across the square to the
+           big wall's south end, stopping in front of the pair of terminals
+           there — the work's statement and, to its right, the way into its
+           map (Terminal A) — where the visitor lands back from the map too.
+           They fade once you are within 1.5 m of the last one. -->
+      <a-entity
+        id="guide-arrows-a"
+        guide-arrows="from: #guide-avatar-a; startOffset: 0.8 0 0.5;
+                      end: 36.7 11.7; reach: 1.5"
+      ></a-entity>
 
       <!-- CAMERA RIG: empty parent at floor level holding the camera + both
            controllers. VR locomotion moves the RIG (view + hands together)
