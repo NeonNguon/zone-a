@@ -235,6 +235,8 @@
              js/guide-avatar.js). Muted + playsinline so it may play inline. -->
         <video id="avatar-video" src="avatar/avatar-stacked.mp4" loop muted playsinline
                crossorigin="anonymous" preload="auto"></video>
+        <!-- Graffiti on the BACK of the lottery wall (#lottery-graffiti-decal). -->
+        <img id="lottery-graffiti" src="assets/lottery-graffiti.png" />
         <!-- The corridor's guide (avatar B). Each avatar has a <video>.json
              beside it, measured by tools/measure-avatar.py. -->
         <video id="avatar-b-video" src="avatar/avatar-b-stacked.mp4" loop muted playsinline
@@ -1341,7 +1343,27 @@
           rotation="0 -90 0"
           image-wall="rows: 5; cols: 20; width: 22.46; aspect: 1.5; shuffle: true"
           wall-focus
-        ></a-entity>
+        >
+          <!-- GRAFFITI on the wall's BACK — "The Lottery of Forgotten Dreams"
+               sprayed across the plain slab you see from the east side of the
+               square (assets/lottery-graffiti.png, a 2:1 transparent PNG).
+               In the wall's own frame: the tiles face +z, the slab's back face
+               is at z -0.32 (2 cm gap + 0.3 m deep) facing -z, so the decal
+               turns 180° and stands 1 cm proud of it (z -0.33). The slab runs
+               from the floor (local y -3, the root is raised 3 m) to 5.16 m;
+               the decal is 9.6 x 4.8 m with its lower edge 0.15 m up (centre
+               local y -0.45), so the painted letters (87% of the PNG's
+               height, 93% of its width) span ~9 m x 4.2 m, centred, about
+               half a metre clear of the top. Unlit like the tiles,
+               transparent for the spray's soft edges. -->
+          <a-plane
+            id="lottery-graffiti-decal"
+            width="9.6" height="4.8"
+            position="0 -0.45 -0.33"
+            rotation="0 180 0"
+            material="src: #lottery-graffiti; shader: flat; transparent: true; depthWrite: false"
+          ></a-plane>
+        </a-entity>
 
         <!-- ONE soft contact shadow along the foot of the wall's back slab —
              was a row of twenty little round per-tile pools (wall-contact-cue),
